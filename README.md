@@ -74,6 +74,25 @@ situées à côté du code qu'elles vérifient et compte les assertions réelles
 (324 checks). La porte complète du harnais Pi reste disponible avec
 `npm run test:gate` quand elle est installée.
 
+## La porte en CI
+
+`ci/verify.yml` est le workflow GitHub Actions de ce dépôt : `npm ci`, puis
+`npm run check`, puis `npm test`, sur Node 24, à chaque push sur `main` et à
+chaque pull request.
+
+GitHub refuse d'écrire un fichier sous `.github/workflows/` avec un jeton qui
+n'a pas le scope `workflow`, quel que soit le canal (push ou API). Le fichier
+est donc versionné ici et s'active en une commande, avec un jeton porteur de
+ce scope :
+
+```bash
+mkdir -p .github/workflows
+cp ci/verify.yml .github/workflows/verify.yml
+git add .github/workflows/verify.yml
+git commit -m "ci: gate the core on every push"
+git push
+```
+
 ## Commandes tracées sur Linux
 
 `cyber_process` expose `run`, `list`, `read` et `stop`. Le délai par défaut est
