@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+
+# Runtime state never belongs to the repository
+.opencode/
+opencode/.opencode/
+*.sqlite
+*.sqlite-journal
+processes.json
+
+# Editor and backup copies
+*.bak-*
+.DS_Store

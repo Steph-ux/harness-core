@@ -1,0 +1,8 @@
+{
+  "name": "harness-core-opencode",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "OpenCode adapter for the harness core: immutable observations and evidence-bound tasks.",
+  "main": "./index.ts"
+}

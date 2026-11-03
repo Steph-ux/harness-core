@@ -1,0 +1,32 @@
+{
+  "name": "harness-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Host-neutral proof and discipline core: immutable observations, evidence-bound tasks, shared types.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./util": "./src/util.ts",
+    "./types": "./src/types.ts",
+    "./context": "./src/context.ts",
+    "./capsule": "./src/capsule.ts",
+    "./capture": "./src/capture.ts",
+    "./process": "./src/process.ts",
+    "./skills": "./src/skills.ts",
+    "./store": "./src/store.ts",
+    "./tasks": "./src/tasks.ts",
+    "./observation-id": "./src/observation-id.ts",
+    "./platform-store": "./src/platform-store.ts",
+    "./platform-types": "./src/platform-types.ts",
+    "./skill-trace": "./src/skill-trace.ts"
+  },
+  "scripts": {
+    "test": "node test/run.cjs",
+    "test:gate": "node ../../../.pi/agent/cyber-harness/tests/run.cjs",
+    "check": "node scripts/check-neutrality.cjs"
+  },
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "jiti": "^2.7.0"
+  }
+}
