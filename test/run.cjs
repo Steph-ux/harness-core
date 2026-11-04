@@ -26,6 +26,8 @@ function countingAssert() {
   return { proxy, read: () => count };
 }
 
+// Explicit consent for the synthetic verifier providers in fixture tests only.
+process.env.HARNESS_VERIFIER_PROVIDERS="test,Ed";
 const root = path.resolve(__dirname, "..");
 const modules = path.join(root, "node_modules");
 const { createJiti } = require(path.join(modules, "jiti"));

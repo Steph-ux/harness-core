@@ -33,16 +33,26 @@ export function scopeFor(cwd: string, aliasFile = aliasFilePath()): string {
     const config = JSON.parse(fs.readFileSync(aliasFile, "utf8"));
     if (config.version !== 1 || !Array.isArray(config.entries))
       throw new Error("Invalid scope alias configuration");
-    const paths = new Set<string>(), scopes = new Set<string>();
+    const paths = new Set<string>(),
+      scopes = new Set<string>();
     let matched: string | undefined;
     for (const entry of config.entries) {
-      if (!entry || typeof entry.linuxCwd !== "string" ||
-          !path.isAbsolute(entry.linuxCwd) || typeof entry.historicalCwd !== "string" ||
-          !/^[A-Za-z]:\\/.test(entry.historicalCwd) ||
-          entry.historicalScope !== `project-${hash(entry.historicalCwd.toLowerCase()).slice(0, 24)}`)
+      if (
+        !entry ||
+        typeof entry.linuxCwd !== "string" ||
+        !path.isAbsolute(entry.linuxCwd) ||
+        typeof entry.historicalCwd !== "string" ||
+        !/^[A-Za-z]:\\/.test(entry.historicalCwd) ||
+        entry.historicalScope !==
+          `project-${hash(entry.historicalCwd.toLowerCase()).slice(0, 24)}`
+      )
         throw new Error("Invalid scope alias entry");
       let linuxCwd = path.resolve(entry.linuxCwd);
-      try { linuxCwd = fs.realpathSync.native(linuxCwd); } catch { /* Workspace may not exist yet. */ }
+      try {
+        linuxCwd = fs.realpathSync.native(linuxCwd);
+      } catch {
+        /* Workspace may not exist yet. */
+      }
       if (paths.has(linuxCwd) || scopes.has(entry.historicalScope))
         throw new Error("Duplicate scope alias entry");
       paths.add(linuxCwd);
@@ -56,6 +66,14 @@ export function scopeFor(cwd: string, aliasFile = aliasFilePath()): string {
 }
 export function redactText(text: string): string {
   return text
+    .replace(
+      /(["'](?:password|passwd|motdepasse|mot_de_passe|pwd|secret|client_secret|api[_-]?key|access[_-]?token|refresh[_-]?token|remember[_-]?token|session[_-]?token|authorization|cookie|set-cookie|private[_-]?key)["']\s*:\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^,}\]\s]+)/gi,
+      '$1"<REDACTED>"',
+    )
+    .replace(
+      /^(\s*(?:set-cookie|cookie|authorization|proxy-authorization|x-api-key)\s*:\s*).*$/gim,
+      "$1<REDACTED>",
+    )
     .replace(
       /-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g,
       "<REDACTED PRIVATE KEY>",
@@ -71,7 +89,7 @@ export function redactText(text: string): string {
       "<REDACTED JWT>",
     )
     .replace(
-      /((?:password|passwd|api[_-]?key|access[_-]?token|refresh[_-]?token|botToken|authorization)\s*[=:]\s*["']?)[^\s,"'}]+/gi,
+      /((?:password|passwd|motdepasse|mot_de_passe|pwd|client_secret|remember[_-]?token|session[_-]?token|api[_-]?key|access[_-]?token|refresh[_-]?token|botToken|authorization)\s*[=:]\s*["']?)[^\s,"'}]+/gi,
       "$1<REDACTED>",
     )
     .replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, "$1<REDACTED>@");
@@ -85,7 +103,7 @@ export function redact(value: unknown, depth = 0): unknown {
     const output: Record<string, unknown> = Object.create(null);
     for (const [key, item] of Object.entries(value).slice(0, 1000)) {
       output[key] =
-        /^(?:password|passwd|api[_-]?key|access[_-]?token|refresh[_-]?token|bottoken|authorization|cookie|secret|private[_-]?key)$/i.test(
+        /^(?:password|passwd|motdepasse|mot_de_passe|pwd|client_secret|remember[_-]?token|session[_-]?token|api[_-]?key|access[_-]?token|refresh[_-]?token|bottoken|authorization|cookie|set-cookie|secret|private[_-]?key)$/i.test(
           key,
         )
           ? "<REDACTED>"

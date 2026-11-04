@@ -18,15 +18,22 @@
     "./observation-id": "./src/observation-id.ts",
     "./platform-store": "./src/platform-store.ts",
     "./platform-types": "./src/platform-types.ts",
-    "./skill-trace": "./src/skill-trace.ts"
+    "./skill-trace": "./src/skill-trace.ts",
+    "./engagement-workflow": "./src/engagement-workflow.ts"
   },
   "scripts": {
     "test": "node test/run.cjs",
-    "test:gate": "node ../../../.pi/agent/cyber-harness/tests/run.cjs",
-    "check": "node scripts/check-neutrality.cjs"
+    "test:gate": "node scripts/pi-gate.cjs",
+    "check": "tsc --noEmit && node scripts/check-neutrality.cjs && node scripts/check-skills.cjs",
+    "test:report": "python3 test/report-pipeline.py --render"
   },
   "license": "UNLICENSED",
   "devDependencies": {
-    "jiti": "^2.7.0"
+    "@types/node": "^24.19.2",
+    "jiti": "^2.7.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

@@ -116,3 +116,38 @@ the session and the call); nothing rewrites one.
 **Why.** A claim is only checkable if the thing it rests on cannot be edited
 afterwards. A session log is a narrative; an observation is a datum.
 **Cost.** Two stores and a strict scope rule: evidence never crosses a project.
+
+## 2026-11-04 — Proof outcomes and concurrent updates
+
+The command supervisor writes a nonce-bound terminal result and full trace
+hash. A launch or stop is not evidence of success; an unknown recovered PID
+is never treated as completed. Descendants in the owned process group may
+not outlive a successful parent result. Complete output hashes detect changes
+beyond the displayed tail. Legacy rows keep their original proof metadata.
+
+Task locks cover the complete read-modify-write. Missing dependencies block
+execution, and old tasks never disappear due to tail slicing. A closed task
+with missing proof remains a continuity blocker. Finding verification binds
+the current finding revision to fresh controls in a distinct session; it
+never fabricates human approval. The native prompt hook supplies routing text.
+
+## 2026-11-04 — Rapports et après restitution
+
+Les rapports partent de snapshots versionnés liés aux sources, puis relient
+Word, PDF, manifeste QA et rendu de toutes les pages. Le dernier rapport
+approuvé doit rester inchangé. Les constats modifiés invalident la revue.
+Une reprise explicite de validation conserve l’historique et exige des preuves
+nouvelles. La revue humaine et la restitution effective sont des transitions
+opérateur distinctes de la vérification technique.
+
+Le nettoyage est permis uniquement après restitution. Son exécution et sa
+vérification utilisent deux processus séparés. Les transitions et événements
+sont atomiques ; un conflit ou l’échec d’enregistrement empêche le lancement.
+La capitalisation consigne une passe bornée et exige des tests distincts pour
+les artefacts validés, sans modifier les poids du modèle.
+
+Le modèle fixé est exclusif. Les replis inter-fournisseurs sont explicites,
+avec délai et limite de réponse acceptée. L’API stateless 2.0.26 n’expose pas de
+plafond de tokens ; la limite de caractères ne prétend pas limiter la facturation.
+Le modèle courant est mémorisé par session. Une requête concurrente ne peut pas
+modifier le fournisseur choisi pour une vérification ou une extraction en cours.

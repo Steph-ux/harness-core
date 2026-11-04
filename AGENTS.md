@@ -8,9 +8,9 @@ outside the repository, so a host can be replaced without losing the evidence.
 ## Verify before claiming anything
 
 ```bash
-npm test          # the core's own suites, 324 checks, must exit 0
-npm run check     # host-neutrality of src/: no host import, no target name
-npm run test:gate # the full Pi harness gate, 2887 checks, when it is installed
+npm test          # the core's own suites; must exit 0
+npm run check     # TypeScript, host-neutrality and authored procedure resources
+npm run test:gate # external host gate, when installed
 ```
 
 `npm test` runs `test/run.cjs`, which is self-contained: it loads the suites
@@ -74,3 +74,20 @@ answered (`lessons.extracted.model`).
 
 Design decisions and their reasons: `DECISIONS.md`. Module-level map:
 `src/ARCHITECTURE.md`. Keep both current when an invariant changes.
+
+## Proof corrections
+
+A process launch is not a successful execution. Read its durable result and
+verify its whole trace before closing work. Unknown recovered processes stay
+unknown. A completed stage needs successful evidence; verification must bind
+fresh reproduction and negative controls from another session. Never invent a
+human approval from technical verification. Cleanup of mission resources is
+permitted only after recorded restitution of the reviewed report.
+
+For reporting changes, run `python3 test/report-pipeline.py`. For layout changes,
+run `npm run test:report` with the optional rendering dependencies and inspect
+every page. Temporary synthetic unit fixtures are not client mission resources.
+Never claim visual review from the technical QA manifest alone. Use the native
+SDK smoke test with the documented binary version before claiming native loading.
+The active CI entry point is `.github/workflows/verify.yml`; keep its copy in
+`ci/verify.yml` synchronized. CI rendering does not replace human page review.

@@ -74,10 +74,11 @@ export class KnowledgeStore implements StorePort {
     const version = Number(
       this.db.prepare("PRAGMA user_version").get()!.user_version,
     );
-    if (version > 1)
+    if (version > 2)
       throw new Error("Knowledge database is newer than this harness");
-    if (version === 1) return;
-    this.db.exec(`BEGIN IMMEDIATE;
+    if (version === 2) return;
+    if (version === 0)
+      this.db.exec(`BEGIN IMMEDIATE;
       CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, scope TEXT NOT NULL, cwd TEXT NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(id,scope));
       CREATE TABLE IF NOT EXISTS messages (entry_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, scope TEXT NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL, timestamp TEXT NOT NULL, FOREIGN KEY(session_id,scope) REFERENCES sessions(id,scope));
       CREATE INDEX IF NOT EXISTS messages_scope ON messages(scope,session_id,timestamp);
@@ -97,6 +98,13 @@ export class KnowledgeStore implements StorePort {
       INSERT INTO messages_fts(entry_id,scope,text) SELECT entry_id,scope,text FROM messages;
       PRAGMA user_version = 1;
       COMMIT;`);
+    this.db.exec(`BEGIN IMMEDIATE;
+      ALTER TABLE observations ADD COLUMN raw_hash TEXT;
+      ALTER TABLE observations ADD COLUMN raw_bytes INTEGER;
+      ALTER TABLE observations ADD COLUMN truncated INTEGER;
+      CREATE TRIGGER observations_no_update BEFORE UPDATE ON observations BEGIN SELECT RAISE(ABORT,'Immutable observation'); END;
+      CREATE TRIGGER observations_no_delete BEFORE DELETE ON observations BEGIN SELECT RAISE(ABORT,'Immutable observation'); END;
+      PRAGMA user_version=2; COMMIT;`);
   }
   private open(): void {
     if (this.closed) throw new Error("Knowledge store is closed");
@@ -203,6 +211,9 @@ export class KnowledgeStore implements StorePort {
       input: stable(redact(observation.input)) ?? null,
       output: redactText(observation.output).slice(0, 24000),
       success: observation.success,
+      rawHash: hash(observation.output),
+      rawBytes: Buffer.byteLength(observation.output, "utf8"),
+      truncated: redactText(observation.output).length > 24000,
     };
     const digest = hash(JSON.stringify(immutable));
     const prior = this.db
@@ -216,7 +227,9 @@ export class KnowledgeStore implements StorePort {
       return this.observation(prior);
     }
     this.db
-      .prepare("INSERT INTO observations VALUES(?,?,?,?,?,?,?,?,?)")
+      .prepare(
+        "INSERT INTO observations(id,session_id,scope,tool,input,output,success,timestamp,hash,raw_hash,raw_bytes,truncated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+      )
       .run(
         immutable.id,
         immutable.sessionId,
@@ -227,9 +240,16 @@ export class KnowledgeStore implements StorePort {
         immutable.success ? 1 : 0,
         observation.timestamp,
         digest,
+        immutable.rawHash,
+        immutable.rawBytes,
+        immutable.truncated ? 1 : 0,
       );
     return JSON.parse(
-      JSON.stringify({ ...immutable, timestamp: observation.timestamp, hash: digest }),
+      JSON.stringify({
+        ...immutable,
+        timestamp: observation.timestamp,
+        hash: digest,
+      }),
     );
   }
   private sameObservationContent(
@@ -241,6 +261,8 @@ export class KnowledgeStore implements StorePort {
       input: unknown;
       output: string;
       success: boolean;
+      rawHash?: string;
+      truncated?: boolean;
     },
   ): boolean {
     return (
@@ -249,7 +271,8 @@ export class KnowledgeStore implements StorePort {
       row.tool === immutable.tool &&
       row.output === immutable.output &&
       (row.success === 1) === immutable.success &&
-      row.input === JSON.stringify(immutable.input)
+      row.input === JSON.stringify(immutable.input) &&
+      (row.raw_hash ? row.raw_hash === immutable.rawHash : !immutable.truncated)
     );
   }
   private observation(row: Row): Observation {
@@ -259,10 +282,17 @@ export class KnowledgeStore implements StorePort {
       scope: row.scope,
       tool: row.tool,
       input: JSON.parse(row.input),
-      output: row.output,
+      output: redactText(row.output),
       success: row.success === 1,
       timestamp: row.timestamp,
       hash: row.hash,
+      ...(row.raw_hash
+        ? {
+            rawHash: String(row.raw_hash),
+            rawBytes: Number(row.raw_bytes),
+            truncated: Boolean(row.truncated),
+          }
+        : {}),
     };
   }
   evidence(scope: string, ids: string[]): Observation[] {
@@ -446,21 +476,38 @@ export class KnowledgeStore implements StorePort {
         "SELECT * FROM knowledge WHERE scope=? AND key=? AND kind='operator' ORDER BY created_at DESC LIMIT 1",
       )
       .get(scope, rule.key);
-    if (existing && existing.status === "active" && existing.content === rule.content)
+    if (
+      existing &&
+      existing.status === "active" &&
+      existing.content === rule.content
+    )
       return this.knowledge(existing);
     this.db.exec("BEGIN IMMEDIATE");
     try {
       if (existing)
         this.db
-          .prepare("DELETE FROM knowledge WHERE scope=? AND key=? AND kind='operator'")
+          .prepare(
+            "DELETE FROM knowledge WHERE scope=? AND key=? AND kind='operator'",
+          )
           .run(scope, rule.key);
-      this.db.prepare("UPDATE knowledge SET status='retired' WHERE scope=? AND key=? AND status='active' AND kind!='operator'")
+      this.db
+        .prepare(
+          "UPDATE knowledge SET status='retired' WHERE scope=? AND key=? AND status='active' AND kind!='operator'",
+        )
         .run(scope, rule.key);
       const id = newId(),
         createdAt = now();
       this.db
         .prepare("INSERT INTO knowledge VALUES(?,?,?,?,?,?,?)")
-        .run(id, scope, rule.key, rule.content, "operator", "active", createdAt);
+        .run(
+          id,
+          scope,
+          rule.key,
+          rule.content,
+          "operator",
+          "active",
+          createdAt,
+        );
       this.db.exec("COMMIT");
       return this.knowledge(
         this.db.prepare("SELECT * FROM knowledge WHERE id=?").get(id)!,
@@ -519,9 +566,16 @@ export class KnowledgeStore implements StorePort {
     if (row.status !== "pending" && row.kind !== "operator")
       throw new Error("Knowledge is not pending");
     if (row.kind === "operator" && row.status === "active" && approve) return;
-    if (approve && row.kind !== "operator" && this.db.prepare(
-      "SELECT 1 FROM knowledge WHERE scope=? AND key=? AND kind='operator' AND status='active'",
-    ).get(scope, row.key)) throw new Error("An inferred fact cannot replace an operator rule");
+    if (
+      approve &&
+      row.kind !== "operator" &&
+      this.db
+        .prepare(
+          "SELECT 1 FROM knowledge WHERE scope=? AND key=? AND kind='operator' AND status='active'",
+        )
+        .get(scope, row.key)
+    )
+      throw new Error("An inferred fact cannot replace an operator rule");
     this.db.exec("BEGIN IMMEDIATE");
     try {
       if (approve)

@@ -11,3 +11,10 @@ processes.json
 # Editor and backup copies
 *.bak-*
 .DS_Store
+
+# Authored procedures are source; the rest of the host state stays ignored.
+!.opencode/
+.opencode/*
+!.opencode/skills/
+!.opencode/skills/**
+__pycache__/

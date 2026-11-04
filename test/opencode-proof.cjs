@@ -51,7 +51,7 @@ module.exports = async ({ assert, jiti }) => {
   const { KnowledgeStore } = jiti(path.join(CORE, "src", "store.ts"));
   const { TaskStore } = jiti(path.join(CORE, "src", "tasks.ts"));
   const { observationId } = jiti(path.join(CORE, "src", "observation-id.ts"));
-  const { scopeFor } = jiti(path.join(CORE, "src", "util.ts"));
+  const { scopeFor, hash } = jiti(path.join(CORE, "src", "util.ts"));
 
   const { ctx, hooks, tools } = makeContext(workspace);
   await plugin.setup(ctx);
@@ -243,19 +243,17 @@ module.exports = async ({ assert, jiti }) => {
     "a second handle on the same file sees the observation",
   );
 
-  // The scope of the harness workspace is the one the operator already uses,
-  // so evidence collected by either host belongs to the same workspace.
-  assert.equal(
-    scopeFor("/home/moon/hacking"),
-    "project-b8395f87f74add1a470b73af",
-    "the harness workspace keeps its historical scope",
-  );
-  const shared = makeContext("/home/moon/hacking", "/home/moon/hacking");
+  // Synthetic migration mapping; the test needs no personal machine configuration.
+  const historicalCwd="C:\\synthetic\\engagement",historicalScope=`project-${hash(historicalCwd.toLowerCase()).slice(0,24)}`;
+  const aliased=path.join(workspace,"aliased");fs.mkdirSync(aliased);const previousAliases=process.env.HARNESS_SCOPE_ALIASES;
+  process.env.HARNESS_SCOPE_ALIASES=path.join(workspace,"aliases.json");fs.writeFileSync(process.env.HARNESS_SCOPE_ALIASES,JSON.stringify({version:1,entries:[{linuxCwd:aliased,historicalCwd,historicalScope}]}));
+  assert.equal(scopeFor(aliased),historicalScope,"the explicit mapping keeps historical scope");
+  const shared = makeContext(aliased, aliased);
   await plugin.setup(shared.ctx);
   await shared.hooks.get("execute.after")(
     toolEvent({ sessionID: "ses_test_scope", id: "call-scope" }),
   );
-  const operatorScope = scopeFor("/home/moon/hacking");
+  const operatorScope = scopeFor(aliased);
   assert.equal(
     store.evidence(operatorScope, [
       observationId("ses_test_scope", "call-scope"),
@@ -264,6 +262,7 @@ module.exports = async ({ assert, jiti }) => {
     "a session in the harness workspace lands in the operator scope",
   );
 
+  if(previousAliases===undefined)delete process.env.HARNESS_SCOPE_ALIASES;else process.env.HARNESS_SCOPE_ALIASES=previousAliases;
   store.close();
   fs.rmSync(workspace, { recursive: true, force: true });
 };

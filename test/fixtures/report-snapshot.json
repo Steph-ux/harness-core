@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "id": "report-35a9201a-7fa1-4391-aaaf-5a0d1931ea7e",
+  "missionId": "mission-4bfc73fb-6a3b-4fd4",
+  "scope": "project-c3bd5553df3757250a52db34",
+  "createdAt": "2026-11-04T16:04:16.904Z",
+  "sourceHash": "c70be1fcfd43adc61192538e8e74d32e6cd449cdd97fb751705a20a255a7b7cc",
+  "title": "Rapport de validation locale",
+  "client": "Organisation de test",
+  "author": "Équipe de test",
+  "period": "4 novembre 2026",
+  "method": "Tests déterministes sur des fixtures locales.",
+  "boundaries": "Fixtures locales uniquement. Aucun système client.",
+  "findings": [
+    {
+      "id": "F-7f038c31-2d1f-408a",
+      "scope": "project-c3bd5553df3757250a52db34",
+      "missionId": "mission-4bfc73fb-6a3b-4fd4",
+      "title": "Écart contrôlé dans la fixture",
+      "createdAt": "2026-11-04T16:04:16.865Z",
+      "severity": "low",
+      "description": "Une fixture locale émet deux marqueurs différents.",
+      "limitations": "Résultat limité au banc local.",
+      "status": "verified",
+      "confidence": 0.6666666666666666,
+      "confidenceBasis": "Observed control-category coverage, not a statistical probability or proof of impact",
+      "checks": [
+        {
+          "observationId": "obs-positive",
+          "contains": "POSITIF résultat observé",
+          "purpose": "reproduction"
+        },
+        {
+          "observationId": "obs-negative",
+          "contains": "NEGATIF témoin observé",
+          "purpose": "negative-control"
+        }
+      ],
+      "evidence": ["obs-negative", "obs-positive"],
+      "sources": [
+        {
+          "id": "C-32b5b02cf260b30d053245db29a41e7c",
+          "scope": "project-c3bd5553df3757250a52db34",
+          "sourceId": "synthetic-source",
+          "uri": "fixture:controls",
+          "title": "Fixture des contrôles",
+          "text": "Comparaison de deux sorties de laboratoire.",
+          "hash": "a829446888489ce068b8436f1a8720ea23d7efb5d5ab8221f9ac4da7828cec93",
+          "current": true,
+          "ordinal": 0
+        }
+      ],
+      "verification": {
+        "observationId": "obs-ea22ffaecacbcb8815c075b84c1bbe73",
+        "hash": "1c50154c9bfae1959726429ff0e0ce1e8c71f32425ed8888e219c8f5829d3617",
+        "attempt": 1,
+        "verifiedBy": {
+          "sessionId": "ses_verifier",
+          "runId": "767180da-7459-46fe-b5df-e9bace230c02",
+          "kind": "technical-reproduction"
+        },
+        "humanApproval": null,
+        "timestamp": "2026-11-04T16:04:16.888Z"
+      },
+      "asset": "Fixture locale",
+      "preconditions": "Accès au banc local",
+      "impact": "Différence de réponse prouvée dans la fixture.",
+      "closure": "Les deux contrôles passent.",
+      "steps": ["Exécuter le cas positif.", "Exécuter le contrôle négatif."],
+      "remediation": ["Conserver la séparation des cas."],
+      "cvss": {
+        "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:N/A:N",
+        "score": 4.3
+      },
+      "businessRisk": "Démonstration locale sans donnée client.",
+      "classification": "vulnerability",
+      "artifacts": [],
+      "observations": [
+        {
+          "id": "obs-negative",
+          "tool": "shell",
+          "input": {},
+          "success": true,
+          "timestamp": "2026-11-04T16:04:16.839Z",
+          "hash": "d962b979482d6dc535cf639499ab6d80064b7690323452049cd8db753cdd7b23",
+          "rawHash": "ec7fa6fc9fc96720d05934734c9fc2661dd77d543ea6d05def59f5f52bedf1bd",
+          "truncated": false,
+          "output": "NEGATIF témoin observé"
+        },
+        {
+          "id": "obs-positive",
+          "tool": "shell",
+          "input": {},
+          "success": true,
+          "timestamp": "2026-11-04T16:04:16.836Z",
+          "hash": "640d49ebadb7f24f7de2e03f93950b1acf48a659b3131b65530f587ab2bc5d03",
+          "rawHash": "52f4bbfbdb93be3dcbf42b73bf11914e4f749dcc7b9f8d5dd0aeb108043a66f0",
+          "truncated": false,
+          "output": "POSITIF résultat observé"
+        }
+      ]
+    }
+  ],
+  "cleanupPolicy": "after-restitution-only"
+}

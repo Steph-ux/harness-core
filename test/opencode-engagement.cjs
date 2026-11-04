@@ -53,7 +53,7 @@ module.exports = async ({ assert, jiti }) => {
   const recon = observation("obs-recon", "recon done\n");
   const reproduction = observation("obs-repro", "XSS confirmed in /profile\n");
   const control = observation("obs-control", "XSS confirmed in /profile\n");
-  const verification = observation("obs-verify", "reproduced independently\n");
+  let verification;
 
   const fixture = makeContext(workspace);
   await plugin.setup(fixture.ctx);
@@ -261,6 +261,7 @@ module.exports = async ({ assert, jiti }) => {
     tool: "skill",
     sessionID: "ses_eng",
     id: "call-skill",
+    status:"completed",
     input: { id: "harness-jwt" },
     result: { output: "skill content" },
   });
@@ -298,6 +299,9 @@ module.exports = async ({ assert, jiti }) => {
       ],
     });
   }
+  knowledge.upsertSession({id:"ses_independent",scope,cwd:workspace,status:"active",updatedAt:new Date().toISOString()});
+  const checks=proposal.checks.map((check,index)=>{const id=`obs-independent-${index}`;knowledge.recordObservation({id,sessionId:"ses_independent",scope,tool:"shell",input:{},output:check.contains,success:true,timestamp:new Date().toISOString()});return {...check,observationId:id};});
+  verification=JSON.parse((await fixture.tools.get("cyber_verification").execute({action:"attest",findingId:createdFinding.id,checks},{sessionID:"ses_independent",agent:"build",messageID:"msg_verify",id:"call_verify"})).content);
   const validationLease = JSON.parse(
     (
       await mission({

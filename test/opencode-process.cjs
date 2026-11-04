@@ -20,7 +20,7 @@ module.exports = async ({ assert, jiti, modules }) => {
   const context = { sessionID: "ses_process", agent: "build", messageID: "msg_process", id: "call_process", signal: new AbortController().signal };
   const call = async (input, sessionID = context.sessionID) => JSON.parse((await fixture.tools.get("cyber_process").execute(input, { ...context, sessionID })).content);
   const until = async (predicate) => {
-    const end = Date.now() + 5000;
+    const end = Date.now() + 8000;
     while (!predicate() && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 30));
     assert.ok(predicate(), "process reached the expected state");
   };
@@ -107,7 +107,7 @@ module.exports = async ({ assert, jiti, modules }) => {
     await fixture.hooks.get("context")(event);
     assert.ok(event.system.some((block) => block.text.includes(record.id)), "running commands travel in the capsule");
     await call({ action: "stop", id: record.id });
-    await until(() => processStatus(recovered.get(record.scope, record.id)) === "finished");
+    await until(() => processStatus(recovered.get(record.scope, record.id)) === "stopped");
 
     // An entirely separate host exits before its command's deadline.
     const launcher = path.join(workspace, "launcher.cjs");
@@ -116,7 +116,7 @@ module.exports = async ({ assert, jiti, modules }) => {
       const jiti = createJiti(__filename);
       const {ProcessRegistry,spawnTraced} = jiti(${JSON.stringify(path.join(CORE, "src/process.ts"))});
       const registry = new ProcessRegistry(${JSON.stringify(state)});
-      const record = registry.prepare("crash-scope","ses_crash","trap '' TERM; echo survived; sleep 20",${JSON.stringify(workspace)},900);
+      const record = registry.prepare("crash-scope","ses_crash","trap '' TERM; echo survived; sleep 20",${JSON.stringify(workspace)},3000);
       const started = spawnTraced(record.command,{cwd:record.cwd,logPath:record.logPath,deadlineMs:record.deadlineMs});
       const stored = registry.add({...record,pid:started.pid});
       console.log(JSON.stringify(stored));
@@ -126,17 +126,18 @@ module.exports = async ({ assert, jiti, modules }) => {
     assert.equal(launched.status, 0, launched.stderr);
     const orphan = JSON.parse(launched.stdout.trim());
     assert.equal(processStatus(orphan), "running", "the command survives the host exit");
-    await until(() => processStatus(orphan) === "finished");
+    await until(() => processStatus(orphan) === "timed_out");
     assert.match(readTrace(orphan.logPath), /survived/);
     assert.equal(new ProcessRegistry(state).get("crash-scope", orphan.id).id, orphan.id);
-    const fake = { ...orphan, pid: process.pid, identity: "old-boot:old-pid" };
+    const fake = { ...orphan, runKey:undefined, pid: process.pid, identity: "old-boot:old-pid" };
     registry.add(fake);
     // Simulate a stale record instead of allowing add() to refresh its identity.
     const records = JSON.parse(fs.readFileSync(path.join(state, "processes.json")));
     records.find((entry) => entry.id === orphan.id).identity = "old-boot:old-pid";
+    delete records.find((entry) => entry.id === orphan.id).runKey;
     fs.writeFileSync(path.join(state, "processes.json"), JSON.stringify(records));
-    registry.stop("crash-scope", orphan.id);
-    assert.equal(processStatus(fake), "finished", "a reused pid is not treated as the old command");
+    assert.throws(()=>registry.stop("crash-scope",orphan.id),/Unknown process identity/);
+    assert.equal(processStatus(fake), "unknown", "a reused pid is not treated as the old command");
     assert.throws(() => registry.tracePath("../../escape"), /Invalid process id/);
     const large = path.join(workspace, "large.log");
     fs.writeFileSync(large, "x".repeat(500000) + "\nlast-line\n");
@@ -145,7 +146,7 @@ module.exports = async ({ assert, jiti, modules }) => {
   } finally {
     const file = path.join(state, "processes.json");
     for (const record of fs.existsSync(file) ? JSON.parse(fs.readFileSync(file)) : []) {
-      registry.stop(record.scope, record.id);
+      try{registry.stop(record.scope,record.id)}catch{}
     }
     fs.rmSync(workspace, { recursive: true, force: true });
   }

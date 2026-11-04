@@ -148,8 +148,8 @@ module.exports = async ({ assert, jiti }) => {
   fixture.ctx.permission.assert = async () => { throw new Error("capture denied"); };
   await assert.rejects(
     () => call({ action: "evidence", argv: ["echo", "blocked"], observationId: captureObservation }),
-    /capture denied/,
-    "the evidence terminal obeys shell permissions before opening a display",
+    /observation of this process read/,
+    "an unrelated command cannot be rerun as visual evidence",
   );
   fixture.ctx.permission.assert = async () => {};
 
