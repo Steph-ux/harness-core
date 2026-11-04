@@ -1,0 +1,53 @@
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run check
+      - run: npm test
+      - run: python3 test/report-pipeline.py
+
+  report-render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r .opencode/skills/rapports-cyber/scripts/requirements.txt
+      - run: sudo apt-get update && sudo apt-get install -y libreoffice-writer poppler-utils fonts-dejavu-core
+      - run: python test/report-pipeline.py --render --out rendered-report
+      - uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-report-pages
+          path: rendered-report/
+          retention-days: 7
+
+  native-v2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm install --prefix "$RUNNER_TEMP/opencode" --ignore-scripts --no-audit --no-fund @opencode/cli@2.0.26
+      - run: node scripts/native-smoke.cjs
+        env:
+          OPENCODE_BINARY: ${{ runner.temp }}/opencode/node_modules/@opencode/cli-linux-x64/bin/opencode

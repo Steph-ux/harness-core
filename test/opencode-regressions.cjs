@@ -72,6 +72,45 @@ module.exports = async ({ assert, jiti, modules }) => {
       status: "active",
       updatedAt: new Date().toISOString(),
     });
+    const policyEvidence = store.recordObservation({
+      id: "obs-policy",
+      sessionId: "ses_regression",
+      scope,
+      tool: "shell",
+      input: {},
+      output: "synthetic policy evidence",
+      success: true,
+      timestamp: new Date().toISOString(),
+    });
+    for (const [sessionID, providerID, id] of [
+      ["ses_policy_a", "alpha", "model-a"],
+      ["ses_policy_b", "beta", "model-b"],
+    ]) {
+      await fixture.hooks.get("context")(
+        fixture.contextEvent({ sessionID, model: { providerID, id } }),
+      );
+    }
+    await fixture.tools.get("cyber_review").execute(
+      { action: "run", claim: "Synthetic policy check", observationIds: [policyEvidence.id] },
+      { ...c("policy-review"), sessionID: "ses_policy_a" },
+    );
+    assert.equal(
+      fixture.generated.at(-1).model.providerID,
+      "alpha",
+      "a second session cannot change the first session's verifier provider",
+    );
+    await assert.rejects(
+      () => fixture.tools.get("cyber_review").execute(
+        {
+          action: "run",
+          claim: "Synthetic policy check",
+          observationIds: [policyEvidence.id],
+          model: { providerID: "beta", id: "model-b" },
+        },
+        { ...c("policy-refusal"), sessionID: "ses_policy_a" },
+      ),
+      /outside the operator policy/,
+    );
     const raw = "x".repeat(25000) + "first-tail",
       record = {
         id: "obs-long",

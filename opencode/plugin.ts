@@ -703,8 +703,8 @@ export default {
     const routedRequired = new Map<string, string[]>();
     const requestBySession = new Map<string, string>();
     const lifecycleController = new AbortController();
-    // The model of the request in flight, used by the independent verifier.
-    let liveModel: { providerID: string; id: string } | undefined;
+    // A different session must never change this request's verifier provider.
+    const liveModels = new Map<string, { providerID: string; id: string }>();
     // The sessions whose lessons were already extracted, and the ones being
     // extracted now.
     const lessonChecked = new Map<string, number>();
@@ -721,6 +721,7 @@ export default {
     async function extractLessons(
       scope: string,
       sessionID: string,
+      requestSessionID: string,
     ): Promise<{
       facts: number;
       skills: number;
@@ -775,7 +776,10 @@ export default {
       let answer: any;
       let lastError: unknown;
       let asked: { providerID: string; id: string } | null = null;
-      for (const candidate of await verifierCandidates()) {
+      for (const candidate of await verifierCandidates(
+        undefined,
+        requestSessionID,
+      )) {
         try {
           answer = await boundedGenerate(candidate, prompt);
           asked = candidate;
@@ -932,10 +936,11 @@ export default {
      * until a region is chosen). The harness therefore keeps a list and tries
      * it in order, instead of pinning one provider and failing the loop.
      */
-    async function verifierCandidates(requested?: {
-      providerID: string;
-      id: string;
-    }): Promise<{ providerID: string; id: string }[]> {
+    async function verifierCandidates(
+      requested: { providerID: string; id: string } | undefined,
+      sessionID: string,
+    ): Promise<{ providerID: string; id: string }[]> {
+      const liveModel = liveModels.get(sessionID);
       const out: { providerID: string; id: string }[] = [];
       const add = (model?: { providerID?: string; id?: string } | null) => {
         if (!model?.providerID || !model?.id) return;
@@ -1183,10 +1188,10 @@ export default {
       }
       try {
         if (event?.model?.providerID && event?.model?.id) {
-          liveModel = {
+          liveModels.set(event.sessionID, {
             providerID: event.model.providerID,
             id: event.model.id,
-          };
+          });
         }
         if (!Array.isArray(event.system)) return;
         // The state of the work, for a session that resumes. It carries the
@@ -1378,7 +1383,11 @@ export default {
                 for (const sessionID of pending) {
                   lessonChecked.set(sessionID, Date.now());
                   try {
-                    const outcome = await extractLessons(scope, sessionID);
+                    const outcome = await extractLessons(
+                      scope,
+                      sessionID,
+                      event.sessionID,
+                    );
                     debug(
                       `lessons ${sessionID}: ${outcome.facts} faits, ${outcome.skills} methodes`,
                     );
@@ -2444,7 +2453,11 @@ export default {
             throw new Error(
               "lessons are extracted only from an inactive scoped session",
             );
-          const outcome = await extractLessons(scope, sessionID);
+          const outcome = await extractLessons(
+            scope,
+            sessionID,
+            context.sessionID,
+          );
           return { content: JSON.stringify(outcome) };
         },
       });
@@ -2856,7 +2869,7 @@ export default {
               "a review needs an observation: there is nothing to check the claim against",
             );
           const observations = knowledge.evidence(scope, ids);
-          const candidates = await verifierCandidates(input.model);
+          const candidates = await verifierCandidates(input.model, context.sessionID);
           const digest = hash(
             JSON.stringify({
               scope,

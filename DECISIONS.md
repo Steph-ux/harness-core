@@ -149,3 +149,5 @@ les artefacts validés, sans modifier les poids du modèle.
 Le modèle fixé est exclusif. Les replis inter-fournisseurs sont explicites,
 avec délai et limite de réponse acceptée. L’API stateless 2.0.26 n’expose pas de
 plafond de tokens ; la limite de caractères ne prétend pas limiter la facturation.
+Le modèle courant est mémorisé par session. Une requête concurrente ne peut pas
+modifier le fournisseur choisi pour une vérification ou une extraction en cours.

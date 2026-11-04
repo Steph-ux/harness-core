@@ -140,7 +140,7 @@ et des exemples anonymisés. La capitalisation ne vaut pas autorisation de netto
 L’extraction automatique attend dix minutes d’inactivité. Elle compare les
 empreintes des observations : une session reprise peut être relue et un échec
 retenté après une minute. `HARNESS_VERIFIER` ou `state/verifier` fixe un modèle
-exclusif. Sans modèle fixé, le fournisseur courant est réutilisé ; les autres
+exclusif. Sans modèle fixé, le fournisseur de la session demandeuse est réutilisé ; les autres
 ne sont envisagés que dans `HARNESS_VERIFIER_PROVIDERS`. Maximum trois candidats,
 30 s par appel et 24 000 caractères de réponse acceptée. **L’API stateless de
 2.0.26 n’expose pas de plafond de tokens en sortie** ; la limite de caractères
@@ -183,5 +183,10 @@ serveur privé. Les événements d’exécution, décisions `once` et résultats
 commandes sont vérifiés avec un hôte de test. Aucun parcours natif avec modèle
 externe n’est revendiqué. Les captures sur fenêtres réelles exigent un écran.
 Le contrôle Pi externe reste optionnel avec `npm run test:gate` ou `HARNESS_PI_GATE`.
+
+Le workflow `.github/workflows/verify.yml` exécute trois contrôles sur les PR :
+contrats du noyau, génération réelle Word/PDF et chargement natif OpenCode 2.0.26.
+Les pages rendues sont conservées comme artefact CI pour la revue visuelle humaine.
+`ci/verify.yml` en conserve une copie ; seul le chemin `.github/workflows/` est actif.
 
 Les décisions sont dans `DECISIONS.md`, la carte des modules dans `src/ARCHITECTURE.md`.
