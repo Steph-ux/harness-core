@@ -1,125 +1,187 @@
-# Harness core — noyau neutre de preuve et de discipline
+# Harness core
 
-Ce dépôt porte le noyau de preuve partagé entre plusieurs hôtes d'agent. Il ne
-dépend d'aucun runtime d'agent : ni Pi, ni OpenCode.
+Noyau de preuve et de suivi de mission pour OpenCode v2. Les observations,
+constats, tâches et méthodes restent dans un état partagé indépendant de l’hôte.
+L’adaptateur est dans `opencode/` ; `src/` utilise les modules natifs de Node.
+Node 24 ou supérieur est requis. La supervision des commandes nécessite Linux
+et un exécutable `node` accessible au serveur (`HARNESS_NODE` peut fixer son chemin).
 
-## Pourquoi
+## Installer dans OpenCode v2
 
-Le harnais Pi avait construit deux choses qu'aucun hôte natif ne fournit :
+La version native vérifiée est **2.0.26**, paquet npm `@opencode/cli`, commande
+`opencode2`. Le paquet `opencode-ai` appartient à l’autre ligne de versions.
 
-- une base d'observations **immuables**, où réécrire une preuve lève une
-  collision ;
-- une liste de tâches qui **ne se ferme pas** sans une observation réussie.
+Définir `HARNESS_CORE` avec le chemin absolu de ce dépôt. Ajouter le **dossier**
+`opencode/` au tableau `plugins` de la configuration existante, en conservant
+les autres réglages et plugins :
 
-Ces deux pièces étaient écrites en TypeScript mais vivaient dans le dépôt Pi,
-ce qui rendait tout portage fragile. Elles vivent maintenant ici.
+```json
+{
+  "plugins": ["/chemin/absolu/harness-core/opencode"],
+  "permissions": [
+    {"action": "harness_operator", "resource": "*", "effect": "ask"}
+  ]
+}
+```
 
-## Contenu
+Le dossier expose `index.ts`. La découverte via
+`~/.config/opencode/plugins/harness-core` est une autre possibilité ; choisir
+une seule méthode pour éviter un identifiant de plugin en double. Attendre
+l’activation du lieu avant de lire son catalogue. Vérifier ensuite
+`harness-core.proof` dans `plugin.list` et les deux procédures dans `skill.list`.
 
-| Module | Rôle |
+`capitaliser-cyber` et `rapports-cyber` sont servies depuis `.opencode/skills/`.
+Les autres méthodes `harness-*` du routeur appartiennent à un catalogue externe.
+Leur absence doit être résolue avant une opération qui les exige. Un chargement
+en erreur ne satisfait jamais cette exigence.
+
+## Garanties et limites
+
+- Les observations opérationnelles sont immuables et limitées à leur périmètre.
+  L’empreinte couvre toute la sortie, même au-delà de l’extrait conservé. Les
+  entrées et sorties destinées au modèle sont expurgées.
+- Un lancement de commande ne prouve pas sa réussite. `cyber_process read`
+  vérifie toute la trace et ne donne une preuve réussie qu’après une fin avec
+  code 0. États : `running`, `succeeded`, `failed`, `timed_out`, `stopped`,
+  `unknown`. Un processus ancien sans résultat fiable reste `unknown`.
+- Le superviseur Node est indépendant du serveur. Délai par défaut : 120 s ;
+  maximum : 600 s. Les descendants dans le groupe qui survivent à leur parent
+  sont arrêtés et font échouer le résultat. Un programme qui quitte
+  volontairement son groupe n’est pas entièrement supervisable ici.
+- Les commandes du registre et les lectures sont expurgées. Les traces,
+  résultats et fichiers de contrôle complets restent locaux, sous accès
+  restreint. La clé de contrôle d’une exécution n’est pas renvoyée au modèle.
+- Un verrou couvre toute mutation des tâches. Un conflit demande une nouvelle
+  tentative. Les tâches ne sont pas tronquées aux vingt dernières. Une
+  dépendance absente ou bloquée empêche le départ ; une clôture sans preuve
+  valide reste visible comme blocage lors de la reprise.
+- La vérification d’un constat lie sa révision à une reproduction et un
+  contrôle négatif observés dans une session distincte, après sa création et
+  après toute reprise de validation. Elle ne vaut pas approbation humaine.
+  Un marqueur prouve le résultat observé ; l’analyse doit justifier l’impact.
+- Le harnais suit les preuves et les permissions. Il ne constitue pas un
+  confinement réseau et ne déduit pas une autorisation de cible d’un dossier.
+  Définir le mandat et le périmètre dans la mission.
+
+Les permissions shell natives restent obligatoires. Sur 2.0.26, le repli par
+le client CLI officiel vérifie qu’il atteint le même PID serveur. Un serveur
+privé différent est refusé. Les versions qui exposent
+`ctx.permission.assert` l’utilisent directement. Les transitions opérateur
+exigent une réponse `once` à `harness_operator` en `ask` ; un `allow` mémorisé
+ne vaut pas décision humaine.
+
+## Rapports et restitution
+
+La procédure `rapports-cyber` décrit ce parcours :
+
+1. Enregistrer observations, sources et constats. Produire les attestations
+   avec `cyber_verification`, puis terminer l’étape `validation` en les citant
+   et vérifier les constats avec `cyber_finding verify`.
+2. Créer `cyber_report snapshot` avec les détails éditoriaux. Les vulnérabilités
+   doivent être vérifiées ; les observations et cas non testés gardent leur
+   classement. Les sources et empreintes sont figées.
+3. Générer Word, PDF et images de toutes les pages avec le script fourni.
+   Enregistrer les trois artefacts et les relier avec `cyber_report register`.
+4. Relire toutes les pages et enregistrer la décision du responsable. L’étape
+   `report` exige le dernier rapport approuvé et ses fichiers inchangés. Une
+   modification des constats invalide la revue et rouvre le rapport.
+5. Si la validation doit être reprise, utiliser `cyber_mission reopen-validation`
+   avec une raison. Après décision de l’opérateur, le harnais conserve les
+   checkpoints, remet les constats à vérifier et rouvre validation, preuves et
+   rapport. Les anciennes observations de vérification ne peuvent pas être
+   réutilisées comme preuves fraîches de cette reprise. Aucun test externe
+   n’est relancé automatiquement.
+6. Consigner la restitution effective avec l’accord de l’opérateur et sa
+   preuve. Une restitution prévue ne vaut pas restitution effectuée.
+7. **Nettoyer uniquement après restitution** avec `cyber_cleanup` :
+   `plan` → `run` → `result` → `verify` → `result`.
+   L’exécution et sa vérification utilisent des processus distincts. Conserver
+   jusque-là les preuves, comptes et objets de test selon le mandat. Aucun PoC,
+   générateur ou passage de capitalisation ne les supprime automatiquement.
+
+Les transitions et leurs événements sont écrits dans une transaction. Les
+transitions concurrentes de nettoyage sont refusées avant le lancement. Une
+clôture de rapport et le suivi après restitution sont distincts :
+`cyber_report status` expose restitution, capitalisation et nettoyage. Ne pas
+annoncer le dossier entièrement clos si ces actions restent à traiter.
+
+Le générateur local ne lance pas les PoC du snapshot :
+
+```bash
+python3 -m pip install -r .opencode/skills/rapports-cyber/scripts/requirements.txt
+# Installer aussi LibreOffice, Poppler et DejaVu Sans Mono ou une police équivalente.
+python3 .opencode/skills/rapports-cyber/scripts/build_report.py /mission/snapshot.json --out /mission/rapport-v2
+```
+
+Il refuse d’écraser une version existante et produit `rapport.docx`,
+`rapport.pdf`, `page-N.png`, `qa.json`. `SOFFICE` peut désigner LibreOffice.
+Le manifeste relie les empreintes et laisse la revue visuelle en attente.
+Le calcul couvre le **score de base CVSS 3.1 uniquement**, selon
+[FIRST](https://www.first.org/cvss/v3.1/specification-document). Un vecteur non
+pris en charge ou un score incohérent est refusé. Justifier séparément les
+métriques et le risque métier.
+
+`cyber_capture shot` photographie une fenêtre réelle. `evidence` affiche une
+trace enregistrée liée au processus lu, sans le rejouer. Cette seconde forme
+porte `rendered-trace` et ne doit pas être présentée comme capture native du test.
+
+## Capitaliser Cyber
+
+Une passe bornée transforme les apprentissages vérifiés en scripts, règles,
+fixtures ou procédures. `cyber_capitalise` consigne `none`, `candidate` ou
+`validated`. La validation exige un artefact ainsi que des tests positifs et
+négatifs distincts. L’absence d’apprentissage utile est un résultat valable. Cette
+passe ne modifie pas les poids du modèle et ne génère pas récursivement des skills.
+
+Les méthodes apprises exigent toujours deux sessions de support et une confiance
+≥ 0,75 pour devenir actives. La promotion globale exige une décision de l’opérateur
+et des exemples anonymisés. La capitalisation ne vaut pas autorisation de nettoyage.
+
+L’extraction automatique attend dix minutes d’inactivité. Elle compare les
+empreintes des observations : une session reprise peut être relue et un échec
+retenté après une minute. `HARNESS_VERIFIER` ou `state/verifier` fixe un modèle
+exclusif. Sans modèle fixé, le fournisseur courant est réutilisé ; les autres
+ne sont envisagés que dans `HARNESS_VERIFIER_PROVIDERS`. Maximum trois candidats,
+30 s par appel et 24 000 caractères de réponse acceptée. **L’API stateless de
+2.0.26 n’expose pas de plafond de tokens en sortie** ; la limite de caractères
+n’est pas un plafond de facturation serveur.
+
+## État et migration
+
+`HARNESS_HOME` vaut par défaut `~/.local/share/harness-core`.
+`HARNESS_STATE_ROOT` peut fixer directement le dossier d’état.
+
+| Fichier | Contenu |
 |---|---|
-| `store.ts` | base d'observations, de connaissances et de règles opérateur ; empreintes de contenu, refus de réécriture |
-| `tasks.ts` | liste de tâches ordonnée, `blocked` avec raison, clôture par preuve |
-| `observation-id.ts` | identité d'une observation, dérivée de la session et de l'appel d'outil |
-| `skill-trace.ts` | ce qu'un hôte a chargé pour un tour, et ce qu'il a écarté |
-| `util.ts`, `types.ts` | socle commun |
-| `process-evidence.ts` | lien observation ↔ appel d'outil |
-| `sources.ts`, `platform-store.ts`, `platform-types.ts` | sources, findings citées, révisions |
-| `memory-ranking.ts` | classement de la mémoire apprise |
-| `process.ts` | commandes détachées, délai indépendant de l'hôte, registre et traces privées |
-| `capsule.ts` | tâches et preuves, mission, approbations, commandes actives et références rappelées |
+| `knowledge.sqlite` | Sessions, observations, connaissances, règles et audits |
+| `platform.sqlite` | Missions, constats, sources, artefacts, rapports, restitutions et nettoyage |
+| `tasks-<scope>.json` | Tâches verrouillées par périmètre |
+| `processes.json`, `traces/` | Exécutions, traces privées, résultats et fichiers de contrôle |
+| `reports/` | Snapshots de rapport conservés par version |
+| `skills/` | Révisions et méthodes apprises |
 
-## Règle de neutralité
+Les migrations SQLite sont additives. Aucun hash complet manquant n’est inventé
+pour les anciennes observations, et aucun ancien processus n’est transformé en
+réussite. Sauvegarder l’état avant une mise à niveau ; ne pas ouvrir une base
+migrée avec une version antérieure. Un verrou abandonné nécessite une inspection,
+pas une suppression automatique.
 
-Un seul import d'un runtime d'hôte suffirait à réaccrocher ce dépôt à un hôte
-et à casser le portage suivant. Le contrôle est mécanique et il est exécuté par
-la suite de tests du harnais :
+## Vérifier
 
 ```bash
-node scripts/check-neutrality.cjs
+npm ci --ignore-scripts --no-audit --no-fund
+npm run check             # TypeScript, neutralité et ressources des procédures
+npm test                  # suites autonomes, sans modèle externe
+python3 test/report-pipeline.py
+npm run test:report       # dépendances de rendu nécessaires
+OPENCODE_BINARY=/chemin/opencode2 node scripts/native-smoke.cjs
 ```
 
-Il échoue si un module importe `@earendil-works/pi-`, `@opencode-ai/`, ou un
-module local lié à un hôte, et si un import interne pointe un fichier absent.
+Les tests utilisent des fixtures synthétiques sans cible client. Le contrôle
+natif 2.0.26 couvre le catalogue, les outils dans leur périmètre et le refus du
+serveur privé. Les événements d’exécution, décisions `once` et résultats de
+commandes sont vérifiés avec un hôte de test. Aucun parcours natif avec modèle
+externe n’est revendiqué. Les captures sur fenêtres réelles exigent un écran.
+Le contrôle Pi externe reste optionnel avec `npm run test:gate` ou `HARNESS_PI_GATE`.
 
-## Consommateurs
-
-- **Harnais Pi** : `~/.pi/agent/cyber-harness/` ré-exporte ce noyau. Les
-  2 576 checks passent dessus.
-- **OpenCode** : `opencode/` est l'adaptateur. Il est installé par **découverte**,
-  `~/.config/opencode/plugins/harness-core` étant un lien vers ce dossier, qui
-  expose `index.ts`. OpenCode rejette une entrée de config qui pointe un
-  fichier, et ignore en silence un dossier sans `index.ts` racine. Le plugin
-  n'importe rien : le cœur est atteint par chemin absolu (`HARNESS_CORE`), donc
-  le même code sert en découverte, en copie ou en dossier package.
-
-## Le store ne se duplique pas
-
-Le store est un fichier, pas une bibliothèque. Les deux hôtes pointent sur la
-même base, donc les preuves accumulées restent uniques et continues d'un hôte à
-l'autre.
-
-Les deux hôtes écrivent dans `~/.local/share/harness-core/state/`
-(`HARNESS_STATE_ROOT`, ou `HARNESS_HOME` pour sa racine parente). La liste des tâches est relue à chaque usage, sans
-cache : deux hôtes sur le même fichier ne peuvent pas diverger en silence.
-
-## Les tests
-
-`test/opencode-proof.cjs` conduit l'adaptateur sans modèle, et prouve les deux
-garanties comme comportement : une tâche ne se ferme pas sans observation
-réussie, et une observation ne peut pas être réécrite.
-
-Le dépôt est autonome : `npm test` lance `test/run.cjs`, qui charge les suites
-situées à côté du code qu'elles vérifient et compte les assertions réelles
-(324 checks). La porte complète du harnais Pi reste disponible avec
-`npm run test:gate` quand elle est installée.
-
-## La porte en CI
-
-`ci/verify.yml` est le workflow GitHub Actions de ce dépôt : `npm ci`, puis
-`npm run check`, puis `npm test`, sur Node 24, à chaque push sur `main` et à
-chaque pull request.
-
-GitHub refuse d'écrire un fichier sous `.github/workflows/` avec un jeton qui
-n'a pas le scope `workflow`, quel que soit le canal (push ou API). Le fichier
-est donc versionné ici et s'active en une commande, avec un jeton porteur de
-ce scope :
-
-```bash
-mkdir -p .github/workflows
-cp ci/verify.yml .github/workflows/verify.yml
-git add .github/workflows/verify.yml
-git commit -m "ci: gate the core on every push"
-git push
-```
-
-## Commandes tracées sur Linux
-
-`cyber_process` expose `run`, `list`, `read` et `stop`. Le délai par défaut est
-120 secondes, au plus 600. Le superviseur `/usr/bin/timeout` et son groupe
-détaché survivent à la sortie du serveur ; après le délai, SIGTERM est suivi
-de SIGKILL une seconde plus tard si nécessaire. Aucun paquet n'est installé.
-`run` reçoit `argv` (exécutable puis arguments) et n'ouvre pas de shell
-implicite. Une composition complexe doit vivre dans un script relu séparément.
-
-Les traces complètes restent locales en mode `0600`. Leur lecture est bornée
-et expurgée ; les commandes du registre sont aussi expurgées. Le registre
-`processes.json` permet une reprise sans rejouer la commande. L'identité du
-processus inclut le démarrage du système et du processus pour éviter de tuer
-un PID réutilisé. `finished` signifie « plus actif », **pas** « sorti avec succès ».
-Cela ne supervise pas un programme qui quitte volontairement son groupe.
-
-Les permissions shell natives restent obligatoires. Sur OpenCode 2.0.26,
-le client officiel appelle `session.permission.create` et le plugin attend
-`permission.replied` si nécessaire. Il vérifie d'abord que le client atteint
-le même PID serveur ; un serveur privé différent est refusé. Les versions
-exposant `ctx.permission.assert` l'utilisent directement. Le rejet, la perte
-du flux d'événements et l'annulation empêchent le lancement.
-
-Les transitions réservées à l'opérateur utilisent l'action
-`harness_operator`, configurée en `ask`. Elles exigent une réponse `once` : un
-allow automatique ou mémorisé n'est jamais une décision humaine.
-
-La mise à jour atomique du registre est verrouillée : une concurrence est
-refusée plutôt qu'écrasée. Si l'hôte meurt pendant cette écriture, un verrou
-résiduel peut demander une intervention ; il n'est jamais effacé à l'aveugle.
+Les décisions sont dans `DECISIONS.md`, la carte des modules dans `src/ARCHITECTURE.md`.

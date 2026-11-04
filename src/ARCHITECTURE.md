@@ -3,13 +3,14 @@
 The core is one-way: a host turns a tool call into an observation, the stores
 own the truth, and everything the model sees is derived from them.
 
+```mermaid
+flowchart TD
+  T[Tool result] --> O[Immutable scoped observation]
+  O --> L[Tasks and findings]
+  O --> M[Candidate methods]
+  L --> C[Continuity and closing gate]
 ```
-tool call ──► observation (immutable, scoped) ──► task / finding / review
-                                   │
-                     capsule + routing table ──► injected context
-                                   │
-                     lesson extraction (no tools) ──► facts / methods
-```
+
 
 ## Two stores, two jobs
 
@@ -27,7 +28,7 @@ database, so a test can hand it a stub and a host can hand it the real store.
 |---|---|
 | `store.ts` | An observation is written once and never edited; a finding cites only evidence from its own scope; operator rules override inferred knowledge |
 | `platform-store.ts` | A mission takes its stages in order; a scope is approved before work is dispatched; a finding is verified by an observation that is not its own evidence |
-| `tasks.ts` | `complete` requires a successful observation id; `block` requires a reason |
+| `tasks.ts` | Mutations are locked; `complete` takes evidence ids resolved by the host; `block` requires a reason |
 | `capsule.ts` | The returning session gets the exact state: open steps, blocked steps with reasons, the mission stage, pending approvals, commands the harness still owns. `closingGate` answers "are we done?" from that state alone |
 | `skills.ts` | A method becomes active only with support from two sessions and confidence ≥ 0.75; a global method is promotion-only, evidence-free, identifier-free, and visible from every project (project shadows global) |
 | `routing.ts` | One route per request, weighted triggers, an anti-noise guard (a single hit on a long text is not a route) |
@@ -39,37 +40,31 @@ database, so a test can hand it a stub and a host can hand it the real store.
 
 ## Where the host plugs in
 
-`opencode/plugin.ts` is the only file that knows the host. It registers:
+`opencode/plugin.ts` and `opencode/workflow-tools.ts` form the host boundary. They register:
 
 - `context` — injects continuity, the routing table and the closing gate; starts
   the background lesson extraction for pending sessions.
 - `tool.execute.after` — records the observation, including failures.
-- `tool.execute.before` — refuses a finding whose enforced method was not loaded.
+- `cyber_finding create` — refuses a finding whose enforced method was not successfully loaded.
 - tools `cyber_*` — tasks, findings, sources, missions, approvals, processes,
   memory, methods, reviews, captures.
-- `skill.transform` — serves the active learned methods, global first, project
-  shadowing by name.
+- `skill.transform` — serves authored project procedures and active learned methods.
+- `prompt` — retains request text for routing in the following context hook.
 
-A known host limitation shapes the design: OpenCode hands the `context` hook no
-request text (`event.messages[0].parts` is empty). `routeFor()` therefore never
-matches live on this host; the whole table is injected and the binding
-constraint is the tool gate, not the router. Any host that passes the text gets
-the sharper behaviour for free.
+The native context event omits prompt text. The prompt hook retains the latest
+request per session; the ledger also routes on the proposed finding. Failed
+skill loads never count as procedure use. Unknown requests receive the compact
+routing table.
 
 ## The learning loop
 
-```
-session ends ──► pendingLessons(scope)
-         └──► extractLessons: one model call, no tools, untrusted input
-                 ├── facts ──► knowledge (pending, ranked, injected)
-                 └── methods ──► skills.propose ──► candidate | active
-                                                   └── promote ──► global
-```
-
-The verifier runs on an ordered candidate list and retries: `opencode` and
-`opencode-go` are excluded because they refuse a direct call (measured), and an
-empty list is reported as "no model can serve the harness" rather than recorded
-as a session that taught nothing.
+Quiet sessions are extracted by the digest of their observation snapshot. New
+observations make a resumed session eligible again. Failures may be retried
+after a cooldown and are never recorded as empty successful extractions.
+Proposals still pass the ordinary evidence gates before becoming knowledge or
+candidate methods. A pinned verifier is exclusive; fallback providers require
+explicit configuration. Time and accepted response length are bounded, while
+the pinned stateless API exposes no server-side output-token ceiling.
 
 ## Rules for changing the core
 
@@ -77,7 +72,7 @@ as a session that taught nothing.
   tests, not only in the prose.
 - A new invariant needs a negative control: a test that shows the refusal.
 - No host name, no target name, no secret in `src/` (`npm run check`).
-- A new suite must be added to the runner's list, or it never runs.
+- The standalone runner discovers `test/opencode-*.cjs` suites.
 
 ## Durable execution and verification
 
@@ -87,3 +82,18 @@ keeps unknown legacy identities distinct from successful outcomes. Task
 mutations hold a lock for the whole update. Verification payloads bind a
 finding content hash to fresh reproduction and negative-control observations.
 The prompt hook provides request text when the native context event omits it.
+
+## Rapports et restitution
+
+`engagement-workflow.ts` utilise `platform.sqlite` : artefacts immuables,
+snapshots, génération liée par empreintes, revue, restitution puis nettoyage
+vérifié. Les transitions et leurs événements sont transactionnels ; un verrou
+optimiste évite les démarrages concurrents. Il n’y a pas de troisième base.
+`PlatformStore.finish` contrôle le rapport dans la transaction qui ferme l’étape.
+Une reprise de validation conserve les checkpoints et invalide les vérifications
+courantes. Les nouvelles preuves doivent suivre cette reprise.
+
+`opencode/workflow-tools.ts` applique les décisions opérateur à la frontière
+native. Les procédures `.opencode/skills/` décrivent rédaction et capitalisation.
+Le générateur Python reste optionnel, hors du runtime Node. Le hook `prompt`
+alimente le routage, les échecs de chargement ne satisfont pas une méthode.

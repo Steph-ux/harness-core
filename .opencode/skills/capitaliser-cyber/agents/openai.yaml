@@ -1,0 +1,14 @@
+interface:
+  display_name: Capitaliser Cyber
+  short_description: Transformer les acquis cyber en outils vérifiés
+  default_prompt: Utilise $capitaliser-cyber pour réaliser cette mission de cybersécurité
+    et transformer les apprentissages vérifiés en outils réutilisables.
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true

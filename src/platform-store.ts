@@ -126,7 +126,10 @@ export class PlatformStore {
       CREATE INDEX approvals_scope ON approvals(scope,status,created);
       PRAGMA user_version=3;COMMIT;`);
     }
-    if(version<4)this.db.exec(`BEGIN IMMEDIATE; ALTER TABLE finding_verifications ADD COLUMN detail TEXT NOT NULL DEFAULT '{}'; PRAGMA user_version=4; COMMIT;`);
+    if (version < 4)
+      this.db.exec(
+        `BEGIN IMMEDIATE; ALTER TABLE finding_verifications ADD COLUMN detail TEXT NOT NULL DEFAULT '{}'; PRAGMA user_version=4; COMMIT;`,
+      );
   }
   private open(scope: string) {
     if (this.closed) throw new Error("Platform store is closed");
@@ -338,13 +341,12 @@ export class PlatformStore {
     const id = `AP-${newId().slice(0, 18)}`;
     const reason = text(justification, 2000);
     if (!reason.trim()) throw new Error("An approval needs its reason");
-    if (!action.trim()) throw new Error("An approval needs the action it covers");
+    if (!action.trim())
+      throw new Error("An approval needs the action it covers");
     identifier(requestedBy);
     this.tx(() => {
       this.db
-        .prepare(
-          "INSERT INTO approvals VALUES(?,?,?,?,?,?,?,?,NULL,NULL)",
-        )
+        .prepare("INSERT INTO approvals VALUES(?,?,?,?,?,?,?,?,NULL,NULL)")
         .run(
           id,
           scope,
@@ -382,7 +384,10 @@ export class PlatformStore {
 
   approvals(scope: string, status?: string, limit = 50) {
     this.open(scope);
-    if (status !== undefined && !["pending", "approved", "denied"].includes(status))
+    if (
+      status !== undefined &&
+      !["pending", "approved", "denied"].includes(status)
+    )
       throw new Error("Invalid approval status");
     if (!Number.isInteger(limit) || limit < 1 || limit > 200)
       throw new Error("Invalid limit");
@@ -400,7 +405,12 @@ export class PlatformStore {
     return rows.map((row) => this.approval(scope, String(row.id)));
   }
 
-  decideApproval(scope: string, id: string, approve: boolean, decidedBy: string) {
+  decideApproval(
+    scope: string,
+    id: string,
+    approve: boolean,
+    decidedBy: string,
+  ) {
     const current = this.approval(scope, id);
     if (current.status !== "pending")
       throw new Error("Approval was already decided");
@@ -410,18 +420,13 @@ export class PlatformStore {
         .prepare(
           "UPDATE approvals SET status=?,decided=?,decided_by=? WHERE scope=? AND id=? AND status='pending'",
         )
-        .run(
-          approve ? "approved" : "denied",
-          now(),
-          decidedBy,
-          scope,
-          id,
-        );
+        .run(approve ? "approved" : "denied", now(), decidedBy, scope, id);
     });
     return this.approval(scope, id);
   }
 
-  approveScope(scope: string, id: string) {    this.mission(scope, id);
+  approveScope(scope: string, id: string) {
+    this.mission(scope, id);
     this.tx(() => {
       const node = this.db
         .prepare(
@@ -507,6 +512,47 @@ export class PlatformStore {
       .run(Date.now() + 15000, id, scope, node, lease);
     if (!changed.changes) throw new Error("Lost node lease");
   }
+  private assertReportReady(scope: string, id: string) {
+    const table = this.db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='workflow_reports'",
+      )
+      .get();
+    const latest = table
+      ? this.db
+          .prepare(
+            "SELECT * FROM workflow_reports WHERE scope=? AND mission_id=? ORDER BY rowid DESC LIMIT 1",
+          )
+          .get(scope, id)
+      : undefined;
+    if (!latest || latest.reviewed !== 1)
+      throw new Error(
+        "Report stage requires a registered, visually reviewed report artifact",
+      );
+    const snapshot = parse(latest.snapshot),
+      payload = parse(latest.payload);
+    if (snapshot.sourceHash !== this.reportFingerprint(scope, id))
+      throw new Error("Report snapshot is stale");
+    const check = (file: string, expected: string) => {
+      assertPlainPath(file);
+      if (
+        createHash("sha256").update(fs.readFileSync(file)).digest("hex") !==
+        expected
+      )
+        throw new Error("Reviewed report content changed");
+    };
+    check(payload.snapshotPath, payload.snapshotHash);
+    for (const artifactId of payload.artifacts) {
+      const row = this.db
+        .prepare(
+          "SELECT payload FROM workflow_artifacts WHERE id=? AND scope=? AND mission_id=?",
+        )
+        .get(artifactId, scope, id);
+      if (!row) throw new Error("Reviewed report artifact missing");
+      const artifact = parse(row.payload);
+      check(artifact.path, artifact.sha256);
+    }
+  }
   finish(
     scope: string,
     id: string,
@@ -540,35 +586,34 @@ export class PlatformStore {
       throw new Error("Report stage needs report workers");
     const ids = [
       ...new Set(
-        results.flatMap((r) => [...(r.evidence ?? []), ...(r.observationIds ?? [])]),
+        results.flatMap((r) => [
+          ...(r.evidence ?? []),
+          ...(r.observationIds ?? []),
+        ]),
       ),
     ];
     this.evidenceStore.evidence(scope, ids);
-    for(const r of results)if(r.status==="completed"){
-      const proofs=[...(r.evidence??[]),...(r.observationIds??[])];
-      if(!proofs.length)throw new Error("A completed stage requires observed evidence");
-      if(!this.evidenceStore.evidence(scope,proofs).some(o=>o.success))throw new Error("A completed stage requires successful evidence");
-    }
-    if(node==="report"){
-      const table=this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='workflow_reports'").get();
-      const latest=table?this.db.prepare("SELECT * FROM workflow_reports WHERE scope=? AND mission_id=? ORDER BY rowid DESC LIMIT 1").get(scope,id):undefined;
-      if(!latest||latest.reviewed!==1)throw new Error("Report stage requires a registered, visually reviewed report artifact");
-      const snapshot=parse(latest.snapshot),payload=parse(latest.payload);
-      if(snapshot.sourceHash!==this.reportFingerprint(scope,id))throw new Error("Report snapshot is stale");
-      const check=(file:string,expected:string)=>{assertPlainPath(file);if(createHash("sha256").update(fs.readFileSync(file)).digest("hex")!==expected)throw new Error("Reviewed report content changed");};
-      check(payload.snapshotPath,payload.snapshotHash);
-      for(const artifactId of payload.artifacts){const row=this.db.prepare("SELECT payload FROM workflow_artifacts WHERE id=? AND scope=? AND mission_id=?").get(artifactId,scope,id);if(!row)throw new Error("Reviewed report artifact missing");const artifact=parse(row.payload);check(artifact.path,artifact.sha256);}
-    }
+    for (const r of results)
+      if (r.status === "completed") {
+        const proofs = [...(r.evidence ?? []), ...(r.observationIds ?? [])];
+        if (!proofs.length)
+          throw new Error("A completed stage requires observed evidence");
+        if (!this.evidenceStore.evidence(scope, proofs).some((o) => o.success))
+          throw new Error("A completed stage requires successful evidence");
+      }
     // The checkpoint keeps what actually proves the stage. A worker may report
     // its evidence as observation ids; both are evidence, and the recorded
     // result must not hide one of them, or a verification stage would look
     // empty while it is not.
     const recorded = results.map((r) => ({
       ...r,
-      evidence: [...new Set([...(r.evidence ?? []), ...(r.observationIds ?? [])])],
+      evidence: [
+        ...new Set([...(r.evidence ?? []), ...(r.observationIds ?? [])]),
+      ],
     }));
     this.tx(() => {
       this.assertLease(scope, id, node, lease);
+      if (node === "report") this.assertReportReady(scope, id);
       const state = recorded.every((r) => r.status === "completed")
         ? "COMPLETED"
         : "FAILED";
@@ -668,6 +713,51 @@ export class PlatformStore {
         payload: parse(r.payload),
         timestamp: String(r.timestamp),
       }));
+  }
+  reopenValidation(
+    scope: string,
+    id: string,
+    reason: string,
+    operator: string,
+  ) {
+    const explanation = text(reason, 4000),
+      decidedBy = text(operator, 300);
+    this.tx(() => {
+      const mission = this.mission(scope, id);
+      if (mission.nodes.some((n) => n.state === "RUNNING"))
+        throw new Error(
+          "Mission has running work; inspect effects before reopening validation",
+        );
+      if (
+        !mission.nodes.some(
+          (n) => n.id === "validation" && n.state === "COMPLETED",
+        )
+      )
+        throw new Error("Only completed validation can be reopened");
+      for (const node of ["validation", "evidence", "report"]) {
+        this.checkpoint(scope, id, node, "PENDING", {
+          reason: explanation,
+          decidedBy,
+          previousResultRetainedInHistory: true,
+        });
+        this.db
+          .prepare(
+            "UPDATE nodes SET state='PENDING',result='null',lease=NULL,owner=NULL,expires=NULL WHERE scope=? AND mission_id=? AND id=?",
+          )
+          .run(scope, id, node);
+      }
+      this.db
+        .prepare(
+          "DELETE FROM finding_verifications WHERE scope=? AND finding_id IN (SELECT id FROM findings WHERE scope=? AND mission_id=?)",
+        )
+        .run(scope, scope, id);
+      this.db
+        .prepare(
+          "UPDATE findings SET status='unverified' WHERE scope=? AND mission_id=? AND status='verified'",
+        )
+        .run(scope, id);
+    });
+    return this.mission(scope, id);
   }
   retry(scope: string, id: string, node: string) {
     this.mission(scope, id);
@@ -950,6 +1040,7 @@ export class PlatformStore {
       scope,
       missionId: String(row.mission_id),
       title: String(row.title),
+      createdAt: String(row.created),
       severity: String(row.severity),
       description: String(row.description),
       limitations: String(row.limitations),
@@ -993,26 +1084,127 @@ export class PlatformStore {
       .all(scope, missionId)
       .map((r) => this.finding(scope, String(r.id)));
   }
-  findingHash(scope:string,id:string){
-    const f=this.finding(scope,id);return hash(json({id:f.id,missionId:f.missionId,title:f.title,severity:f.severity,description:f.description,limitations:f.limitations,checks:f.checks,evidence:f.evidence,sources:f.sources.map(s=>({id:s.id,hash:s.hash}))}));
+  findingHash(scope: string, id: string) {
+    const f = this.finding(scope, id);
+    return hash(
+      json({
+        id: f.id,
+        missionId: f.missionId,
+        title: f.title,
+        severity: f.severity,
+        description: f.description,
+        limitations: f.limitations,
+        checks: f.checks,
+        evidence: f.evidence,
+        sources: f.sources.map((s) => ({ id: s.id, hash: s.hash })),
+      }),
+    );
   }
-  reportFingerprint(scope:string,missionId:string){
-    const m=this.mission(scope,missionId);return hash(json({missionId,scope,boundaries:m.boundaries,findings:this.findings(scope,missionId).map(f=>({id:f.id,hash:this.findingHash(scope,f.id),status:f.status,verification:f.verification}))}));
+  reportFingerprint(scope: string, missionId: string) {
+    const m = this.mission(scope, missionId);
+    return hash(
+      json({
+        missionId,
+        scope,
+        boundaries: m.boundaries,
+        findings: this.findings(scope, missionId).map((f) => ({
+          id: f.id,
+          hash: this.findingHash(scope, f.id),
+          status: f.status,
+          verification: f.verification,
+        })),
+      }),
+    );
   }
-  private checkVerification(scope:string,finding:ReturnType<PlatformStore["finding"]>,checks:FindingProposal["checks"],sessionId:string){
-    if(!Array.isArray(checks)||checks.length<2||checks.length>30)throw new Error("Verification needs reproduction and negative controls");
-    const purposes=new Set(checks.map(c=>c.purpose));if(!purposes.has("reproduction")||!purposes.has("negative-control"))throw new Error("Verification needs reproduction and negative controls");
-    const initial=this.evidenceStore.evidence(scope,finding.evidence),proofs=this.evidenceStore.evidence(scope,checks.map(c=>c.observationId));
-    if(proofs.some(o=>!o.success||o.sessionId!==sessionId||finding.evidence.includes(o.id)||initial.some(old=>old.sessionId===o.sessionId)))throw new Error("Verification requires fresh successful observations from a distinct session");
-    for(const c of checks){
-      if(typeof c.contains!=="string"||c.contains.trim().length<4||!proofs.some(o=>o.id===c.observationId&&o.output.includes(c.contains)))throw new Error("Verification control lacks observed evidence");
-      if(!finding.checks.some(expected=>expected.purpose===c.purpose&&expected.contains===c.contains))throw new Error("Verification does not test the finding's declared criterion");
+  private checkVerification(
+    scope: string,
+    finding: ReturnType<PlatformStore["finding"]>,
+    checks: FindingProposal["checks"],
+    sessionId: string,
+  ) {
+    if (!Array.isArray(checks) || checks.length < 2 || checks.length > 30)
+      throw new Error("Verification needs reproduction and negative controls");
+    const purposes = new Set(checks.map((c) => c.purpose));
+    if (!purposes.has("reproduction") || !purposes.has("negative-control"))
+      throw new Error("Verification needs reproduction and negative controls");
+    const initial = this.evidenceStore.evidence(scope, finding.evidence),
+      proofs = this.evidenceStore.evidence(
+        scope,
+        checks.map((c) => c.observationId),
+      );
+    const reopened = this.db
+      .prepare(
+        "SELECT timestamp FROM checkpoints WHERE scope=? AND mission_id=? AND node_id='validation' AND state='PENDING' ORDER BY seq DESC LIMIT 1",
+      )
+      .get(scope, finding.missionId);
+    const cutoff = Math.max(
+      Date.parse(finding.createdAt),
+      reopened ? Date.parse(String(reopened.timestamp)) : 0,
+    );
+    if (proofs.some((o) => Date.parse(o.timestamp) < cutoff))
+      throw new Error(
+        "Verification requires fresh observations for the current validation",
+      );
+    if (
+      proofs.some(
+        (o) =>
+          !o.success ||
+          o.sessionId !== sessionId ||
+          finding.evidence.includes(o.id) ||
+          initial.some((old) => old.sessionId === o.sessionId),
+      )
+    )
+      throw new Error(
+        "Verification requires fresh successful observations from a distinct session",
+      );
+    for (const c of checks) {
+      if (
+        typeof c.contains !== "string" ||
+        c.contains.trim().length < 4 ||
+        !proofs.some(
+          (o) => o.id === c.observationId && o.output.includes(c.contains),
+        )
+      )
+        throw new Error("Verification control lacks observed evidence");
+      if (
+        !finding.checks.some(
+          (expected) =>
+            expected.purpose === c.purpose && expected.contains === c.contains,
+        )
+      )
+        throw new Error(
+          "Verification does not test the finding's declared criterion",
+        );
     }
-    if(checks.filter(c=>c.purpose==="reproduction").some(c=>checks.some(n=>n.purpose==="negative-control"&&n.observationId===c.observationId)))throw new Error("Verification controls must be distinct");
+    if (
+      checks
+        .filter((c) => c.purpose === "reproduction")
+        .some((c) =>
+          checks.some(
+            (n) =>
+              n.purpose === "negative-control" &&
+              n.observationId === c.observationId,
+          ),
+        )
+    )
+      throw new Error("Verification controls must be distinct");
   }
-  verificationPayload(scope:string,id:string,sessionId:string,checks:FindingProposal["checks"]){
-    const finding=this.finding(scope,id);this.checkVerification(scope,finding,checks,sessionId);
-    return {type:"finding-verification",findingId:id,findingHash:this.findingHash(scope,id),runId:newId(),verdict:"confirmed",checks};
+  verificationPayload(
+    scope: string,
+    id: string,
+    sessionId: string,
+    checks: FindingProposal["checks"],
+  ) {
+    const finding = this.finding(scope, id);
+    this.checkVerification(scope, finding, checks, sessionId);
+    return {
+      type: "finding-verification",
+      findingId: id,
+      findingHash: this.findingHash(scope, id),
+      runId: newId(),
+      verdict: "confirmed",
+      checks,
+    };
   }
   verifyFinding(scope: string, id: string, verificationId?: string) {
     const f = this.finding(scope, id),
@@ -1059,9 +1251,20 @@ export class PlatformStore {
     const observation = this.evidenceStore.evidence(scope, [verificationId])[0];
     if (!observation.success)
       throw new Error("Independent verification observation failed");
-    let attestation:any;try{attestation=JSON.parse(observation.output);}catch{throw new Error("A linked verification attestation is required");}
-    if(observation.tool!=="harness:verification"||attestation.findingId!==id||attestation.findingHash!==this.findingHash(scope,id)||attestation.verdict!=="confirmed")throw new Error("Verification attestation is unrelated or stale");
-    this.checkVerification(scope,f,attestation.checks,observation.sessionId);
+    let attestation: any;
+    try {
+      attestation = JSON.parse(observation.output);
+    } catch {
+      throw new Error("A linked verification attestation is required");
+    }
+    if (
+      observation.tool !== "harness:verification" ||
+      attestation.findingId !== id ||
+      attestation.findingHash !== this.findingHash(scope, id) ||
+      attestation.verdict !== "confirmed"
+    )
+      throw new Error("Verification attestation is unrelated or stale");
+    this.checkVerification(scope, f, attestation.checks, observation.sessionId);
     const observations = this.evidenceStore.evidence(scope, f.evidence);
     if (
       f.checks.some(
@@ -1100,7 +1303,11 @@ export class PlatformStore {
         observation.hash,
         verification.attempt,
         now(),
-        json({sessionId:observation.sessionId,runId:attestation.runId,kind:"technical-reproduction"}),
+        json({
+          sessionId: observation.sessionId,
+          runId: attestation.runId,
+          kind: "technical-reproduction",
+        }),
       );
     this.db
       .prepare(

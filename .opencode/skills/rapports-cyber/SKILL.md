@@ -1,0 +1,19 @@
+---
+name: rapports-cyber
+description: Rédiger, améliorer et mettre à jour les rapports de pentest ou red team en français à partir de preuves vérifiées, avec PoC reproductibles, contrôles négatifs, CVSS recalculé et livrables Word et PDF relus page par page. Utiliser pour préparer un rapport, actualiser les constats ou organiser la restitution.
+---
+
+# Rapports Cyber
+
+Lire `references/methode.md`. Conserver le mandat, les autorisations et les limites établis. Ne pas inventer les informations propres au client qui manquent.
+
+1. Lire `cyber_mission status` et `cyber_finding get`. Séparer vulnérabilités prouvées, observations, non reproduits, non testés et blocages. Une version, un HTTP 200 ou une alerte de scanner ne démontre pas un impact.
+2. Pour chaque vulnérabilité, exécuter reproduction et contrôle négatif dans une session indépendante. Produire `cyber_verification action=attest`. Revendiquer l’étape `validation` avec `owner=verification-agent` et tous les `findingIds` couverts, puis la terminer en citant les attestations. Utiliser `cyber_finding verify`. La vérification technique ne vaut pas approbation humaine. Si la validation d’une mission terminée doit être reprise, demander `cyber_mission action=reopen-validation` avec la raison précise ; cette transition exige une décision de l’opérateur.
+3. Fournir les détails éditoriaux par identifiant : `classification`, `asset`, `preconditions`, `impact`, `steps`, `remediation`, `closure`, `artifactIds`, éventuellement `cvss: {vector,score}` et `businessRisk`. Conserver les secrets et traces brutes sous accès restreint.
+4. Enregistrer PoC, captures et extraits expurgés avec `cyber_report action=artifact` et leurs observations de provenance. Employer des captures réelles datées. `cyber_capture evidence` affiche une trace enregistrée ; la légender ainsi. Ne jamais relancer une action offensive uniquement pour mettre en scène une capture.
+5. Créer `cyber_report action=snapshot`, avec `missionId` et `config` contenant `title`, `client`, `author`, `period`, `method`, `findings`. Toute modification des constats impose un nouveau snapshot et une nouvelle génération ; conserver l’ancienne version.
+6. Exécuter `python3 <répertoire-de-cette-compétence>/scripts/build_report.py <snapshot.json> --out <répertoire-de-mission>/rapport-vN`. Dépendances : `python-docx`, `pypdf`, LibreOffice et Poppler. Le générateur refuse d’écraser une version existante. Il prend en charge le score de base CVSS 3.1 uniquement.
+7. Inspecter **toutes** les images des pages. Corriger et régénérer en cas de débordement, coupure ou preuve illisible. Un manifeste technique ne prouve pas une relecture visuelle. Enregistrer DOCX, PDF et QA comme artefacts, puis `cyber_report action=register`.
+8. Présenter le rapport concret au responsable. Enregistrer sa décision avec `cyber_report action=review`, `pagesReviewed` complet, `decision` et `notes`. Ne pas transmettre automatiquement. Revendiquer et terminer l’étape `report` seulement lorsque le dernier rapport est approuvé et inchangé ; garder le bail actif durant les opérations longues.
+9. Après restitution **effective**, utiliser `cyber_report action=restitution`, `reportId`, une observation justificative et `statement`. Une restitution prévue demain n’est pas effectuée aujourd’hui. **Le nettoyage se fait uniquement après restitution.** Préserver avant cela les preuves et objets de test. Utiliser ensuite `cyber_cleanup plan`, `run`, `result`, `verify`, `result` avec décision de l’opérateur et commande séparée de vérification.
+10. Appliquer une passe bornée `capitaliser-cyber`. Ne pas attendre le nettoyage pour rédiger ou restituer le rapport. Annoncer séparément rapport prêt, restitution effectuée et nettoyage vérifié.

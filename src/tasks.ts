@@ -16,7 +16,8 @@ const MAX_TITLE = 200;
 const MAX_REASON = 400;
 const MAX_DEPENDS = 10;
 const identifier = (value: unknown): value is string =>
-  typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/.test(value);
+  typeof value === "string" &&
+  /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/.test(value);
 
 export interface Task {
   id: string;
@@ -36,14 +37,28 @@ export class TaskStore {
   }
 
   private file(scope: string): string {
-    if(!/^[a-z][a-z0-9-]{0,95}$/.test(scope))throw new Error("Invalid task scope");
+    if (!/^[a-z][a-z0-9-]{0,95}$/.test(scope))
+      throw new Error("Invalid task scope");
     return path.join(this.stateRoot, `tasks-${scope}.json`);
   }
 
-  private mutate<T>(scope:string,fn:()=>T):T {
-    const lock=`${this.file(scope)}.lock`;assertPlainPath(lock);let fd:number;
-    try{fd=fs.openSync(lock,"wx",0o600);}catch(error){if((error as NodeJS.ErrnoException).code==="EEXIST")throw new Error("Concurrent task update; retry from the current state");throw error;}
-    try{return fn();}finally{fs.closeSync(fd);fs.unlinkSync(lock);}
+  private mutate<T>(scope: string, fn: () => T): T {
+    const lock = `${this.file(scope)}.lock`;
+    assertPlainPath(lock);
+    let fd: number;
+    try {
+      fd = fs.openSync(lock, "wx", 0o600);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST")
+        throw new Error("Concurrent task update; retry from the current state");
+      throw error;
+    }
+    try {
+      return fn();
+    } finally {
+      fs.closeSync(fd);
+      fs.unlinkSync(lock);
+    }
   }
   /**
    * The task list is read from the file on every use.
@@ -68,14 +83,20 @@ export class TaskStore {
   }
 
   private save(scope: string, rows: Task[]): Task[] {
-    if(rows.length>MAX_TASKS)throw new Error("Task capacity reached; archive completed work explicitly");
+    if (rows.length > MAX_TASKS)
+      throw new Error(
+        "Task capacity reached; archive completed work explicitly",
+      );
     const kept = rows;
     atomicWrite(this.file(scope), JSON.stringify(kept, null, 1));
     return kept;
   }
 
   list(scope: string): Task[] {
-    return this.load(scope).map((row) => ({ ...row, dependsOn: [...row.dependsOn] }));
+    return this.load(scope).map((row) => ({
+      ...row,
+      dependsOn: [...row.dependsOn],
+    }));
   }
 
   /** The review packet: every task with the observations that close it. */
@@ -112,9 +133,11 @@ export class TaskStore {
     const open = rows.filter(
       (row) => row.status === "pending" || row.status === "in-progress",
     );
-    const completed = new Set(rows.filter(row=>row.status==="completed").map(row=>row.id));
+    const completed = new Set(
+      rows.filter((row) => row.status === "completed").map((row) => row.id),
+    );
     return open
-      .filter((row) => row.dependsOn.every(id=>completed.has(id)))
+      .filter((row) => row.dependsOn.every((id) => completed.has(id)))
       .map((row) => ({ ...row, dependsOn: [...row.dependsOn] }));
   }
 
@@ -125,19 +148,27 @@ export class TaskStore {
   }
 
   add(scope: string, input: { title: string; dependsOn?: string[] }): Task {
-    return this.mutate(scope,()=>{
-    const title = bounded(input?.title, MAX_TITLE, "task title");
-    const dependsOn = Array.isArray(input?.dependsOn)
-      ? [...new Set(input.dependsOn.filter((v) => typeof v === "string"))].slice(0, MAX_DEPENDS)
-      : [];
-    const rows=this.load(scope);
-    if(dependsOn.some(id=>!rows.some(r=>r.id===id)))throw new Error("Missing task dependency");
-    const stamp = now();
-    const task: Task = {
-      id: newId(), title, status: "pending", dependsOn, createdAt: stamp, updatedAt: stamp,
-    };
-    this.save(scope, [...rows, task]);
-    return { ...task };
+    return this.mutate(scope, () => {
+      const title = bounded(input?.title, MAX_TITLE, "task title");
+      const dependsOn = Array.isArray(input?.dependsOn)
+        ? [
+            ...new Set(input.dependsOn.filter((v) => typeof v === "string")),
+          ].slice(0, MAX_DEPENDS)
+        : [];
+      const rows = this.load(scope);
+      if (dependsOn.some((id) => !rows.some((r) => r.id === id)))
+        throw new Error("Missing task dependency");
+      const stamp = now();
+      const task: Task = {
+        id: newId(),
+        title,
+        status: "pending",
+        dependsOn,
+        createdAt: stamp,
+        updatedAt: stamp,
+      };
+      this.save(scope, [...rows, task]);
+      return { ...task };
     });
   }
 
@@ -148,20 +179,27 @@ export class TaskStore {
     reason?: string,
     evidence?: string[],
   ): Task {
-    if(!identifier(id))throw new Error("Invalid task id");
-    return this.mutate(scope,()=>{
-    const rows = this.load(scope);
-    const row = rows.find((entry) => entry.id === id);
-    if (!row) throw new Error(`Unknown task ${id}`);
-    if(["in-progress","completed"].includes(status)&&row.dependsOn.some(dep=>!rows.some(r=>r.id===dep&&r.status==="completed")))throw new Error("Task dependency is not completed");
-    row.status = status;
-    row.updatedAt = now();
-    if (status === "blocked") row.reason = bounded(reason, MAX_REASON, "blocked reason");
-    else delete row.reason;
-    if (status === "completed") row.evidence = evidence;
-    else delete row.evidence;
-    this.save(scope, rows);
-    return { ...row, dependsOn: [...row.dependsOn] };
+    if (!identifier(id)) throw new Error("Invalid task id");
+    return this.mutate(scope, () => {
+      const rows = this.load(scope);
+      const row = rows.find((entry) => entry.id === id);
+      if (!row) throw new Error(`Unknown task ${id}`);
+      if (
+        ["in-progress", "completed"].includes(status) &&
+        row.dependsOn.some(
+          (dep) => !rows.some((r) => r.id === dep && r.status === "completed"),
+        )
+      )
+        throw new Error("Task dependency is not completed");
+      row.status = status;
+      row.updatedAt = now();
+      if (status === "blocked")
+        row.reason = bounded(reason, MAX_REASON, "blocked reason");
+      else delete row.reason;
+      if (status === "completed") row.evidence = evidence;
+      else delete row.evidence;
+      this.save(scope, rows);
+      return { ...row, dependsOn: [...row.dependsOn] };
     });
   }
 
@@ -172,10 +210,14 @@ export class TaskStore {
   /** A task closes with the observation that proves it, or it does not close. */
   complete(scope: string, id: string, evidence: string[]): Task {
     if (!Array.isArray(evidence) || !evidence.length)
-      throw new Error("A completed task requires the observation that proves it");
+      throw new Error(
+        "A completed task requires the observation that proves it",
+      );
     const ids = [...new Set(evidence)];
     if (ids.length > 20 || !ids.every(identifier))
-      throw new Error("A completed task accepts at most 20 valid observation ids");
+      throw new Error(
+        "A completed task accepts at most 20 valid observation ids",
+      );
     return this.transition(scope, id, "completed", undefined, ids);
   }
 
@@ -185,11 +227,20 @@ export class TaskStore {
     return this.transition(scope, id, "blocked", reason);
   }
 
-  remove(scope:string,id:string):void{this.mutate(scope,()=>{
-    const rows=this.load(scope);if(rows.some(r=>r.dependsOn.includes(id)))throw new Error("Task is still a dependency");this.save(scope,rows.filter(r=>r.id!==id));
-  });}
-  clear(scope:string):void{this.mutate(scope,()=>this.save(scope,[]));}
-
+  remove(scope: string, id: string): void {
+    this.mutate(scope, () => {
+      const rows = this.load(scope);
+      if (rows.some((r) => r.dependsOn.includes(id)))
+        throw new Error("Task is still a dependency");
+      this.save(
+        scope,
+        rows.filter((r) => r.id !== id),
+      );
+    });
+  }
+  clear(scope: string): void {
+    this.mutate(scope, () => this.save(scope, []));
+  }
 }
 
 const bounded = (value: unknown, max: number, label: string): string => {
@@ -197,7 +248,9 @@ const bounded = (value: unknown, max: number, label: string): string => {
     throw new Error(`Invalid ${label}`);
   const text = value.trim().slice(0, max);
   if (/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/u.test(text))
-    throw new Error(`Invisible control characters are not accepted in a ${label}`);
+    throw new Error(
+      `Invisible control characters are not accepted in a ${label}`,
+    );
   return text;
 };
 

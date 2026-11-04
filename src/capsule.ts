@@ -52,6 +52,13 @@ export interface Capsule {
     state: string;
     stages: { id: string; state: string }[];
   };
+  workflow?: {
+    reports: unknown[];
+    restitutions: unknown[];
+    capitalizations: unknown[];
+    cleanup: { id: string; status: string }[];
+    cleanupPolicy: string;
+  };
   /** The actions that wait for the operator. */
   approvals?: { id: string; action: string; justification: string }[];
   /** The commands the harness still owns. */
@@ -67,7 +74,8 @@ const MAX_OBSERVATIONS = 20;
 const MAX_OUTPUT = 600;
 
 const identifier = (value: unknown): value is string =>
-  typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/.test(value);
+  typeof value === "string" &&
+  /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/.test(value);
 
 /**
  * One task, or nothing.
@@ -96,7 +104,8 @@ export function capsuleTask(input: {
     : [];
   const status = input.status as CapsuleTaskStatus;
   if (status === "blocked") {
-    if (typeof input.reason !== "string" || !input.reason.trim()) return undefined;
+    if (typeof input.reason !== "string" || !input.reason.trim())
+      return undefined;
     return {
       id: input.id,
       title: input.title.slice(0, MAX_TITLE),
@@ -152,6 +161,7 @@ export function capsule(
   options: {
     observations?: number;
     mission?: Capsule["mission"];
+    workflow?: Capsule["workflow"];
     approvals?: Capsule["approvals"];
     processes?: Capsule["processes"];
     references?: Capsule["references"];
@@ -180,11 +190,28 @@ export function capsule(
       /* A proof that is gone proves nothing. */
     }
   }
-  const tasks = taskStore.list(scope).map(task=>capsuleTask(task)??{id:task.id,title:task.title,status:"blocked" as const,dependsOn:task.dependsOn,reason:"Stored task cannot justify its state; repair it before closure"})
+  const tasks = taskStore
+    .list(scope)
+    .map(
+      (task) =>
+        capsuleTask(task) ?? {
+          id: task.id,
+          title: task.title,
+          status: "blocked" as const,
+          dependsOn: task.dependsOn,
+          reason:
+            "Stored task cannot justify its state; repair it before closure",
+        },
+    )
     .map((task) => {
       if (task.status !== "completed" || !task.evidence) return task;
       const evidence = task.evidence.filter((id) => proofs.has(id));
-      if (!evidence.some((id) => proofs.get(id)?.success)) return {...task,status:"blocked" as const,reason:"Completion evidence is missing or unsuccessful"};
+      if (!evidence.some((id) => proofs.get(id)?.success))
+        return {
+          ...task,
+          status: "blocked" as const,
+          reason: "Completion evidence is missing or unsuccessful",
+        };
       return { ...task, evidence };
     })
     .filter((task): task is CapsuleTask => task !== undefined);
@@ -215,6 +242,7 @@ export function capsule(
     blocked: tasks.filter((task) => task.status === "blocked").length,
     observations: [...proofList, ...recent].slice(-MAX_OBSERVATIONS * 2),
     ...(options.mission ? { mission: options.mission } : {}),
+    ...(options.workflow ? { workflow: options.workflow } : {}),
     ...(options.approvals?.length ? { approvals: options.approvals } : {}),
     ...(options.processes?.length ? { processes: options.processes } : {}),
     ...(options.references?.length ? { references: options.references } : {}),
@@ -271,6 +299,12 @@ export function closingGate(value: Capsule): string {
     blockers.push(`${value.approvals.length} action(s) wait for the operator`);
   if (value.processes?.length)
     blockers.push(`${value.processes.length} command(s) still owned`);
+  const pendingCleanup =
+    value.workflow?.cleanup.filter((c) => c.status !== "completed") ?? [];
+  if (pendingCleanup.length)
+    blockers.push(
+      `${pendingCleanup.length} post-restitution cleanup action(s) not verified`,
+    );
   if (!blockers.length) return "";
   return [
     `${GATE_MARKER} The work is not finished:`,
