@@ -116,3 +116,17 @@ the session and the call); nothing rewrites one.
 **Why.** A claim is only checkable if the thing it rests on cannot be edited
 afterwards. A session log is a narrative; an observation is a datum.
 **Cost.** Two stores and a strict scope rule: evidence never crosses a project.
+
+## 2026-11-04 — Proof outcomes and concurrent updates
+
+The command supervisor writes a nonce-bound terminal result and full trace
+hash. A launch or stop is not evidence of success; an unknown recovered PID
+is never treated as completed. Descendants in the owned process group may
+not outlive a successful parent result. Complete output hashes detect changes
+beyond the displayed tail. Legacy rows keep their original proof metadata.
+
+Task locks cover the complete read-modify-write. Missing dependencies block
+execution, and old tasks never disappear due to tail slicing. A closed task
+with missing proof remains a continuity blocker. Finding verification binds
+the current finding revision to fresh controls in a distinct session; it
+never fabricates human approval. The native prompt hook supplies routing text.

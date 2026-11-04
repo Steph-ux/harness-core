@@ -78,3 +78,12 @@ as a session that taught nothing.
 - A new invariant needs a negative control: a test that shows the refusal.
 - No host name, no target name, no secret in `src/` (`npm run check`).
 - A new suite must be added to the runner's list, or it never runs.
+
+## Durable execution and verification
+
+`process-supervisor.cjs` owns one process group independently of the host and
+writes a durable terminal result. `process.ts` verifies all trace bytes and
+keeps unknown legacy identities distinct from successful outcomes. Task
+mutations hold a lock for the whole update. Verification payloads bind a
+finding content hash to fresh reproduction and negative-control observations.
+The prompt hook provides request text when the native context event omits it.

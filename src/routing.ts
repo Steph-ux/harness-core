@@ -209,6 +209,8 @@ export function requestText(event: any): string {
 
   for (const key of ["prompt", "text", "message"]) push(event?.[key]);
 
+  push(event?.prompt?.text);
+  for(const part of Array.isArray(event?.prompt?.parts)?event.prompt.parts:[])if(part?.type==="text")push(part.text);
   const messages = Array.isArray(event?.messages) ? event.messages : [];
   for (let index = messages.length - 1; index >= 0 && out.length < 3; index -= 1) {
     const message = messages[index];

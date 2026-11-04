@@ -187,7 +187,7 @@ function commandArguments(value: unknown): string[] {
 function waitForTerminalCommand(session: string, marker: string): void {
   for (let attempt = 0; attempt < 300; attempt++) {
     const pane = runCommand("tmux", ["capture-pane", "-p", "-t", session], 10000);
-    if (pane.includes(marker)) return;
+    if(pane.split("\n").some(line=>line.trim()===`${marker}:0`))return;
     spawnSync("sleep", ["0.1"]);
   }
   throw new Error("the evidence command did not finish within 30 seconds");
@@ -219,7 +219,7 @@ const stateRoot = () => stateDir();
 const DEBUG = process.env.HARNESS_PROOF_DEBUG === "1";
 
 /** Bookkeeping cannot prove itself; operational harness tools still leave observations. */
-const OWN_TOOL = /^(?:cyber_tasks|cyber_mission|cyber_approval|cyber_finding|cyber_review|cyber_memory|cyber_method|cyber_lessons)$/;
+const OWN_TOOL = /^(?:cyber_tasks|cyber_mission|cyber_approval|cyber_finding|cyber_review|cyber_memory|cyber_method|cyber_lessons|cyber_verification|cyber_report|cyber_capitalise|cyber_cleanup)$/;
 
 /** The first words of the injected operator block, used to detect a duplicate. */
 const OPERATOR_MARKER = "Operator rules.";
@@ -326,6 +326,8 @@ function outputText(result: any): string {
 function succeeded(event: any): boolean {
   if (event.status !== "completed") return false;
   const metadata = event.result?.metadata ?? {};
+  if(metadata.evidenceSuccess===false)return false;
+  if(event.tool==="cyber_process")return metadata.evidenceSuccess===true;
   if (metadata.status === "error" || metadata.status === "failed") return false;
   if (typeof metadata.exit === "number" && metadata.exit !== 0) return false;
   const output = event.result?.output;
@@ -549,6 +551,7 @@ export default {
       DEFAULT_DEADLINE_MS,
       MAX_DEADLINE_MS,
       ProcessRegistry,
+      processStatus, verifiedOutcome, publicProcess,
       readTrace,
       spawnTraced,
       stopProcess,
@@ -594,12 +597,13 @@ export default {
     // The skills the current turn routed to, per session. A finding for that
     // request needs the method loaded, not merely named in the prompt.
     const routedRequired = new Map<string, string[]>();
+    const requestBySession=new Map<string,string>();
     const lifecycleController = new AbortController();
     // The model of the request in flight, used by the independent verifier.
     let liveModel: { providerID: string; id: string } | undefined;
     // The sessions whose lessons were already extracted, and the ones being
     // extracted now.
-    const lessonChecked = new Set<string>();
+    const lessonChecked=new Map<string,number>();
     let lessonRunning = false;
 
     /**
@@ -627,7 +631,7 @@ export default {
         JSON.stringify({
           scope,
           sessionID,
-          observations: observations.map((item: any) => item.id),
+          observations: observations.map((item: any) => [item.id,item.hash]),
         }),
       );
       if (!observations.length) {
@@ -660,7 +664,7 @@ export default {
       let asked: { providerID: string; id: string } | null = null;
       for (const candidate of await verifierCandidates()) {
         try {
-          answer = await ctx.generate.text({ model: candidate, prompt });
+          answer = await boundedGenerate(candidate,prompt);
           asked = candidate;
           break;
         } catch (error) {
@@ -712,11 +716,8 @@ export default {
      * observations are not complete, and a session is read by the next one.
      */
     function pendingLessons(scope: string, current?: string): string[] {
-      const reviewed = new Set(
-        knowledge.audits(scope, "lessons.extracted", 200).flatMap((row: any) => {
-          try { return [JSON.parse(row.detail).sessionID]; } catch { return []; }
-        }),
-      );
+      const reviewed=new Set(knowledge.audits(scope,"lessons.extracted",200).flatMap((row:any)=>{try{return [JSON.parse(row.detail).digest];}catch{return [];}}));
+      const snapshotDigest=(id:string)=>hash(JSON.stringify({scope,sessionID:id,observations:knowledge.observationsForSession(id,scope,100).map((o:any)=>[o.id,o.hash])}));
       // A session is read by a later one. "Later" is a matter of time, not of
       // status: a host that never marked a session closed leaves it active
       // forever, and its work stays unread.
@@ -726,8 +727,8 @@ export default {
         .filter(
           (row: any) =>
             row.id !== current &&
-            !reviewed.has(row.id) &&
-            !lessonChecked.has(row.id) &&
+            !reviewed.has(snapshotDigest(row.id)) &&
+            Date.now()-(lessonChecked.get(row.id)??0)>60000 &&
             Number.isFinite(Date.parse(row.updatedAt)) &&
             Date.parse(row.updatedAt) < cutoff,
         )
@@ -805,7 +806,7 @@ export default {
         if (out.some((row) => row.providerID === model.providerID && row.id === model.id)) return;
         out.push({ providerID: model.providerID, id: model.id });
       };
-      add(requested);
+
       // The operator can pin the model that serves the harness: the host's own
       // default may refuse a request of its own, or cost more than the call is
       // worth. The environment wins; the file is how the choice survives a
@@ -819,36 +820,25 @@ export default {
           return "";
         }
       })();
-      if (pinned) {
-        const cut = pinned.indexOf("/");
-        if (cut > 0)
-          add({ providerID: pinned.slice(0, cut), id: pinned.slice(cut + 1) });
-      }
-      // A provider known to refuse a request of its own is not a candidate:
-      // trying it first is what left 67 sessions unread.
-      const usable = (model?: { providerID?: string; id?: string } | null) =>
-        Boolean(model?.providerID && model?.id) &&
-        model.providerID !== "opencode" &&
-        model.providerID !== "opencode-go";
-      if (usable(liveModel)) add(liveModel);
-      try {
-        const models = await ctx.model.list();
-        const listed = Array.isArray(models)
-          ? models
-          : ((models as any)?.data ?? []);
-        for (const model of listed) if (usable(model)) add(model);
-      } catch (error) {
-        debug(`model list failed: ${String(error)}`);
-      }
+      const allowed=new Set((process.env.HARNESS_VERIFIER_PROVIDERS??"").split(",").map(s=>s.trim()).filter(Boolean));
+      if(pinned){const cut=pinned.indexOf("/");if(cut<1||cut===pinned.length-1)throw new Error("Invalid pinned verifier");const model={providerID:pinned.slice(0,cut),id:pinned.slice(cut+1)};if(requested&&(requested.providerID!==model.providerID||requested.id!==model.id))throw new Error("Requested model conflicts with pinned verifier");return [model];}
+      if(requested){if(requested.providerID!==liveModel?.providerID&&!allowed.has(requested.providerID))throw new Error("Verifier provider is outside the operator policy");return [requested];}
+      if(liveModel&&!["opencode","opencode-go"].includes(liveModel.providerID))add(liveModel);
+      if(allowed.size){const models=await ctx.model.list();for(const model of Array.isArray(models)?models:models?.data??[])if(allowed.has(model.providerID))add(model);}
       // An empty list is a refusal with a reason, not a silent no-op: the
       // caller reports it instead of recording a review that never ran.
       if (!out.length)
         throw new Error(
           "no model can serve the harness: the OpenCode free tier refuses the requests the harness makes, and no other provider is configured",
         );
-      return out.slice(0, 6);
+      return out.slice(0, 3);
     }
 
+    // The pinned API accepts model/prompt only. No server-side token cap is claimed.
+    async function boundedGenerate(model:any,prompt:string){
+      const controller=new AbortController(),signal=AbortSignal.any([controller.signal,lifecycleController.signal]);let timer:any;
+      try{const deadline=new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(new Error("Verifier deadline exceeded"));},30000);});const value:any=await Promise.race([ctx.generate.text({model,prompt},{signal}),deadline]);if(typeof value?.text!=="string"||value.text.length>24000)throw new Error("Invalid or oversized verifier output");return value;}finally{clearTimeout(timer);controller.abort();}
+    }
     /**
      * The observation ids of a session.
      *
@@ -924,6 +914,7 @@ export default {
         process.env.HARNESS_MEMORY_CHARS ?? DEFAULT_CONFIG.memoryMaxChars,
       ),
     };
+    await ctx.session.hook("prompt",async(event:any)=>{const text=requestText(event);if(text)requestBySession.set(event.sessionID,text);});
     await ctx.session.hook("context", async (event: any) => {
       if (!Array.isArray(event.system)) return;
       const scope = await scopeOf(event.sessionID);
@@ -958,7 +949,7 @@ export default {
           } : undefined,
           approvals: platform.approvals(scope, "pending", 20).map(({ id, action, justification }: any) => ({ id, action: action.slice(0, 200), justification: justification.slice(0, 400) })),
           processes: processes
-            .withStatus(scope).filter((entry) => entry.status === "running").slice(-20)
+            .withStatus(scope).filter(entry=>["running","unknown"].includes(entry.status))
             .map((entry) => ({
               id: entry.id,
               command: entry.command.slice(0, 500),
@@ -1016,7 +1007,7 @@ export default {
         // The method that covers this request. The route is decided by a
         // keyword matcher, never by a model: a model that is handed sixty
         // skills picks the tool it already knows, which is the whole problem.
-        const routing = routeFor(requestText(event));
+        const routing = routeFor(requestText(event)||requestBySession.get(event.sessionID)||"");
         // HARNESS_ROUTER=off is the control arm of the A/B: the same request
         // without the map, and without the load the map would require.
         const routerOff = (process.env.HARNESS_ROUTER ?? "").toLowerCase() === "off";
@@ -1103,7 +1094,7 @@ export default {
             void (async () => {
               try {
                 for (const sessionID of pending) {
-                  lessonChecked.add(sessionID);
+                  lessonChecked.set(sessionID,Date.now());
                   try {
                     const outcome = await extractLessons(scope, sessionID);
                     debug(
@@ -1152,7 +1143,7 @@ export default {
      * observation supports it, a later correction replaces it, and a method
      * nobody used is archived.
      */
-    await ctx.skill.transform(async (editor: any) => {
+    await ctx.skill.transform((editor: any) => {
       const scope = scopeFor(instanceCwd);
       const active = skills.active(scope);
       const wanted = new Set(active.map((entry) => entry.revision.name));
@@ -1205,6 +1196,12 @@ export default {
     });
 
     await ctx.tool.transform((editor: any) => {
+      editor.add({name:"cyber_verification",description:"Bind fresh reproduction and negative-control observations from this independent session to the finding revision.",input:{type:"object",properties:{action:{type:"string",enum:["attest"]},findingId:{type:"string"},checks:{type:"array",items:{type:"object",properties:{observationId:{type:"string"},contains:{type:"string"},purpose:{type:"string",enum:["reproduction","positive-control","negative-control"]}},required:["observationId","contains","purpose"],additionalProperties:false}}},required:["action","findingId","checks"],additionalProperties:false},execute:async(input:any,context:any)=>{
+        if(input.action!=="attest")throw new Error("Invalid verification action");
+        const scope=await scopeOf(context.sessionID),sessionId=ensureSession(context.sessionID,scope),payload=platform.verificationPayload(scope,input.findingId,sessionId,input.checks);
+        return{content:JSON.stringify(knowledge.recordObservation({id:observationId(context.sessionID,`${context.id}:verification`),sessionId,scope,tool:"harness:verification",input:{findingId:input.findingId,runId:payload.runId},output:JSON.stringify(payload),success:true,timestamp:new Date().toISOString()}))};
+      }});
+
       editor.add({
         name: "cyber_tasks",
         description:
@@ -1732,7 +1729,7 @@ export default {
               );
               const loaded = new Set(
                 seen
-                  .filter((row: any) => row.tool === "skill")
+                  .filter((row: any) => row.tool === "skill"&&row.success)
                   .map((row: any) => String(row.input?.id ?? "")),
               );
               const missing = required.filter((id) => !loaded.has(id));
@@ -1775,7 +1772,7 @@ export default {
             return {
               content: JSON.stringify({
                 finding,
-                sources: finding.sources.map((id) => platform.chunk(scope, id)),
+                sources: finding.sources,
                 evidence: platform.evidence(scope, finding.evidence),
               }),
             };
@@ -1829,7 +1826,7 @@ export default {
           if (!["run", "list", "read", "stop"].includes(input.action))
             throw new Error("Invalid process action");
           if (input.action === "list")
-            return { content: JSON.stringify(processes.withStatus(scope)) };
+            return {content:JSON.stringify(processes.withStatus(scope).map(publicProcess)),metadata:{evidenceSuccess:false}};
           if (input.action === "run") {
             const argv = commandArguments(input.argv);
             const command = argv.map(shellQuote).join(" ");
@@ -1855,17 +1852,18 @@ export default {
             });
             let stored;
             try {
-              stored = processes.add({ ...record, pid: started.pid });
+              stored = processes.add({ ...record, ...started });
             } catch (error) {
               stopProcess(started.pid);
               throw error;
             }
             return {
               content: JSON.stringify({
-                ...stored,
+                ...publicProcess(stored),
                 trace: record.logPath,
-                note: "The command is detached and keeps running. Read the trace with action read.",
+                note: "Launch is not proof of success. Read after termination to obtain the exit code and verified trace.",
               }),
+              metadata:{evidenceSuccess:false},
             };
           }
           if (!input.id) throw new Error("a command id is required");
@@ -1873,17 +1871,12 @@ export default {
             const record = processes.get(scope, input.id);
             await assertProcessPermission(ctx, context, `kill -TERM -- -${record.pid}`);
             const stopped = processes.stop(scope, input.id);
-            return { content: JSON.stringify(stopped) };
+            return { content: JSON.stringify(publicProcess(stopped)),metadata:{evidenceSuccess:false} };
           }
-          const record = processes.get(scope, input.id);
-          return {
-            content: JSON.stringify({
-              ...record,
-              status: processes.withStatus(scope).find((entry) => entry.id === record.id)
-                ?.status,
-              trace: readTrace(record.logPath, input.tail ?? 200),
-            }),
-          };
+          const record=processes.get(scope,input.id),outcome=verifiedOutcome(record);
+          const {runKey,...result}=outcome??{} as any;
+          return {content:JSON.stringify({...publicProcess(record),...result,status:outcome?.status??processStatus(record),trace:readTrace(record.logPath,input.tail??200)}),metadata:{evidenceSuccess:outcome?.status==="succeeded"&&outcome.exitCode===0}};
+
         },
       });
 
@@ -1942,12 +1935,7 @@ export default {
               description:
                 "List the windows of the display, capture one of them, or capture the terminal of the harness.",
             },
-            argv: {
-              type: "array",
-              items: { type: "string" },
-              description:
-                "The executable and arguments to show, for action evidence. Shell syntax is intentionally not accepted.",
-            },
+            processId:{type:"string",description:"The finished process whose verified recorded trace is rendered. No command is rerun."},
             window: {
               type: "string",
               description:
@@ -1978,10 +1966,13 @@ export default {
             // is the terminal of the operator.
             if (!input.observationId)
               throw new Error("an evidence capture needs the observation it attests");
-            knowledge.evidence(scope, [input.observationId]);
-            const argv = commandArguments(input.argv);
-            const line = argv.map(shellQuote).join(" ");
-            await assertProcessPermission(ctx, context, line);
+            const proof=knowledge.evidence(scope,[input.observationId])[0];
+            if(!input.processId||proof.tool!=="cyber_process"||proof.input?.action!=="read"||proof.input?.id!==input.processId)throw new Error("Capture requires the observation of this process read");
+            const record=processes.get(scope,input.processId),outcome=verifiedOutcome(record);
+            if(!outcome||outcome.status==="running")throw new Error("A capture requires a finished, verified trace");
+            const rendered=path.join(stateRoot(),"captures",`trace-${randomUUID()}.txt`);fs.mkdirSync(path.dirname(rendered),{recursive:true,mode:0o700});
+            fs.writeFileSync(rendered,`RECORDED TRACE / ${record.id} / ${outcome.status} / ${outcome.finishedAt}\n${readTrace(record.logPath,2000)}`.replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g,"").replace(/\x1b\[[0-?]*[ -/]*[@-~]/g,"").replace(/[\x00-\x08\x0b-\x1f\x7f]/g,""),{mode:0o600});
+            const line=`cat -- ${shellQuote(rendered)}`;
             const display = ensurePrivateDisplay();
             const session = EVIDENCE_SESSION;
             const alive =
@@ -2027,6 +2018,7 @@ export default {
                 "the capture does not match the window it claims to show, so it is refused",
               );
             const link = {
+              kind:"rendered-trace",processId:input.processId,traceHash:outcome.traceHash,
               observationId: input.observationId ?? "",
               path: dest,
               window: window.id,
@@ -2161,6 +2153,7 @@ export default {
             return { content: JSON.stringify(loaded) };
           }
           if (input.action === "promote") {
+            await assertOperatorDecision(ctx,context,`promote-global:${input.name}`);
             if (!input.name) throw new Error("promote requires a method name");
             const revision = skills.promote(scope, input.name);
             if (typeof ctx.skill?.reload === "function") await ctx.skill.reload();
@@ -2273,7 +2266,7 @@ export default {
             JSON.stringify({
               scope,
               claim: input.claim,
-              observations: observations.map((item: any) => item.id),
+              observations: observations.map((item: any) => [item.id,item.hash]),
             }),
           );
           const proofSessionID = ensureSession(context.sessionID, scope);
@@ -2308,7 +2301,7 @@ export default {
             let lastError: unknown;
             for (const candidate of candidates) {
               try {
-                answer = await ctx.generate.text({ model: candidate, prompt });
+                answer = await boundedGenerate(candidate,prompt);
                 break;
               } catch (error) {
                 lastError = error;

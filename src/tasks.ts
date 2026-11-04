@@ -7,11 +7,11 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { atomicWrite, newId, now } from "./util";
+import { assertPlainPath, atomicWrite, newId, now } from "./util";
 
 export type TaskStatus = "pending" | "in-progress" | "completed" | "blocked";
 const STATUS: TaskStatus[] = ["pending", "in-progress", "completed", "blocked"];
-const MAX_TASKS = 20;
+const MAX_TASKS = 1000;
 const MAX_TITLE = 200;
 const MAX_REASON = 400;
 const MAX_DEPENDS = 10;
@@ -36,9 +36,15 @@ export class TaskStore {
   }
 
   private file(scope: string): string {
+    if(!/^[a-z][a-z0-9-]{0,95}$/.test(scope))throw new Error("Invalid task scope");
     return path.join(this.stateRoot, `tasks-${scope}.json`);
   }
 
+  private mutate<T>(scope:string,fn:()=>T):T {
+    const lock=`${this.file(scope)}.lock`;assertPlainPath(lock);let fd:number;
+    try{fd=fs.openSync(lock,"wx",0o600);}catch(error){if((error as NodeJS.ErrnoException).code==="EEXIST")throw new Error("Concurrent task update; retry from the current state");throw error;}
+    try{return fn();}finally{fs.closeSync(fd);fs.unlinkSync(lock);}
+  }
   /**
    * The task list is read from the file on every use.
    *
@@ -50,6 +56,7 @@ export class TaskStore {
   private load(scope: string): Task[] {
     let rows: Task[] = [];
     try {
+      assertPlainPath(this.file(scope));
       const value = JSON.parse(fs.readFileSync(this.file(scope), "utf8"));
       if (!Array.isArray(value) || !value.every((row) => task(row)))
         throw new Error("Invalid task storage");
@@ -61,7 +68,8 @@ export class TaskStore {
   }
 
   private save(scope: string, rows: Task[]): Task[] {
-    const kept = rows.slice(-MAX_TASKS);
+    if(rows.length>MAX_TASKS)throw new Error("Task capacity reached; archive completed work explicitly");
+    const kept = rows;
     atomicWrite(this.file(scope), JSON.stringify(kept, null, 1));
     return kept;
   }
@@ -104,9 +112,9 @@ export class TaskStore {
     const open = rows.filter(
       (row) => row.status === "pending" || row.status === "in-progress",
     );
-    const openIds = new Set(open.map((row) => row.id));
+    const completed = new Set(rows.filter(row=>row.status==="completed").map(row=>row.id));
     return open
-      .filter((row) => !row.dependsOn.some((id) => openIds.has(id)))
+      .filter((row) => row.dependsOn.every(id=>completed.has(id)))
       .map((row) => ({ ...row, dependsOn: [...row.dependsOn] }));
   }
 
@@ -117,16 +125,20 @@ export class TaskStore {
   }
 
   add(scope: string, input: { title: string; dependsOn?: string[] }): Task {
+    return this.mutate(scope,()=>{
     const title = bounded(input?.title, MAX_TITLE, "task title");
     const dependsOn = Array.isArray(input?.dependsOn)
       ? [...new Set(input.dependsOn.filter((v) => typeof v === "string"))].slice(0, MAX_DEPENDS)
       : [];
+    const rows=this.load(scope);
+    if(dependsOn.some(id=>!rows.some(r=>r.id===id)))throw new Error("Missing task dependency");
     const stamp = now();
     const task: Task = {
       id: newId(), title, status: "pending", dependsOn, createdAt: stamp, updatedAt: stamp,
     };
-    this.save(scope, [...this.load(scope), task]);
+    this.save(scope, [...rows, task]);
     return { ...task };
+    });
   }
 
   private transition(
@@ -136,10 +148,12 @@ export class TaskStore {
     reason?: string,
     evidence?: string[],
   ): Task {
-    identifier(id);
+    if(!identifier(id))throw new Error("Invalid task id");
+    return this.mutate(scope,()=>{
     const rows = this.load(scope);
     const row = rows.find((entry) => entry.id === id);
     if (!row) throw new Error(`Unknown task ${id}`);
+    if(["in-progress","completed"].includes(status)&&row.dependsOn.some(dep=>!rows.some(r=>r.id===dep&&r.status==="completed")))throw new Error("Task dependency is not completed");
     row.status = status;
     row.updatedAt = now();
     if (status === "blocked") row.reason = bounded(reason, MAX_REASON, "blocked reason");
@@ -148,6 +162,7 @@ export class TaskStore {
     else delete row.evidence;
     this.save(scope, rows);
     return { ...row, dependsOn: [...row.dependsOn] };
+    });
   }
 
   start(scope: string, id: string): Task {
@@ -170,16 +185,11 @@ export class TaskStore {
     return this.transition(scope, id, "blocked", reason);
   }
 
-  remove(scope: string, id: string): void {
-    this.save(
-      scope,
-      this.load(scope).filter((entry) => entry.id !== id),
-    );
-  }
+  remove(scope:string,id:string):void{this.mutate(scope,()=>{
+    const rows=this.load(scope);if(rows.some(r=>r.dependsOn.includes(id)))throw new Error("Task is still a dependency");this.save(scope,rows.filter(r=>r.id!==id));
+  });}
+  clear(scope:string):void{this.mutate(scope,()=>this.save(scope,[]));}
 
-  clear(scope: string): void {
-    this.save(scope, []);
-  }
 }
 
 const bounded = (value: unknown, max: number, label: string): string => {

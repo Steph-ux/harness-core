@@ -34,6 +34,9 @@ export interface Observation {
   success: boolean;
   timestamp: string;
   hash: string;
+  rawHash?: string;
+  rawBytes?: number;
+  truncated?: boolean;
 }
 export interface EvidenceCheck {
   observationId: string;

@@ -186,8 +186,8 @@ module.exports = async ({ assert, jiti }) => {
   );
   const after = capsule(taskStore, store, scope, "ses_ctx");
   assert.ok(
-    !after.tasks.some((task) => task.id === orphan.id),
-    "a task whose proof cannot be resolved does not travel",
+    after.tasks.some((task) => task.id === orphan.id&&task.status==="blocked"),
+    "a task whose proof cannot be resolved remains blocked",
   );
   const failedProof = store.recordObservation({
     id: "obs-failed-proof", sessionId: "ses_ctx", scope, tool: "shell",
@@ -197,8 +197,8 @@ module.exports = async ({ assert, jiti }) => {
   const failedTask = taskStore.add(scope, { title: "closed with failed proof" });
   taskStore.complete(scope, failedTask.id, [failedProof.id]);
   assert.ok(
-    !capsule(taskStore, store, scope, "ses_ctx").tasks.some((task) => task.id === failedTask.id),
-    "a completed task backed only by failures does not travel",
+    capsule(taskStore, store, scope, "ses_ctx").tasks.some((task) => task.id === failedTask.id&&task.status==="blocked"),
+    "a completed task backed only by failures remains blocked",
   );
   const tooMany = taskStore.add(scope, { title: "too many proofs" });
   assert.throws(

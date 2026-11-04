@@ -180,11 +180,11 @@ export function capsule(
       /* A proof that is gone proves nothing. */
     }
   }
-  const tasks = capsuleTasks(taskStore.list(scope))
+  const tasks = taskStore.list(scope).map(task=>capsuleTask(task)??{id:task.id,title:task.title,status:"blocked" as const,dependsOn:task.dependsOn,reason:"Stored task cannot justify its state; repair it before closure"})
     .map((task) => {
       if (task.status !== "completed" || !task.evidence) return task;
       const evidence = task.evidence.filter((id) => proofs.has(id));
-      if (!evidence.some((id) => proofs.get(id)?.success)) return undefined;
+      if (!evidence.some((id) => proofs.get(id)?.success)) return {...task,status:"blocked" as const,reason:"Completion evidence is missing or unsuccessful"};
       return { ...task, evidence };
     })
     .filter((task): task is CapsuleTask => task !== undefined);

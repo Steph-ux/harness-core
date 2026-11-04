@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import type { StorePort, WorkerResult } from "./types";
 import { WORKER_ROLES } from "./types";
@@ -72,9 +73,9 @@ export class PlatformStore {
     const version = Number(
       this.db.prepare("PRAGMA user_version").get()!.user_version,
     );
-    if (version > 3)
+    if (version > 4)
       throw new Error("Platform database version is newer than this harness");
-    if (version === 3) return;
+    if (version === 4) return;
     if (version === 0)
       this.db.exec(`BEGIN IMMEDIATE;
    CREATE TABLE missions(id TEXT PRIMARY KEY,scope TEXT NOT NULL,title TEXT NOT NULL,boundaries TEXT NOT NULL,created TEXT NOT NULL,UNIQUE(id,scope));
@@ -125,6 +126,7 @@ export class PlatformStore {
       CREATE INDEX approvals_scope ON approvals(scope,status,created);
       PRAGMA user_version=3;COMMIT;`);
     }
+    if(version<4)this.db.exec(`BEGIN IMMEDIATE; ALTER TABLE finding_verifications ADD COLUMN detail TEXT NOT NULL DEFAULT '{}'; PRAGMA user_version=4; COMMIT;`);
   }
   private open(scope: string) {
     if (this.closed) throw new Error("Platform store is closed");
@@ -538,10 +540,25 @@ export class PlatformStore {
       throw new Error("Report stage needs report workers");
     const ids = [
       ...new Set(
-        results.flatMap((r) => [...r.evidence, ...(r.observationIds ?? [])]),
+        results.flatMap((r) => [...(r.evidence ?? []), ...(r.observationIds ?? [])]),
       ),
     ];
     this.evidenceStore.evidence(scope, ids);
+    for(const r of results)if(r.status==="completed"){
+      const proofs=[...(r.evidence??[]),...(r.observationIds??[])];
+      if(!proofs.length)throw new Error("A completed stage requires observed evidence");
+      if(!this.evidenceStore.evidence(scope,proofs).some(o=>o.success))throw new Error("A completed stage requires successful evidence");
+    }
+    if(node==="report"){
+      const table=this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='workflow_reports'").get();
+      const latest=table?this.db.prepare("SELECT * FROM workflow_reports WHERE scope=? AND mission_id=? ORDER BY rowid DESC LIMIT 1").get(scope,id):undefined;
+      if(!latest||latest.reviewed!==1)throw new Error("Report stage requires a registered, visually reviewed report artifact");
+      const snapshot=parse(latest.snapshot),payload=parse(latest.payload);
+      if(snapshot.sourceHash!==this.reportFingerprint(scope,id))throw new Error("Report snapshot is stale");
+      const check=(file:string,expected:string)=>{assertPlainPath(file);if(createHash("sha256").update(fs.readFileSync(file)).digest("hex")!==expected)throw new Error("Reviewed report content changed");};
+      check(payload.snapshotPath,payload.snapshotHash);
+      for(const artifactId of payload.artifacts){const row=this.db.prepare("SELECT payload FROM workflow_artifacts WHERE id=? AND scope=? AND mission_id=?").get(artifactId,scope,id);if(!row)throw new Error("Reviewed report artifact missing");const artifact=parse(row.payload);check(artifact.path,artifact.sha256);}
+    }
     // The checkpoint keeps what actually proves the stage. A worker may report
     // its evidence as observation ids; both are evidence, and the recorded
     // result must not hide one of them, or a verification stage would look
@@ -959,7 +976,8 @@ export class PlatformStore {
               observationId: String(v.observation_id),
               hash: String(v.hash),
               attempt: Number(v.attempt),
-              approvedBy: "user",
+              verifiedBy: parse(v.detail),
+              humanApproval: null,
               timestamp: String(v.timestamp),
             }
           : null;
@@ -974,6 +992,27 @@ export class PlatformStore {
       )
       .all(scope, missionId)
       .map((r) => this.finding(scope, String(r.id)));
+  }
+  findingHash(scope:string,id:string){
+    const f=this.finding(scope,id);return hash(json({id:f.id,missionId:f.missionId,title:f.title,severity:f.severity,description:f.description,limitations:f.limitations,checks:f.checks,evidence:f.evidence,sources:f.sources.map(s=>({id:s.id,hash:s.hash}))}));
+  }
+  reportFingerprint(scope:string,missionId:string){
+    const m=this.mission(scope,missionId);return hash(json({missionId,scope,boundaries:m.boundaries,findings:this.findings(scope,missionId).map(f=>({id:f.id,hash:this.findingHash(scope,f.id),status:f.status,verification:f.verification}))}));
+  }
+  private checkVerification(scope:string,finding:ReturnType<PlatformStore["finding"]>,checks:FindingProposal["checks"],sessionId:string){
+    if(!Array.isArray(checks)||checks.length<2||checks.length>30)throw new Error("Verification needs reproduction and negative controls");
+    const purposes=new Set(checks.map(c=>c.purpose));if(!purposes.has("reproduction")||!purposes.has("negative-control"))throw new Error("Verification needs reproduction and negative controls");
+    const initial=this.evidenceStore.evidence(scope,finding.evidence),proofs=this.evidenceStore.evidence(scope,checks.map(c=>c.observationId));
+    if(proofs.some(o=>!o.success||o.sessionId!==sessionId||finding.evidence.includes(o.id)||initial.some(old=>old.sessionId===o.sessionId)))throw new Error("Verification requires fresh successful observations from a distinct session");
+    for(const c of checks){
+      if(typeof c.contains!=="string"||c.contains.trim().length<4||!proofs.some(o=>o.id===c.observationId&&o.output.includes(c.contains)))throw new Error("Verification control lacks observed evidence");
+      if(!finding.checks.some(expected=>expected.purpose===c.purpose&&expected.contains===c.contains))throw new Error("Verification does not test the finding's declared criterion");
+    }
+    if(checks.filter(c=>c.purpose==="reproduction").some(c=>checks.some(n=>n.purpose==="negative-control"&&n.observationId===c.observationId)))throw new Error("Verification controls must be distinct");
+  }
+  verificationPayload(scope:string,id:string,sessionId:string,checks:FindingProposal["checks"]){
+    const finding=this.finding(scope,id);this.checkVerification(scope,finding,checks,sessionId);
+    return {type:"finding-verification",findingId:id,findingHash:this.findingHash(scope,id),runId:newId(),verdict:"confirmed",checks};
   }
   verifyFinding(scope: string, id: string, verificationId?: string) {
     const f = this.finding(scope, id),
@@ -1020,6 +1059,9 @@ export class PlatformStore {
     const observation = this.evidenceStore.evidence(scope, [verificationId])[0];
     if (!observation.success)
       throw new Error("Independent verification observation failed");
+    let attestation:any;try{attestation=JSON.parse(observation.output);}catch{throw new Error("A linked verification attestation is required");}
+    if(observation.tool!=="harness:verification"||attestation.findingId!==id||attestation.findingHash!==this.findingHash(scope,id)||attestation.verdict!=="confirmed")throw new Error("Verification attestation is unrelated or stale");
+    this.checkVerification(scope,f,attestation.checks,observation.sessionId);
     const observations = this.evidenceStore.evidence(scope, f.evidence);
     if (
       f.checks.some(
@@ -1049,7 +1091,7 @@ export class PlatformStore {
       );
     this.db
       .prepare(
-        "INSERT INTO finding_verifications VALUES(?,?,?,?,?,?) ON CONFLICT(finding_id)DO UPDATE SET observation_id=excluded.observation_id,hash=excluded.hash,attempt=excluded.attempt,timestamp=excluded.timestamp",
+        "INSERT INTO finding_verifications(finding_id,scope,observation_id,hash,attempt,timestamp,detail) VALUES(?,?,?,?,?,?,?) ON CONFLICT(finding_id)DO UPDATE SET observation_id=excluded.observation_id,hash=excluded.hash,attempt=excluded.attempt,timestamp=excluded.timestamp,detail=excluded.detail",
       )
       .run(
         id,
@@ -1058,6 +1100,7 @@ export class PlatformStore {
         observation.hash,
         verification.attempt,
         now(),
+        json({sessionId:observation.sessionId,runId:attestation.runId,kind:"technical-reproduction"}),
       );
     this.db
       .prepare(

@@ -74,3 +74,12 @@ answered (`lessons.extracted.model`).
 
 Design decisions and their reasons: `DECISIONS.md`. Module-level map:
 `src/ARCHITECTURE.md`. Keep both current when an invariant changes.
+
+## Proof corrections
+
+A process launch is not a successful execution. Read its durable result and
+verify its whole trace before closing work. Unknown recovered processes stay
+unknown. A completed stage needs successful evidence; verification must bind
+fresh reproduction and negative controls from another session. Never invent a
+human approval from technical verification. Cleanup of mission resources is
+permitted only after recorded restitution of the reviewed report.
