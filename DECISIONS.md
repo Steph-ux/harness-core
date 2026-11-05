@@ -3,6 +3,20 @@
 One entry per decision that is expensive to reverse. Each states what was
 decided, why, and what it costs. New entries go at the top.
 
+## 2026-11-05 — The engagement root anchors the evidence
+
+**Decision.** `cyber_mission action=create` takes a `root`: the directory that
+owns the engagement. Captures are written under `<root>/preuves/captures`, the
+report artifacts must stay under `<root>/rapport-vN`, and the snapshot returns
+that `reportDir`. A mission created without a root keeps the session working
+directory the harness used before.
+**Why.** Evidence was landing wherever the agent happened to run: captures in
+the harness state, PoCs in `/tmp`, reports next to the notes. A delivered
+mission could not be told apart from its own working files.
+**Cost.** The root is validated once, at creation (absolute, existing directory,
+no symlink), and cannot be changed afterwards. A mission created without one
+keeps the loose behaviour, so the anchor has to be declared deliberately.
+
 ## 2026-11-04 — A launch is not a proof outcome
 
 **Decision.** The supervisor writes a nonce-bound terminal result carrying the
