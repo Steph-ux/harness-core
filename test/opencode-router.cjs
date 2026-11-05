@@ -66,18 +66,32 @@ module.exports = async ({ assert, jiti }) => {
   );
   assert.match(pasted.block, /^Harness routing\./, "the map is still there");
 
-  // Every skill named by a route must exist: on disk, or shipped by the host.
+  // Every skill named by a route must exist. The two authored procedures ship
+  // with this repository, so they are always checked here; the method skills
+  // are provisioned by the host and can only be checked where it has them.
   const BUILTIN_SKILLS = new Set(["opencode"]);
-  const skillsDir = path.join(os.homedir(), ".config", "opencode", "skills");
-  if (fs.existsSync(skillsDir)) {
-    const entries = new Set(fs.readdirSync(skillsDir));
-    for (const route of ROUTES) {
-      for (const skill of route.skills) {
-        assert.ok(
-          BUILTIN_SKILLS.has(skill) || entries.has(skill) || entries.has(`${skill}.md`),
-          `route ${route.id} names a skill that exists: ${skill}`,
-        );
-      }
+  const SHIPPED_SKILLS = new Set(["rapports-cyber", "capitaliser-cyber"]);
+  const repoSkills = path.join(CORE, ".opencode", "skills");
+  const hostSkills = path.join(os.homedir(), ".config", "opencode", "skills");
+  const hasHost = fs.existsSync(hostSkills);
+  const entries = new Set(
+    [repoSkills, hostSkills]
+      .filter((dir) => fs.existsSync(dir))
+      .flatMap((dir) => fs.readdirSync(dir)),
+  );
+  for (const skill of SHIPPED_SKILLS)
+    assert.ok(
+      fs.existsSync(path.join(repoSkills, skill)),
+      `${skill} ships with the repository`,
+    );
+  for (const route of ROUTES) {
+    for (const skill of route.skills) {
+      if (BUILTIN_SKILLS.has(skill)) continue;
+      if (!SHIPPED_SKILLS.has(skill) && !hasHost) continue;
+      assert.ok(
+        entries.has(skill) || entries.has(`${skill}.md`),
+        `route ${route.id} names a skill that exists: ${skill}`,
+      );
     }
   }
 
