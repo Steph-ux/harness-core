@@ -145,13 +145,73 @@ module.exports = async ({ assert, jiti }) => {
       progress: () => {},
       signal: new AbortController().signal,
     });
-  fixture.ctx.permission.assert = async () => { throw new Error("capture denied"); };
-  await assert.rejects(
-    () => call({ action: "evidence", argv: ["echo", "blocked"], observationId: captureObservation }),
-    /observation of this process read/,
-    "an unrelated command cannot be rerun as visual evidence",
+  // A capture renders the recorded trace of a finished command, and the proof
+  // it rests on is the observation of that read, never the launch.
+  const command = (input) =>
+    fixture.tools.get("cyber_process").execute(input, {
+      sessionID: "ses_cap",
+      agent: "build",
+      messageID: "msg_cap",
+      id: "call-process",
+      progress: () => {},
+      signal: new AbortController().signal,
+    });
+  const { ProcessRegistry, processStatus } = jiti(
+    path.join(CORE, "src", "process.ts"),
   );
-  fixture.ctx.permission.assert = async () => {};
+  const registry = new ProcessRegistry(state);
+  const ran = JSON.parse(
+    (
+      await command({
+        action: "run",
+        argv: [process.execPath, "-e", `console.log("marqueur-harness")`],
+      })
+    ).content,
+  );
+  const until = async (predicate) => {
+    const end = Date.now() + 8000;
+    while (!predicate() && Date.now() < end)
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.ok(predicate(), "the command reached a terminal state");
+  };
+  await until(() =>
+    ["succeeded", "failed", "timed_out", "stopped"].includes(
+      processStatus(registry.get(ran.scope, ran.id)),
+    ),
+  );
+  const read = JSON.parse((await command({ action: "read", id: ran.id })).content);
+  assert.match(read.trace, /marqueur-harness/, "the trace carries the output");
+  await fixture.hooks.get("execute.after")({
+    tool: "cyber_process",
+    sessionID: "ses_cap",
+    id: "call-process-read",
+    input: { action: "read", id: ran.id },
+    status: "completed",
+    result: { content: JSON.stringify(await command({ action: "read", id: ran.id })) },
+  });
+  const readObservation = observationId("ses_cap", "call-process-read");
+
+  // The observation must be the read of the process that is rendered.
+  await assert.rejects(
+    () =>
+      call({
+        action: "evidence",
+        processId: ran.id,
+        observationId: captureObservation,
+      }),
+    /observation of this process read/,
+    "an unrelated command cannot be rendered as visual evidence",
+  );
+  await assert.rejects(
+    () =>
+      call({
+        action: "evidence",
+        processId: "process-absent",
+        observationId: readObservation,
+      }),
+    /observation of this process read/,
+    "another process id does not inherit the read",
+  );
 
   const display = process.env.DISPLAY;
   if (!display) {
@@ -178,21 +238,27 @@ module.exports = async ({ assert, jiti }) => {
       );
     }
 
-    // The evidence terminal of the harness runs a real command, on a display
-    // of its own, and the capture shows it.
+    // The evidence terminal of the harness renders the recorded trace of the
+    // finished command, on a display of its own.
     const shot = JSON.parse(
       (
         await call({
           action: "evidence",
-          argv: ["echo", "marqueur-harness"],
-          observationId: captureObservation,
+          processId: ran.id,
+          observationId: readObservation,
         })
       ).content,
     );
     assert.equal(
       shot.observationId,
-      captureObservation,
+      readObservation,
       "the capture is linked to the observation it attests",
+    );
+    assert.equal(shot.processId, ran.id, "the capture names the process it renders");
+    assert.match(
+      String(shot.traceHash ?? ""),
+      /^[0-9a-f]{64}$/,
+      "the capture binds the whole recorded trace",
     );
     assert.ok(shot.bytes > 32, "the capture has content");
     assert.ok(
@@ -222,7 +288,7 @@ module.exports = async ({ assert, jiti }) => {
     assert.equal(audits.length, 1, "the capture is recorded in the store");
     assert.match(
       audits[0].detail,
-      new RegExp(captureObservation),
+      new RegExp(readObservation),
       "the record names the observation it attests",
     );
     store.close();
