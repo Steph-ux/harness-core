@@ -53,8 +53,9 @@ export interface Capsule {
     stages: { id: string; state: string }[];
   };
   workflow?: {
-    reports: unknown[];
-    restitutions: unknown[];
+    /** Newest first: `reports[0]` is the current snapshot. */
+    reports: { id: string; reviewed: number }[];
+    restitutions: { reportId?: string }[];
     capitalizations: unknown[];
     cleanup: { id: string; status: string }[];
     cleanupPolicy: string;
@@ -305,6 +306,17 @@ export function closingGate(value: Capsule): string {
     blockers.push(
       `${pendingCleanup.length} post-restitution cleanup action(s) not verified`,
     );
+  // A report that is not reviewed, or an approved report that was never
+  // restituted, is the same kind of blocker as an open stage: the work is not
+  // done, even when the stage list says otherwise.
+  const report = value.workflow?.reports[0];
+  if (report && !report.reviewed)
+    blockers.push(`report ${report.id} waits for the visual review`);
+  if (
+    report?.reviewed &&
+    !value.workflow?.restitutions.some((r) => r.reportId === report.id)
+  )
+    blockers.push(`approved report ${report.id} is not restituted`);
   if (!blockers.length) return "";
   return [
     `${GATE_MARKER} The work is not finished:`,

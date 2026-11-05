@@ -723,7 +723,7 @@ export class EngagementWorkflow {
     return {
       reports: this.db
         .prepare(
-          "SELECT id,reviewed FROM workflow_reports WHERE scope=? AND mission_id=?",
+          "SELECT id,reviewed FROM workflow_reports WHERE scope=? AND mission_id=? ORDER BY rowid DESC",
         )
         .all(scope, missionId),
       restitutions: rows("workflow_restitutions"),

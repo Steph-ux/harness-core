@@ -171,6 +171,34 @@ module.exports = async ({ assert, jiti }) => {
   });
   assert.match(waiting, /wait for the operator/, "a pending approval is a blocker");
   assert.match(waiting, /still owned/, "an owned command is a blocker");
+  const withReport = (reviewed, restitutions) => ({
+    ...value,
+    tasks: [],
+    open: 0,
+    blocked: 0,
+    workflow: {
+      reports: [{ id: "report-2", reviewed }],
+      restitutions,
+      capitalizations: [],
+      cleanup: [],
+      cleanupPolicy: "after-restitution-only",
+    },
+  });
+  assert.match(
+    closingGate(withReport(0, [])),
+    /waits for the visual review/,
+    "an unreviewed report is a blocker",
+  );
+  assert.match(
+    closingGate(withReport(1, [])),
+    /is not restituted/,
+    "an approved report is not done until it is restituted",
+  );
+  assert.equal(
+    closingGate(withReport(1, [{ reportId: "report-2" }])),
+    "",
+    "a reviewed and restituted report leaves no gate",
+  );
 
   // A closed task whose proof is gone does not travel.
   const orphan = taskStore.add(scope, { title: "claimed without proof" });
