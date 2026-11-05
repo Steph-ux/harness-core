@@ -156,6 +156,26 @@ module.exports = async ({ assert, jiti }) => {
       progress: () => {},
       signal: new AbortController().signal,
     });
+  // The engagement owns the captures. A mission without a root keeps the
+  // historical location under the harness state.
+  const engagement = path.join(workspace, "engagement");
+  fs.mkdirSync(engagement, { recursive: true });
+  await fixture.tools.get("cyber_mission").execute(
+    {
+      action: "create",
+      title: "Capture du harnais",
+      boundaries: "Fixtures locales uniquement.",
+      root: engagement,
+    },
+    {
+      sessionID: "ses_cap",
+      agent: "build",
+      messageID: "msg_cap",
+      id: "call-mission",
+      progress: () => {},
+      signal: new AbortController().signal,
+    },
+  );
   const { ProcessRegistry, processStatus } = jiti(
     path.join(CORE, "src", "process.ts"),
   );
@@ -267,8 +287,13 @@ module.exports = async ({ assert, jiti }) => {
     );
     assert.ok(fs.existsSync(shot.path), "the capture file exists");
     assert.ok(
+      shot.path.startsWith(path.join(engagement, "preuves", "captures")),
+      "the capture stays in the engagement that owns it",
+    );
+    assert.equal(
       shot.path.startsWith(path.join(state, "captures")),
-      "the capture stays in the state of the harness",
+      false,
+      "the capture is not left in the state of the harness",
     );
 
     // Nothing appeared on the display of the operator.

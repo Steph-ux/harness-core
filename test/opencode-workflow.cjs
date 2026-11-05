@@ -578,6 +578,52 @@ module.exports = async ({ assert, jiti }) => {
         ),
       /stale/,
     );
+
+    // The engagement root anchors the deliverables of a mission.
+    const engagement = path.join(work, "engagement");
+    fs.mkdirSync(engagement, { recursive: true });
+    const anchored = platform.createMission(
+      scope,
+      "Mission ancrée",
+      "Fixtures locales uniquement.",
+      undefined,
+      engagement,
+    );
+    assert.equal(
+      platform.missionRoot(scope, anchored.id),
+      fs.realpathSync(engagement),
+      "the engagement root is stored with the mission",
+    );
+    const artifactTool = (input) =>
+      call("cyber_report", { missionId: anchored.id, ...input });
+    await assert.rejects(
+      () =>
+        artifactTool({
+          action: "artifact",
+          path: docx,
+          kind: "report-docx",
+          observationIds: [okay.id],
+        }),
+      /rapport-vN/,
+      "a report artifact outside the report folder is refused",
+    );
+    const inFolder = path.join(engagement, "rapport-v1", "rapport.docx");
+    fs.mkdirSync(path.dirname(inFolder), { recursive: true });
+    fs.copyFileSync(docx, inFolder);
+    const registered = JSON.parse(
+      (
+        await artifactTool({
+          action: "artifact",
+          path: inFolder,
+          kind: "report-docx",
+          observationIds: [okay.id],
+        })
+      ).content,
+    );
+    assert.ok(
+      registered.id,
+      "a report artifact inside rapport-vN is accepted",
+    );
   } finally {
     unload();
     workflow.close();
