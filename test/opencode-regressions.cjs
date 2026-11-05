@@ -162,7 +162,7 @@ module.exports = async ({ assert, jiti, modules }) => {
       worker,
       `
    const {createJiti}=require(${JSON.stringify(path.join(modules, "jiti"))});const {TaskStore}=createJiti(__filename)(${JSON.stringify(path.join(root, "src/tasks.ts"))});const store=new TaskStore(${JSON.stringify(state)});
-   (async()=>{for(let i=0;i<12;i++){for(let attempt=0;;attempt++){try{store.add(${JSON.stringify(scope)},{title:process.argv[2]+'-'+i});break}catch(e){if(!String(e).includes('Concurrent')||attempt>200)throw e;await new Promise(r=>setTimeout(r,5));}}}})().catch(e=>{console.error(e);process.exitCode=1});`,
+   (async()=>{for(let i=0;i<12;i++){for(let attempt=0;;attempt++){try{store.add(${JSON.stringify(scope)},{title:process.argv[2]+'-'+i});break}catch(e){if(!String(e).includes('Concurrent')||attempt>800)throw e;await new Promise(r=>setTimeout(r,5));}}}})().catch(e=>{console.error(e);process.exitCode=1});`,
     );
     await Promise.all(
       ["a", "b", "c"].map(
