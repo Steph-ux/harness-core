@@ -1757,6 +1757,11 @@ export default {
               description:
                 "What is in scope and what is not, in the operator's own words, for create.",
             },
+            root: {
+              type: "string",
+              description:
+                "The engagement directory that owns this mission's artifacts and captures, for create. An absolute path to an existing directory; evidence outside it is refused.",
+            },
             reason: {
               type: "string",
               description: "Why a completed validation must be reopened.",
@@ -1831,7 +1836,13 @@ export default {
               );
             return {
               content: JSON.stringify(
-                platform.createMission(scope, input.title, input.boundaries),
+                platform.createMission(
+                  scope,
+                  input.title,
+                  input.boundaries,
+                  undefined,
+                  input.root,
+                ),
               ),
             };
           }
@@ -2462,6 +2473,20 @@ export default {
         },
       });
 
+      // A capture belongs to the engagement that owns it. Without a declared
+      // root, it keeps the historical location under the harness state.
+      const captureRoot = (scope: string) => {
+        const mission = platform.active(scope);
+        const engagement = mission
+          ? platform.missionRoot(scope, mission.id)
+          : undefined;
+        const root = engagement
+          ? path.join(engagement, "preuves", "captures")
+          : path.join(stateRoot(), "captures");
+        fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+        return root;
+      };
+
       editor.add({
         name: "cyber_capture",
         description:
@@ -2592,8 +2617,7 @@ export default {
               input.observationId,
               `${input.label ?? "evidence"}-${randomUUID().slice(0, 8)}`,
             );
-            const root = path.join(stateRoot(), "captures");
-            fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+            const root = captureRoot(scope);
             const dest = captureDestination(root, name);
             const capture = captureWindow(window.id, dest, display);
             if (!isFramed(capture, geometry))
@@ -2637,8 +2661,7 @@ export default {
             input.observationId,
             `${input.label ?? "capture"}-${randomUUID().slice(0, 8)}`,
           );
-          const root = path.join(stateRoot(), "captures");
-          fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+          const root = captureRoot(scope);
           const dest = captureDestination(root, name);
           const capture = captureWindow(target.id, dest);
           if (!isFramed(capture, geometry))

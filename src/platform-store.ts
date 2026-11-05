@@ -73,9 +73,9 @@ export class PlatformStore {
     const version = Number(
       this.db.prepare("PRAGMA user_version").get()!.user_version,
     );
-    if (version > 4)
+    if (version > 5)
       throw new Error("Platform database version is newer than this harness");
-    if (version === 4) return;
+    if (version === 5) return;
     if (version === 0)
       this.db.exec(`BEGIN IMMEDIATE;
    CREATE TABLE missions(id TEXT PRIMARY KEY,scope TEXT NOT NULL,title TEXT NOT NULL,boundaries TEXT NOT NULL,created TEXT NOT NULL,UNIQUE(id,scope));
@@ -130,6 +130,10 @@ export class PlatformStore {
       this.db.exec(
         `BEGIN IMMEDIATE; ALTER TABLE finding_verifications ADD COLUMN detail TEXT NOT NULL DEFAULT '{}'; PRAGMA user_version=4; COMMIT;`,
       );
+    if (version < 5)
+      this.db.exec(`BEGIN IMMEDIATE;
+      CREATE TABLE IF NOT EXISTS mission_roots(mission_id TEXT NOT NULL,scope TEXT NOT NULL,root TEXT NOT NULL,PRIMARY KEY(mission_id,scope),FOREIGN KEY(mission_id,scope) REFERENCES missions(id,scope));
+      PRAGMA user_version=5;COMMIT;`);
   }
   private open(scope: string) {
     if (this.closed) throw new Error("Platform store is closed");
@@ -172,15 +176,32 @@ export class PlatformStore {
         missionId ?? null,
       );
   }
+  /**
+   * The directory an engagement owns. It anchors every artifact and capture,
+   * so evidence cannot be scattered across a session's working directory.
+   */
+  private checkRoot(value: string) {
+    if (typeof value !== "string" || !value.trim())
+      throw new Error("An engagement root is required");
+    const file = path.resolve(value);
+    assertPlainPath(file);
+    if (!fs.statSync(file).isDirectory())
+      throw new Error("The engagement root must be an existing directory");
+    if (path.dirname(file) === file)
+      throw new Error("The filesystem root is not an engagement");
+    return fs.realpathSync(file);
+  }
   createMission(
     scope: string,
     title: string,
     boundaries: string,
     graph?: GraphNode[],
+    root?: string,
   ): Mission {
     this.open(scope);
     title = text(title, 500);
     boundaries = text(boundaries, 8000);
+    const engagementRoot = root === undefined ? undefined : this.checkRoot(root);
     const nodes =
       graph ??
       STAGES.map((id, i) => ({ id, dependsOn: i ? [STAGES[i - 1]] : [] }));
@@ -262,6 +283,10 @@ export class PlatformStore {
           "INSERT INTO active_missions VALUES(?,?) ON CONFLICT(scope)DO UPDATE SET id=excluded.id",
         )
         .run(scope, id);
+      if (engagementRoot)
+        this.db
+          .prepare("INSERT INTO mission_roots VALUES(?,?,?)")
+          .run(id, scope, engagementRoot);
     });
     this.index(
       scope,
@@ -322,6 +347,14 @@ export class PlatformStore {
       .prepare("SELECT id FROM active_missions WHERE scope=?")
       .get(scope);
     return row ? this.mission(scope, String(row.id)) : undefined;
+  }
+  /** The engagement directory declared with the mission, when one was. */
+  missionRoot(scope: string, id: string): string | undefined {
+    this.open(scope);
+    const row = this.db
+      .prepare("SELECT root FROM mission_roots WHERE mission_id=? AND scope=?")
+      .get(id, scope);
+    return row ? String(row.root) : undefined;
   }
   /**
    * The approval queue.

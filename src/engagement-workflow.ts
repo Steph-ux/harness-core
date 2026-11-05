@@ -167,6 +167,24 @@ export class EngagementWorkflow {
         );
       for (const k of ["title", "client", "author", "period", "method"])
         text(config?.[k], 8000);
+      // The deliverables folder is created with the snapshot, inside the
+      // engagement. It is versioned because the generator refuses to overwrite
+      // a report that was already delivered.
+      const engagementRoot = this.platform.missionRoot(scope, missionId);
+      const reportDir = engagementRoot
+        ? path.join(
+            engagementRoot,
+            `rapport-v${
+              Number(
+                this.db
+                  .prepare(
+                    "SELECT COUNT(*) AS n FROM workflow_reports WHERE scope=? AND mission_id=?",
+                  )
+                  .get(scope, missionId)!.n,
+              ) + 1
+            }`,
+          )
+        : undefined;
       let bytes = 0;
       const rows = this.platform
         .findings(scope, missionId)
@@ -286,7 +304,12 @@ export class EngagementWorkflow {
         id: snapshot.id,
         sourceHash: snapshot.sourceHash,
       });
-      return { snapshot, path: file, sha256: digestFile(file) };
+      return {
+        snapshot,
+        path: file,
+        sha256: digestFile(file),
+        ...(reportDir ? { reportDir } : {}),
+      };
     });
   }
   report(scope: string, id: string) {

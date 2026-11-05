@@ -18,7 +18,7 @@ Expurger mots de passe, cookies, clés, jetons et données personnelles des extr
 
 ## Contrat du générateur
 
-Entrée : snapshot JSON issu de `cyber_report snapshot`, schéma 1. Sorties : `rapport.docx`, `rapport.pdf`, `page-N.png`, `qa.json`. Le manifeste porte les empreintes du snapshot, des livrables et des images, sans déclarer la revue visuelle effectuée. Le script n’exécute aucun PoC ni commande fournie dans le snapshot et ne télécharge pas d’image.
+Entrée : snapshot JSON issu de `cyber_report snapshot`, schéma 1. Sorties : `rapport.docx`, `rapport.pdf`, `page-N.png`, `qa.json`, écrites dans le `reportDir` renvoyé par le snapshot, sous `<engagement>/rapport-vN`. Les trois artefacts enregistrés (DOCX, PDF, QA) doivent rester sous ce dossier ; `cyber_report action=artifact` refuse un chemin hors de `<engagement>/rapport-vN`. Le manifeste porte les empreintes du snapshot, des livrables et des images, sans déclarer la revue visuelle effectuée. Le script n’exécute aucun PoC ni commande fournie dans le snapshot et ne télécharge pas d’image.
 
 Le score de base CVSS 3.1 suit FIRST : https://www.first.org/cvss/v3.1/specification-document . Refuser un vecteur incomplet, une métrique répétée, un format non pris en charge ou un score incohérent. Justifier les métriques à partir des preuves ; la formule seule ne prouve pas leur pertinence.
 

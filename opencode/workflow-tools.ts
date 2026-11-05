@@ -1,4 +1,6 @@
 /** Native permission boundary for reporting, capitalization and post-restitution cleanup. */
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { json } from "../src/util";
 export function addWorkflowTools(editor: any, s: any) {
   const str = { type: "string" },
@@ -73,13 +75,25 @@ export function addWorkflowTools(editor: any, s: any) {
     async (i: any, c: any, scope: string) => {
       if (i.action === "snapshot")
         return s.workflow.snapshot(scope, i.missionId, i.config);
-      if (i.action === "artifact")
+      if (i.action === "artifact") {
+        const engagement = s.platform.missionRoot(scope, i.missionId);
+        // The three deliverables live in a folder of their own, inside the
+        // engagement, so a report is never a loose file next to the notes.
+        if (engagement && String(i.kind ?? "").startsWith("report-")) {
+          const file = path.resolve(i.path);
+          const top = path.relative(engagement, file).split(path.sep)[0];
+          if (!/^rapport(-v\d+)?$/.test(top))
+            throw new Error(
+              "Report artifacts belong in <engagement>/rapport-vN",
+            );
+        }
         return s.workflow.registerArtifact(
           scope,
           i.missionId,
           i,
-          s.sessionCwd.get(c.sessionID) ?? s.instanceCwd,
+          engagement ?? s.sessionCwd.get(c.sessionID) ?? s.instanceCwd,
         );
+      }
       if (i.action === "status") return s.workflow.status(scope, i.missionId);
       if (i.action === "get") return s.workflow.report(scope, i.reportId);
       if (i.action === "register")
