@@ -3,6 +3,70 @@
 One entry per decision that is expensive to reverse. Each states what was
 decided, why, and what it costs. New entries go at the top.
 
+## 2026-11-04 — A launch is not a proof outcome
+
+**Decision.** The supervisor writes a nonce-bound terminal result carrying the
+full trace hash, and `read` re-hashes every byte before trusting it. A recovered
+PID without a reliable result stays `unknown`, and a command whose group outlives
+it is `failed`.
+**Why.** A spawn, a stop, or the displayed tail proves nothing on its own; only a
+terminal result bound to the run key and to the whole trace can be cited.
+**Cost.** One result file per command and a full read on every verification.
+Legacy rows keep their weaker metadata instead of being rewritten.
+
+## 2026-11-04 — Task locks cover the whole read-modify-write
+
+**Decision.** A task mutation holds its lock across the complete read, check and
+write; a missing dependency blocks execution; old tasks are never dropped by tail
+slicing.
+**Why.** Two concurrent updates could otherwise both read the same open state and
+both close it.
+**Cost.** The lock is held longer, and a closed task whose proof disappeared
+stays a continuity blocker instead of being silently forgotten.
+
+## 2026-11-04 — Verification, review and restitution are distinct
+
+**Decision.** `cyber_finding verify` binds the current finding revision to fresh
+reproduction and negative controls observed in a distinct session. The visual
+review and the effective restitution are operator transitions, separate from the
+technical verification.
+**Why.** A technical reproduction is not a person approving a report, and a
+restitution that was planned is not a restitution that happened.
+**Cost.** More transitions to record. Reopening validation keeps the node's
+previous result in the mission history but deletes the old verification links, so
+fresh proof has to be produced.
+
+## 2026-11-04 — Reports are versioned snapshots
+
+**Decision.** A report starts from a snapshot bound to the source fingerprint,
+then links Word, PDF and a QA manifest that covers every rendered page. The
+latest approved report must stay unchanged; a changed finding invalidates the
+review and reopens the snapshot.
+**Why.** A report is a claim about a fixed state; if the state or the files move,
+the approval no longer covers what would be delivered.
+**Cost.** Every correction produces a new version and a new visual review.
+
+## 2026-11-04 — Cleanup follows restitution, in two processes
+
+**Decision.** Cleanup is allowed only after the restitution is recorded, and its
+execution and verification are two separate traced processes.
+**Why.** A planned restitution is not a performed one, and a cleanup that
+verifies itself proves nothing.
+**Cost.** Cleanup takes two commands, and the evidence, accounts and test objects
+must be kept until restitution instead of being purged along the way.
+
+## 2026-11-04 — The verifier is isolated and pinned
+
+**Decision.** `HARNESS_VERIFIER`, or `state/verifier`, pins one model; a
+cross-provider fallback is an explicit ordered list with a timeout and an
+accepted response limit; the current model is remembered per session.
+**Why.** A verification already in flight must not be silently re-routed, and the
+stateless 2.0.26 API exposes no token ceiling, so a character limit cannot be
+sold as a billing limit.
+**Cost.** A bad pin fails loudly as that provider's refusal, and a concurrent
+request cannot change the provider of a verification or an extraction already
+running.
+
 ## 2026-10-26 — Idle, not status, decides that a session is finished
 
 **Decision.** `pendingLessons` reads a session once it has been quiet for ten
@@ -95,7 +159,8 @@ calls with the soft wording.
 ## 2026-10-23 — The finding gate routes on the finding's own text
 
 **Decision.** When the host hands the hook no request text, the gate matches the
-finding's title and description.
+finding's title and description; the native prompt hook supplies the text when
+the host does provide it.
 **Why.** OpenCode does not pass the request (`event.messages[0].parts` empty). A
 gate that cannot see the request must still be able to decide.
 **Cost.** The gate is narrower than the request: it sees the claim, not the work
@@ -117,37 +182,14 @@ the session and the call); nothing rewrites one.
 afterwards. A session log is a narrative; an observation is a datum.
 **Cost.** Two stores and a strict scope rule: evidence never crosses a project.
 
-## 2026-11-04 — Proof outcomes and concurrent updates
+## 2026-11-04 — Capitalisation is a bounded, validated pass
 
-The command supervisor writes a nonce-bound terminal result and full trace
-hash. A launch or stop is not evidence of success; an unknown recovered PID
-is never treated as completed. Descendants in the owned process group may
-not outlive a successful parent result. Complete output hashes detect changes
-beyond the displayed tail. Legacy rows keep their original proof metadata.
+**Decision.** A capitalisation pass records one bounded outcome (`none`,
+`candidate`, `validated`); `validated` requires artifacts and distinct positive
+and negative observation tests. It never claims to change model weights, native
+tools or permissions.
+**Why.** A lesson is only reusable if something observed backs it, and a pass that
+rewrites itself on every run cannot be audited.
+**Cost.** More evidence per pass, and a repeated snapshot rewrites the same
+capitalisation row instead of accumulating duplicates.
 
-Task locks cover the complete read-modify-write. Missing dependencies block
-execution, and old tasks never disappear due to tail slicing. A closed task
-with missing proof remains a continuity blocker. Finding verification binds
-the current finding revision to fresh controls in a distinct session; it
-never fabricates human approval. The native prompt hook supplies routing text.
-
-## 2026-11-04 — Rapports et après restitution
-
-Les rapports partent de snapshots versionnés liés aux sources, puis relient
-Word, PDF, manifeste QA et rendu de toutes les pages. Le dernier rapport
-approuvé doit rester inchangé. Les constats modifiés invalident la revue.
-Une reprise explicite de validation conserve l’historique et exige des preuves
-nouvelles. La revue humaine et la restitution effective sont des transitions
-opérateur distinctes de la vérification technique.
-
-Le nettoyage est permis uniquement après restitution. Son exécution et sa
-vérification utilisent deux processus séparés. Les transitions et événements
-sont atomiques ; un conflit ou l’échec d’enregistrement empêche le lancement.
-La capitalisation consigne une passe bornée et exige des tests distincts pour
-les artefacts validés, sans modifier les poids du modèle.
-
-Le modèle fixé est exclusif. Les replis inter-fournisseurs sont explicites,
-avec délai et limite de réponse acceptée. L’API stateless 2.0.26 n’expose pas de
-plafond de tokens ; la limite de caractères ne prétend pas limiter la facturation.
-Le modèle courant est mémorisé par session. Une requête concurrente ne peut pas
-modifier le fournisseur choisi pour une vérification ou une extraction en cours.
