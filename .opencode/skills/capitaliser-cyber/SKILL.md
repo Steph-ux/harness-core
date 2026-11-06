@@ -70,6 +70,17 @@ Terminer par le résultat de la mission et, si une capitalisation a eu lieu, ind
 
 Ne pas faire de cette passe une tâche de fond ou une automatisation permanente. Une invocation active guide la clôture de cette mission ; une exécution planifiée exige une demande distincte et un mécanisme dédié.
 
+## Où vit un outil réutilisable
+
+La boîte à outils de l’opérateur est `/home/moon/hacking/Mes-outils/`. Un script ou un outil conçu, corrigé ou amélioré pendant une mission y est déposé ; il n’est pas laissé dans le répertoire de la cible, dans `/tmp` ou dans un dossier de preuves.
+
+- Une capacité va dans sa catégorie d’usage : `01-enumeration/`, `02-fingerprint/`, `03-exploitation/`, `04-secrets-supply-chain/`, `05-validation-preuve/`, `06-rapport/`.
+- Le moteur partagé va dans `_lib/`. Une source de découverte va dans `_plugins/` (un fichier = une source, prise automatiquement par le registre). Un dictionnaire générique va dans `_modeles/`.
+- **Le moteur est générique ; la connaissance d’une cible est une donnée.** Hôtes, chemins applicatifs, conventions DNS, signatures WAF et identifiants vivent dans `hacking/cibles/<cible>/cibles.json` ou `hacking/engagements/<engagement>/cibles.json`, jamais dans l’outil.
+- Un outil qui existe déjà est amélioré sur place, avec un cas de non-régression. On ne crée pas un second script qui fait la même chose.
+- Toute addition, modification ou retrait est daté dans `CHANGELOG.md`. Un enseignement issu d’un échec vérifié va dans `LEÇONS.md`.
+- Un outil de preuve joint son contrôle négatif ; une absence de résultat n’est jamais présentée comme une preuve d’absence.
+
 ## Intégration au harnais
 
 - Lire `cyber_report action=status` avant la passe de capitalisation.
