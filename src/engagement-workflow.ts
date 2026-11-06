@@ -252,12 +252,21 @@ export class EngagementWorkflow {
           throw new Error("Report snapshot size limit exceeded");
         return entry;
       });
+      const reportId = `report-${newId()}`;
+      const reference = config?.reference
+          ? text(config.reference, 120)
+          : reportId,
+        classification = config?.classification
+          ? text(config.classification, 120)
+          : "CONFIDENTIEL";
       const snapshot = {
         schemaVersion: 1,
-        id: `report-${newId()}`,
+        id: reportId,
         missionId,
         scope,
         createdAt: now(),
+        reference,
+        classification,
         sourceHash: this.platform.reportFingerprint(scope, missionId),
         title: text(config.title),
         client: text(config.client),
