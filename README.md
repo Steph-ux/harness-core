@@ -5,6 +5,8 @@ constats, tâches et méthodes restent dans un état partagé indépendant de l�
 L’adaptateur est dans `opencode/` ; `src/` utilise les modules natifs de Node.
 Node 24 ou supérieur est requis. La supervision des commandes nécessite Linux
 et un exécutable `node` accessible au serveur (`HARNESS_NODE` peut fixer son chemin).
+La capture d’une trace exige ImageMagick (`convert` ou `magick`) ; la capture
+d’une fenêtre réelle exige X11 (`import`, `identify`) et un écran.
 
 ## Installer dans OpenCode v2
 

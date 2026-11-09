@@ -252,9 +252,62 @@ module.exports = async ({ assert, jiti }) => {
     "another process id does not inherit the read",
   );
 
+  // The rendered trace is the visual attestation of the finished command. It
+  // needs no display: the image is drawn from the recorded bytes, not re-run.
+  const shot = JSON.parse(
+    (
+      await call({
+        action: "evidence",
+        processId: ran.id,
+        observationId: readObservation,
+      })
+    ).content,
+  );
+  assert.equal(
+    shot.observationId,
+    readObservation,
+    "the capture is linked to the observation it attests",
+  );
+  assert.equal(shot.processId, ran.id, "the capture names the process it renders");
+  assert.match(
+    String(shot.traceHash ?? ""),
+    /^[0-9a-f]{64}$/,
+    "the capture binds the whole recorded trace",
+  );
+  assert.equal(shot.renderer, "imagemagick", "the trace is rendered, not re-run");
+  assert.ok(shot.bytes > 1000, "the capture has content");
+  assert.ok(
+    shot.width >= 200 && shot.height >= 40,
+    "the capture is a readable image",
+  );
+  assert.ok(fs.existsSync(shot.path), "the capture file exists");
+  assert.ok(
+    shot.path.startsWith(path.join(engagement, "preuves", "captures")),
+    "the capture stays in the engagement that owns it",
+  );
+  assert.equal(
+    shot.path.startsWith(path.join(state, "captures")),
+    false,
+    "the capture is not left in the state of the harness",
+  );
+
+  // The link is in the store, so a later session can find it.
+  const { KnowledgeStore } = jiti(path.join(CORE, "src", "store.ts"));
+  const { scopeFor } = jiti(path.join(CORE, "src", "util.ts"));
+  const store = new KnowledgeStore(path.join(state, "knowledge.sqlite"));
+  const scope = scopeFor(workspace);
+  const audits = store.audits(scope, "capture", 10);
+  assert.equal(audits.length, 1, "the capture is recorded in the store");
+  assert.match(
+    audits[0].detail,
+    new RegExp(readObservation),
+    "the record names the observation it attests",
+  );
+  store.close();
+
   const display = process.env.DISPLAY;
   if (!display) {
-    console.log("  note: no display, the capture on a real window is not exercised");
+    console.log("  note: no display, the capture of a real window is not exercised");
   } else {
     // The windows of the operator, before the harness does anything.
     const before = JSON.parse((await call({ action: "windows" })).content);
@@ -262,7 +315,7 @@ module.exports = async ({ assert, jiti }) => {
     assert.equal(
       before.filter((window) => window.title === "harness-evidence").length,
       0,
-      "the terminal of the harness is not on the display of the operator",
+      "no terminal of the harness is on the display of the operator",
     );
 
     // The desktop is refused, even when it is asked for by name.
@@ -277,68 +330,16 @@ module.exports = async ({ assert, jiti }) => {
       );
     }
 
-    // The evidence terminal of the harness renders the recorded trace of the
-    // finished command, on a display of its own.
-    const shot = JSON.parse(
-      (
-        await call({
-          action: "evidence",
-          processId: ran.id,
-          observationId: readObservation,
-        })
-      ).content,
-    );
-    assert.equal(
-      shot.observationId,
-      readObservation,
-      "the capture is linked to the observation it attests",
-    );
-    assert.equal(shot.processId, ran.id, "the capture names the process it renders");
-    assert.match(
-      String(shot.traceHash ?? ""),
-      /^[0-9a-f]{64}$/,
-      "the capture binds the whole recorded trace",
-    );
-    assert.ok(shot.bytes > 32, "the capture has content");
-    assert.ok(
-      shot.width >= 16 && shot.height >= 16,
-      "the capture has the size of a window",
-    );
-    assert.ok(fs.existsSync(shot.path), "the capture file exists");
-    assert.ok(
-      shot.path.startsWith(path.join(engagement, "preuves", "captures")),
-      "the capture stays in the engagement that owns it",
-    );
-    assert.equal(
-      shot.path.startsWith(path.join(state, "captures")),
-      false,
-      "the capture is not left in the state of the harness",
-    );
-
     // Nothing appeared on the display of the operator.
     const after = JSON.parse((await call({ action: "windows" })).content);
     assert.equal(
       after.filter((window) => window.title === "harness-evidence").length,
       0,
-      "the terminal of the harness stays off the display of the operator",
+      "the harness leaves no window on the display of the operator",
     );
-
-    // The link is in the store, so a later session can find it.
-    const { KnowledgeStore } = jiti(path.join(CORE, "src", "store.ts"));
-    const { scopeFor } = jiti(path.join(CORE, "src", "util.ts"));
-    const store = new KnowledgeStore(path.join(state, "knowledge.sqlite"));
-    const scope = scopeFor(workspace);
-    const audits = store.audits(scope, "capture", 10);
-    assert.equal(audits.length, 1, "the capture is recorded in the store");
-    assert.match(
-      audits[0].detail,
-      new RegExp(readObservation),
-      "the record names the observation it attests",
-    );
-    store.close();
   }
 
-  // The private display of the harness goes away with it.
+  // The plugin goes away; the rendered images stay on disk.
   if (typeof unload === "function") unload();
   fs.rmSync(workspace, { recursive: true, force: true });
 };

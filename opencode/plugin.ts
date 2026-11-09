@@ -234,6 +234,39 @@ function runCommand(
   return result.stdout ?? "";
 }
 
+/**
+ * Render a recorded trace as the terminal view a report can print.
+ *
+ * The text goes through argv, never through ImageMagick's `@file` form: the
+ * default security policy refuses it. No harness metadata is drawn into the
+ * image; the provenance lives in the capture link.
+ */
+function renderTrace(text: string, dest: string): void {
+  const binary = process.env.IMAGEMAGICK || "convert";
+  const font = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf";
+  runCommand(
+    binary,
+    [
+      "-background",
+      "white",
+      "-fill",
+      "#1a1a1a",
+      ...(fs.existsSync(font) ? ["-font", font] : []),
+      "-pointsize",
+      "13",
+      "-size",
+      "980x",
+      `caption:${text}`,
+      "-bordercolor",
+      "#e8e8e8",
+      "-border",
+      "18",
+      dest,
+    ],
+    30000,
+  );
+}
+
 function commandArguments(value: unknown): string[] {
   if (
     !Array.isArray(value) ||
@@ -507,118 +540,9 @@ function captureWindow(
   return { width, height, bytes: stat.size };
 }
 
-/**
- * The private display of the harness.
- *
- * The harness renders its terminal on a display of its own, the way a browser
- * of a test runner opens its own window instead of taking over the one of the
- * operator. Nothing appears on the desktop of the operator, and the terminal of
- * the operator is never touched.
- */
-let privateDisplay: { number: number; pid: number } | undefined;
-
-function freeDisplay(): number {
-  for (let number = 99; number >= 90; number -= 1) {
-    if (
-      !fs.existsSync(`/tmp/.X${number}-lock`) &&
-      !fs.existsSync(`/tmp/.X11-unix/X${number}`)
-    )
-      return number;
-  }
-  throw new Error("no free display for the evidence terminal");
-}
-
-function ensurePrivateDisplay(): string {
-  if (privateDisplay) return `:${privateDisplay.number}`;
-  const number = freeDisplay();
-  const child = spawn(
-    "Xvfb",
-    [`:${number}`, "-screen", "0", "1280x800x24", "-nolisten", "tcp"],
-    { detached: true, stdio: "ignore" },
-  );
-  child.unref();
-  privateDisplay = { number, pid: child.pid ?? 0 };
-  const deadline = Date.now() + 10000;
-  while (Date.now() < deadline) {
-    if (fs.existsSync(`/tmp/.X11-unix/X${number}`)) return `:${number}`;
-    spawnSync("sleep", ["0.2"]);
-  }
-  throw new Error("the private display of the harness did not start");
-}
-
-function stopPrivateDisplay(): void {
-  // The terminal of the harness goes with its display. The session is the
-  // harness's own, and the display it lived in is gone.
-  try {
-    spawnSync("tmux", ["kill-session", "-t", EVIDENCE_SESSION], {
-      encoding: "utf8",
-    });
-  } catch {
-    /* The session is already gone. */
-  }
-  if (!privateDisplay) return;
-  try {
-    process.kill(privateDisplay.pid, "SIGTERM");
-  } catch {
-    /* The display is already gone. */
-  }
-  privateDisplay = undefined;
-}
-
-/** The title of the window the harness owns, on its own display. */
-const EVIDENCE_TITLE = "harness-evidence";
-
-/** The session of the terminal the harness owns. */
-const EVIDENCE_SESSION = "harness-evidence";
-
-/** A path, quoted for the shell of the evidence terminal. */
+/** A path, quoted for the shell. */
 function shellQuote(value: string): string {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
-}
-
-/**
- * The window of the harness, on its private display.
- *
- * It is a real terminal rendering of a real execution, and it lives where the
- * operator cannot see it.
- */
-function ensureEvidenceWindow(
-  display: string,
-  session: string,
-): { id: string; title: string } {
-  const found = listWindows(display).find(
-    (window) => window.title === EVIDENCE_TITLE,
-  );
-  if (found) return found;
-  const child = spawn(
-    "xterm",
-    [
-      "-T",
-      EVIDENCE_TITLE,
-      "-geometry",
-      "120x32",
-      "-e",
-      "tmux",
-      "attach-session",
-      "-t",
-      session,
-    ],
-    {
-      detached: true,
-      stdio: "ignore",
-      env: { ...process.env, DISPLAY: display },
-    },
-  );
-  child.unref();
-  const deadline = Date.now() + 10000;
-  while (Date.now() < deadline) {
-    const window = listWindows(display).find(
-      (candidate) => candidate.title === EVIDENCE_TITLE,
-    );
-    if (window) return window;
-    spawnSync("sleep", ["0.3"]);
-  }
-  throw new Error("the terminal of the harness did not open");
 }
 
 export default {
@@ -2742,93 +2666,36 @@ export default {
               outcome = verifiedOutcome(record);
             if (!outcome || outcome.status === "running")
               throw new Error("A capture requires a finished, verified trace");
-            const rendered = path.join(
-              stateRoot(),
-              "captures",
-              `trace-${randomUUID()}.txt`,
-            );
-            fs.mkdirSync(path.dirname(rendered), {
-              recursive: true,
-              mode: 0o700,
-            });
-            fs.writeFileSync(
-              rendered,
-              `RECORDED TRACE / ${record.id} / ${outcome.status} / ${outcome.finishedAt}\n${readTrace(record.logPath, 2000)}`
-                .replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, "")
-                .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
-                .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, ""),
-              { mode: 0o600 },
-            );
-            const line = `cat -- ${shellQuote(rendered)}`;
-            const display = ensurePrivateDisplay();
-            const session = EVIDENCE_SESSION;
-            const alive =
-              spawnSync("tmux", ["has-session", "-t", session]).status === 0;
-            if (!alive)
-              spawnSync("tmux", [
-                "new-session",
-                "-d",
-                "-s",
-                session,
-                "-x",
-                "120",
-                "-y",
-                "32",
-                "-c",
-                sessionCwd.get(context.sessionID) ?? instanceCwd,
-              ]);
-            const window = ensureEvidenceWindow(display, session);
-            // The attestation shows where the command ran.
-            runCommand(
-              "tmux",
-              [
-                "send-keys",
-                "-t",
-                session,
-                `cd ${shellQuote(sessionCwd.get(context.sessionID) ?? instanceCwd)}`,
-                "C-m",
-              ],
-              10000,
-            );
-            const marker = `__HARNESS_DONE_${randomUUID().replaceAll("-", "")}__`;
-            runCommand(
-              "tmux",
-              [
-                "send-keys",
-                "-t",
-                session,
-                `${line}; printf '\\n${marker}:%s\\n' "$?"`,
-                "C-m",
-              ],
-              10000,
-            );
-            waitForTerminalCommand(session, marker);
-            const geometry = windowGeometry(window.id, display);
             const name = captureName(
               input.observationId,
               `${input.label ?? "evidence"}-${randomUUID().slice(0, 8)}`,
             );
             const root = captureRoot(scope);
             const dest = captureDestination(root, name);
-            const capture = captureWindow(window.id, dest, display);
-            if (!isFramed(capture, geometry))
-              throw new Error(
-                "the capture does not match the window it claims to show, so it is refused",
-              );
+            // The image is the terminal view of the recorded trace: the command
+            // and its output. Provenance stays in the audit link, not burned
+            // into the page that goes to the client.
+            const body = readTrace(record.logPath, 2000)
+              .replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, "")
+              .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+              .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "")
+              .replace(/\s+$/, "");
+            const lines = body.split("\n"),
+              shown = lines.slice(0, 40);
+            if (lines.length > shown.length) shown.push("…");
+            renderTrace(`$ ${record.command}\n\n${shown.join("\n")}`, dest);
+            const image = fs.readFileSync(dest);
             const link = {
               kind: "rendered-trace",
               processId: input.processId,
               traceHash: outcome.traceHash,
               observationId: input.observationId ?? "",
               path: dest,
-              window: window.id,
-              title: window.title,
-              width: capture.width,
-              height: capture.height,
-              bytes: capture.bytes,
-              sha256: createHash("sha256")
-                .update(fs.readFileSync(dest))
-                .digest("hex"),
+              renderer: "imagemagick",
+              width: image.readUInt32BE(16),
+              height: image.readUInt32BE(20),
+              bytes: image.length,
+              sha256: createHash("sha256").update(image).digest("hex"),
               takenAt: new Date().toISOString(),
             };
             knowledge.audit(scope, "capture", link);
@@ -3292,9 +3159,6 @@ export default {
     debug(`plugin ready scope=${scopeFor(instanceCwd)} cwd=${instanceCwd}`);
     return () => {
       lifecycleController.abort();
-      // The private display of the harness goes away with it. The terminal of
-      // the operator was never touched.
-      stopPrivateDisplay();
       debug("plugin unloaded");
     };
   },
