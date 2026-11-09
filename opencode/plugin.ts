@@ -17,6 +17,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 
 /** Use the official client's discovery and authentication, never a guessed URL. */
 async function localApi(args: string[], signal?: AbortSignal): Promise<any> {
@@ -273,7 +274,12 @@ function waitForTerminalCommand(session: string, marker: string): void {
  */
 const coreRoot = () =>
   process.env.HARNESS_CORE?.trim() ||
-  path.join(os.homedir(), "hacking", "lab", "harness-core");
+  // The plugin may be reached through the host's symlink: resolve the file
+  // itself so the core is the directory that owns opencode/plugin.ts, not
+  // wherever the host keeps its links.
+  path.dirname(
+    path.dirname(fs.realpathSync(fileURLToPath(import.meta.url))),
+  );
 
 /**
  * Where the shared state lives.
