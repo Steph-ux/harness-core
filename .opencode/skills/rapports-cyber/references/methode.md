@@ -45,6 +45,12 @@ Aucune capture ne doit montrer la mention « Chrome est contrôlé par un logici
 - Ne jamais rogner l'image pour faire disparaître le bandeau : la barre d'adresse reste visible, elle porte l'URL de la preuve.
 - Relire l'image après la capture. Si le bandeau est présent, relancer avec le bon drapeau et reprendre la capture.
 
+## Couverture
+
+Le rapport porte une table de couverture : OWASP Top 10 (2021) et techniques MITRE ATT&CK. Chaque ligne vaut `tested`, `not-tested` ou `not-applicable` ; une ligne non testée ou non applicable porte sa raison. La couverture ne se déduit pas du nombre de constats : elle se déclare élément par élément, et le snapshot la transporte dans `coverage`.
+
+Un constat cite la catégorie OWASP et la technique MITRE qu'il illustre. Une catégorie absente de la table n'a pas été examinée ; une catégorie présente sans raison n'est pas acceptable.
+
 ## Contrat du générateur
 
 Entrée : snapshot JSON issu de `cyber_report snapshot`, schéma 1. Sorties : `rapport.docx`, `rapport.pdf`, `page-N.png`, `qa.json`, écrites dans le `reportDir` renvoyé par le snapshot, sous `<engagement>/rapport-vN`. Le DOCX porte la couverture (client, référence, périmètre, période, édition, classification en pied de première page), un sommaire paginé calculé sur le rendu réel, un en-tête courant et un pied de page avec `page / total`. Les trois artefacts enregistrés (DOCX, PDF, QA) doivent rester sous ce dossier ; `cyber_report action=artifact` refuse un chemin hors de `<engagement>/rapport-vN`. Le manifeste porte les empreintes du snapshot, des livrables et des images, sans déclarer la revue visuelle effectuée. Le script n’exécute aucun PoC ni commande fournie dans le snapshot et ne télécharge pas d’image.
