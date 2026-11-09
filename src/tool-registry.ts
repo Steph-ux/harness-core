@@ -76,6 +76,17 @@ function relevance(query: string, item: ToolCapability): number {
 function commandFor(item: ToolRevision): string {
   return LANG[item.language] + " " + JSON.stringify(item.file);
 }
+/** Conservative direct invocation check (not proof of successful effects). */
+function directInvocation(command: unknown, script: string): boolean {
+  if (typeof command !== "string") return false;
+  const line = command.trim();
+  if (/[;|&\x60]/.test(line) || line.includes("$(") || line.includes("\n"))
+    return false;
+  if (!/^(?:\/?[\w./-]+\/)?(?:node|nodejs|python|python3|bash|sh)\s+/.test(line))
+    return false;
+  const args = line.match(/(?:"[^"]*"|'[^']*'|\S+)/g) ?? [];
+  return args.slice(1).some((part) => part.replace(/^["']|["']$/g, "") === script);
+}
 function safeSource(source: string): void {
   if (typeof source !== "string" || !source.trim() || source.length > 80000 ||
       source.includes("\0") || redactText(source) !== source)
@@ -212,15 +223,16 @@ export class ToolRegistry {
     const proofs = evidence(tests.map((test) => test.observationId));
     for (const test of tests) {
       const proof = proofs.find((entry) => entry.id === test.observationId);
-      const command = JSON.stringify(proof?.input ?? {});
-      // Echoing a file path through an unrelated tool must not validate code.
-      // Only recorded process/shell execution tools qualify as test evidence.
-      const executable = /(?:^|[\\/" ])(?:node|nodejs|python3?|bash|sh)(?:[ "])/i.test(command);
+      const providedInput = proof?.input && typeof proof.input === "object"
+        ? proof.input as Record<string, unknown> : {};
+      const executable = directInvocation(
+        providedInput.command ?? providedInput.cmd, item.file,
+      );
       const executionTool = /(?:shell|bash|process|exec|terminal|command)/i.test(proof?.tool ?? "");
       if (!proof || proof.scope !== scope || !proof.success ||
           typeof test.contains !== "string" || test.contains.trim().length < 4 ||
           !proof.output.includes(test.contains) ||
-          !command.includes(item.file) || !executable || !executionTool)
+          !executable || !executionTool)
         throw new Error("Test lacks successful, scope-bound execution of the exact candidate: " + test.observationId);
     }
     return this.mutate((state) => {
@@ -430,16 +442,8 @@ export class ToolRegistry {
     const source = input && typeof input === "object" ? input as Record<string, unknown> : {};
     const command = source.command ?? source.cmd;
     if (typeof command !== "string") return null;
-    const line = command.trim();
-    if (!/^(?:(?:env)\s+)?(?:\/?[\w.\/-]+\/)?(?:node|nodejs|python|python3|bash|sh)\s+/.test(line))
-      return null;
-    // Only a direct interpreter invocation counts as a likely execution.
-    // Do not interpret arbitrary shell scripts or pipelines as provenance.
-    if (/[;|&`]/.test(line)) return null;
-    const argv = line.match(/(?:"[^"]*"|'[^']*'|\S+)/g) ?? [];
-    const argumentsOnly = argv.slice(1).map((token) => token.replace(/^["']|["']$/g, ""));
     for (const entry of this.available(scope)) {
-      if (argumentsOnly.includes(entry.file))
+      if (directInvocation(command, entry.file))
         return { name: entry.name, version: entry.version, scope: entry.scope };
     }
     return null;
