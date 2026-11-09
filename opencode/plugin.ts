@@ -661,6 +661,9 @@ export default {
     const { SkillUpdater } = await import(
       path.join(coreRoot(), "src", "skills.ts")
     );
+    const { ToolRegistry } = await import(
+      path.join(coreRoot(), "src", "tool-registry.ts")
+    );
     const { PlatformStore } = await import(
       path.join(coreRoot(), "src", "platform-store.ts")
     );
@@ -687,6 +690,7 @@ export default {
     );
     const taskStore = new TaskStore(stateRoot());
     const skills = new SkillUpdater(stateRoot(), knowledge, DEFAULT_CONFIG);
+    const toolRegistry = new ToolRegistry(stateRoot());
     // The engagement ledger. It is the same file the Pi harness writes to, so
     // both hosts share one engagement state.
     const platform = new PlatformStore(
@@ -708,6 +712,20 @@ export default {
     // request needs the method loaded, not merely named in the prompt.
     const routedRequired = new Map<string, string[]>();
     const requestBySession = new Map<string, string>();
+    // Host-provided tools are discovered through the host, not invented in a prompt.
+    const hostTools = async () => {
+      try {
+        const list = await ctx.tool.list();
+        return Array.isArray(list)
+          ? list.map((entry: any) => ({
+              name: String(entry.name ?? entry.id ?? ""),
+              description: String(entry.description ?? "").slice(0, 300),
+            })).filter((entry: any) => entry.name)
+          : [];
+      } catch {
+        return [];
+      }
+    };
     const lifecycleController = new AbortController();
     // A different session must never change this request's verifier provider.
     const liveModels = new Map<string, { providerID: string; id: string }>();
@@ -1325,6 +1343,26 @@ export default {
           });
         }
 
+        // Recompute on each context injection, including the same running
+        // session after a tool is activated. This is a hint, never a proof.
+        const capabilities = toolRegistry.context(
+          scope,
+          requestText(event) || requestBySession.get(event.sessionID) || "",
+          await hostTools(),
+        );
+        const capabilityMarker = "Harness capabilities.";
+        const existingCapability = event.system.findIndex(
+          (block: any) => typeof block?.text === "string" &&
+            block.text.startsWith(capabilityMarker),
+        );
+        if (existingCapability >= 0)
+          event.system.splice(existingCapability, 1);
+        event.system.splice(1, 0, { type: "text", text: capabilities });
+        knowledge.audit(scope, "tools.discovered", {
+          sessionID: event.sessionID,
+          query: (requestBySession.get(event.sessionID) ?? "").slice(0, 100),
+        });
+
         // The closing gate. It answers "are we done?" from the state, not
         // from the model's story: whatever still stands is named, and a plan
         // is not a result.
@@ -1501,6 +1539,14 @@ export default {
           success: succeeded(event),
           timestamp: new Date().toISOString(),
         });
+        const managed = toolRegistry.matchExecution(scope, event.input);
+        knowledge.audit(scope, "tools.executed", {
+          sessionID: event.sessionID,
+          tool: observation.tool,
+          observationId: observation.id,
+          success: observation.success,
+          managed,
+        });
         debug(
           `observed ${observation.id} tool=${observation.tool} success=${observation.success} scope=${scope}`,
         );
@@ -1525,6 +1571,91 @@ export default {
       path.join(coreRoot(), "opencode", "workflow-tools.ts")
     );
     await ctx.tool.transform((editor: any) => {
+      editor.add({
+        name: "cyber_toolbox",
+        description: "Discover actual host/CLI/managed capabilities, propose scripts, validate using two observed tests, activate instantly, and roll back. Native shell permissions still apply.",
+        input: {
+          type: "object",
+          properties: {
+            action: { type: "string", enum: ["discover", "list", "propose", "validate", "activate", "promote", "rollback"] },
+            query: { type: "string" },
+            offset: { type: "integer", minimum: 0 },
+            limit: { type: "integer", minimum: 1, maximum: 40 },
+            name: { type: "string" },
+            description: { type: "string" },
+            language: { type: "string", enum: ["mjs", "py", "sh"] },
+            source: { type: "string" },
+            candidateId: { type: "string" },
+            version: { type: "integer", minimum: 1 },
+            tests: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  observationId: { type: "string" },
+                  contains: { type: "string" },
+                  kind: { type: "string", enum: ["positive", "negative"] },
+                },
+                required: ["observationId", "contains", "kind"],
+                additionalProperties: false,
+              },
+            },
+          },
+          required: ["action"],
+          additionalProperties: false,
+        },
+        execute: async (input: any, context: any) => {
+          const scope = await scopeOf(context.sessionID);
+          ensureSession(context.sessionID, scope);
+          const action = String(input.action);
+          if (action === "discover")
+            return { content: JSON.stringify(toolRegistry.discover(
+              scope, input.query ?? "", await hostTools(), input.offset, input.limit,
+            )) };
+          if (action === "list")
+            return { content: JSON.stringify(toolRegistry.list(scope, true)) };
+          if (action === "propose") {
+            const candidate = toolRegistry.propose(scope, input);
+            knowledge.audit(scope, "tools.proposed", {
+              sessionID: context.sessionID, id: candidate.id, name: candidate.name,
+              version: candidate.version, sha256: candidate.sha256,
+            });
+            return { content: JSON.stringify(candidate) };
+          }
+          if (action === "validate") {
+            const candidate = toolRegistry.validate(
+              scope, input.candidateId, input.tests,
+              (ids: string[]) => knowledge.evidence(scope, ids),
+            );
+            knowledge.audit(scope, "tools.validated", {
+              sessionID: context.sessionID, id: candidate.id, tests: candidate.tests,
+            });
+            return { content: JSON.stringify(candidate) };
+          }
+          if (action === "activate" || action === "promote") {
+            if (action === "promote")
+              await assertOperatorDecision(ctx, context, "promote-tool:" + input.candidateId);
+            const active = toolRegistry.activate(scope, input.candidateId, action === "promote");
+            knowledge.audit(scope, "tools.activated", {
+              sessionID: context.sessionID, id: active.id, scope: active.scope,
+              name: active.name, version: active.version,
+            });
+            return { content: JSON.stringify({
+              ...active, availability: "immediate via permissioned shell/process",
+            }) };
+          }
+          if (action === "rollback") {
+            await assertOperatorDecision(ctx, context, "rollback-tool:" + input.name);
+            const restored = toolRegistry.rollback(scope, input.name, input.version);
+            knowledge.audit(scope, "tools.rolled-back", {
+              sessionID: context.sessionID, name: restored.name,
+              version: restored.version,
+            });
+            return { content: JSON.stringify(restored) };
+          }
+          throw new Error("Unknown toolbox action");
+        },
+      });
       addWorkflowTools(editor, {
         ctx,
         workflow,
