@@ -664,6 +664,9 @@ export default {
     const { ToolRegistry } = await import(
       path.join(coreRoot(), "src", "tool-registry.ts")
     );
+    const { identifyToolGaps } = await import(
+      path.join(coreRoot(), "src", "tool-gap.ts")
+    );
     const { PlatformStore } = await import(
       path.join(coreRoot(), "src", "platform-store.ts")
     );
@@ -1577,8 +1580,9 @@ export default {
         input: {
           type: "object",
           properties: {
-            action: { type: "string", enum: ["discover", "list", "propose", "validate", "activate", "promote", "rollback"] },
+            action: { type: "string", enum: ["discover", "plan", "list", "propose", "validate", "activate", "promote", "rollback"] },
             query: { type: "string" },
+            objectives: { type: "array", items: { type: "string" }, maxItems: 25 },
             offset: { type: "integer", minimum: 0 },
             limit: { type: "integer", minimum: 1, maximum: 40 },
             name: { type: "string" },
@@ -1612,6 +1616,24 @@ export default {
             return { content: JSON.stringify(toolRegistry.discover(
               scope, input.query ?? "", await hostTools(), input.offset, input.limit,
             )) };
+          if (action === "plan") {
+            // A bounded top-level inventory can be insufficient: scan the complete
+            // CLI list once and combine it with the full managed registry.
+            const inventory = [
+              ...toolRegistry.scan(),
+              ...toolRegistry.list(scope).map((item: any) => ({
+                name: item.name, origin: "managed", description: item.description,
+              })),
+              ...await hostTools(),
+            ];
+            const gaps = identifyToolGaps(input.objectives ?? [], inventory);
+            knowledge.audit(scope, "tools.gaps", {
+              sessionID: context.sessionID,
+              objectives: gaps.map((gap: any) => gap.objective.slice(0, 120)),
+              unmatched: gaps.filter((gap: any) => gap.status === "unmatched").length,
+            });
+            return { content: JSON.stringify(gaps) };
+          }
           if (action === "list")
             return { content: JSON.stringify(toolRegistry.list(scope, true)) };
           if (action === "propose") {
