@@ -416,6 +416,22 @@ module.exports = async ({ assert, jiti }) => {
       /content changed/,
     );
     fs.writeFileSync(docx, originalDocx);
+    const originalPage = fs.readFileSync(png);
+    fs.appendFileSync(png, "changed");
+    assert.throws(
+      () =>
+        platform.finish(scope, m.id, "report", reportLease, [
+          {
+            role: "report-agent",
+            status: "completed",
+            summary: "Changed page",
+            evidence: [okay.id],
+          },
+        ]),
+      /content changed/,
+      "a rendered page changed after the review blocks the stage",
+    );
+    fs.writeFileSync(png, originalPage);
     platform.finish(scope, m.id, "report", reportLease, [
       {
         role: "report-agent",

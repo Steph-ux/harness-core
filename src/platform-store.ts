@@ -584,6 +584,26 @@ export class PlatformStore {
       if (!row) throw new Error("Reviewed report artifact missing");
       const artifact = parse(row.payload);
       check(artifact.path, artifact.sha256);
+      // The rendered pages are proofs too: re-hash them at the stage close,
+      // not only when the report was registered and reviewed.
+      if (artifact.kind === "report-qa") {
+        const qa = JSON.parse(fs.readFileSync(artifact.path, "utf8"));
+        if (!Array.isArray(qa?.pageImages) || qa.pageImages.length !== qa.pages)
+          throw new Error("Report page manifest is incomplete");
+        const folder = path.dirname(artifact.path);
+        for (const page of qa.pageImages) {
+          if (
+            !page ||
+            typeof page.path !== "string" ||
+            typeof page.sha256 !== "string"
+          )
+            throw new Error("Invalid report page entry");
+          const file = path.resolve(folder, page.path);
+          if (!file.startsWith(folder + path.sep))
+            throw new Error("Report page escapes the report folder");
+          check(file, page.sha256);
+        }
+      }
     }
   }
   finish(
