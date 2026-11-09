@@ -274,7 +274,7 @@ module.exports = async ({ assert, jiti }) => {
     /^[0-9a-f]{64}$/,
     "the capture binds the whole recorded trace",
   );
-  assert.equal(shot.renderer, "imagemagick", "the trace is rendered, not re-run");
+  assert.equal(shot.renderer, "terminal", "the trace is rendered, not re-run");
   assert.ok(shot.bytes > 1000, "the capture has content");
   assert.ok(
     shot.width >= 200 && shot.height >= 40,

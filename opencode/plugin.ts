@@ -235,36 +235,35 @@ function runCommand(
 }
 
 /**
- * Render a recorded trace as the terminal view a report can print.
+ * Render a recorded trace as the terminal window a report can print.
  *
- * The text goes through argv, never through ImageMagick's `@file` form: the
- * default security policy refuses it. No harness metadata is drawn into the
- * image; the provenance lives in the capture link.
+ * The body goes through a temporary file, the command and the title through
+ * argv. No harness metadata is drawn: the provenance lives in the capture
+ * link.
  */
-function renderTrace(text: string, dest: string): void {
-  const binary = process.env.IMAGEMAGICK || "convert";
-  const font = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf";
-  runCommand(
-    binary,
-    [
-      "-background",
-      "white",
-      "-fill",
-      "#1a1a1a",
-      ...(fs.existsSync(font) ? ["-font", font] : []),
-      "-pointsize",
-      "13",
-      "-size",
-      "980x",
-      `caption:${text}`,
-      "-bordercolor",
-      "#e8e8e8",
-      "-border",
-      "18",
-      dest,
-    ],
-    30000,
-  );
+function renderTrace(
+  text: string,
+  dest: string,
+  title: string,
+  command: string,
+): void {
+  const source = path.join(path.dirname(dest), `.trace-${randomUUID()}.txt`);
+  fs.writeFileSync(source, text, { mode: 0o600 });
+  try {
+    runCommand(
+      "python3",
+      [
+        path.join(coreRoot(), "scripts", "render_trace.py"),
+        source,
+        dest,
+        title,
+        command,
+      ],
+      30000,
+    );
+  } finally {
+    fs.rmSync(source, { force: true });
+  }
 }
 
 function commandArguments(value: unknown): string[] {
@@ -2685,7 +2684,12 @@ export default {
             const lines = body.split("\n"),
               shown = lines.slice(0, 40);
             if (lines.length > shown.length) shown.push("…");
-            renderTrace(`$ ${record.command}\n\n${shown.join("\n")}`, dest);
+            renderTrace(
+              shown.join("\n"),
+              dest,
+              path.basename(record.command.trim().split(/\s+/)[0] || "shell"),
+              record.command,
+            );
             const image = fs.readFileSync(dest);
             const link = {
               kind: "rendered-trace",
@@ -2693,7 +2697,7 @@ export default {
               traceHash: outcome.traceHash,
               observationId: input.observationId ?? "",
               path: dest,
-              renderer: "imagemagick",
+              renderer: "terminal",
               width: image.readUInt32BE(16),
               height: image.readUInt32BE(20),
               bytes: image.length,
