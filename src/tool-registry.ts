@@ -158,7 +158,7 @@ export class ToolRegistry {
     checkScope(scope);
     if (scope === "global") throw new Error("A global tool requires validated promotion");
     checkName(input.name);
-    if (!(input.language in LANG)) throw new Error("Unsupported tool language");
+    if (!Object.hasOwn(LANG, input.language)) throw new Error("Unsupported tool language");
     if (!input.description?.trim() || input.description.length > 500 ||
         redactText(input.description) !== input.description)
       throw new Error("Invalid tool description");
@@ -184,6 +184,7 @@ export class ToolRegistry {
   }
   validate(scope: string, id: string, tests: ToolTest[], evidence: (ids: string[]) => {
     id: string; success: boolean; output: string; input: unknown; scope: string;
+    tool?: string;
   }[]): ToolRevision {
     checkScope(scope);
     if (!Array.isArray(tests) || tests.length < 2 || tests.length > 12 ||
@@ -201,10 +202,11 @@ export class ToolRegistry {
       // Echoing a file path through an unrelated tool must not validate code.
       // Only recorded process/shell execution tools qualify as test evidence.
       const executable = /(?:^|[\\/" ])(?:node|nodejs|python3?|bash|sh)(?:[ "])/i.test(command);
+      const executionTool = /(?:shell|bash|process|exec|terminal|command)/i.test(proof?.tool ?? "");
       if (!proof || proof.scope !== scope || !proof.success ||
           typeof test.contains !== "string" || test.contains.trim().length < 4 ||
           !proof.output.includes(test.contains) ||
-          !command.includes(item.file) || !executable)
+          !command.includes(item.file) || !executable || !executionTool)
         throw new Error("Test lacks successful, scope-bound execution of the exact candidate: " + test.observationId);
     }
     return this.mutate((state) => {
@@ -220,7 +222,8 @@ export class ToolRegistry {
     checkScope(scope);
     return this.mutate((state) => {
       const item = state.revisions.find((entry) => entry.id === id && entry.scope === scope);
-      if (!item || item.status !== "validated") throw new Error("Validated candidate required");
+      if (!item || (item.status !== "validated" && !(global && item.status === "active")))
+        throw new Error("Validated candidate required");
       this.verifyFile(item);
       if (global) globallyReusable(fs.readFileSync(item.file, "utf8"));
       const targetScope = global ? "global" : scope;
