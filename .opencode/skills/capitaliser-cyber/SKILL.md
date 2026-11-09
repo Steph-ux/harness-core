@@ -81,6 +81,16 @@ La boîte à outils de l’opérateur est `/home/moon/hacking/Mes-outils/`. Un s
 - Toute addition, modification ou retrait est daté dans `CHANGELOG.md`. Un enseignement issu d’un échec vérifié va dans `LEÇONS.md`.
 - Un outil de preuve joint son contrôle négatif ; une absence de résultat n’est jamais présentée comme une preuve d’absence.
 
+## Acquérir une capacité manquante
+
+Un binaire absent est un manque à combler, pas une raison d'abandonner l'étape. L'ordre est fixe.
+
+1. **Inventorier d'abord.** `cyber_toolbox plan` avec les objectifs : un outil déjà présent peut couvrir le besoin sous un autre nom.
+2. **Chercher avant de construire.** Chercher un outil maintenu existant (GitHub, page de release de l'éditeur). Juger l'adéquation : interface, langage, licence, dernière version, problèmes de sécurité ouverts. Ne pas prendre un nom pour une capacité.
+3. **Installer sous une règle bornée.** Épingler la version, télécharger la release, vérifier l'empreinte publiée, installer sous `~/.local/opt` ou `~/.local/bin`. Ne jamais envoyer un script distant directement dans un shell. Jamais de root sans accord explicite de l'opérateur. Consigner l'URL, le commit ou la version, la licence et le sha256 dans l'observation de l'installation.
+4. **Adapter seulement si rien ne convient.** `cyber_toolbox propose` avec la `provenance` de la source de départ, puis `validate` avec des observations distinctes positives et négatives du candidat exact, puis `activate`.
+5. **Dire ce qui a été fait.** Le rapport indique si l'outil était présent, installé ou adapté, avec la version réellement utilisée. Une installation non vérifiée n'est pas une capacité.
+
 ## Intégration au harnais
 
 - Lire `cyber_report action=status` avant la passe de capitalisation.

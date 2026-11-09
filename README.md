@@ -239,7 +239,10 @@ not add a native OpenCode tool per script.
 - `list`: returns the versions of the scope, with candidates and history.
 - `propose`: writes a **candidate** version, without executing it or making it
   available to other missions. Supported formats: `mjs`, `py`, `sh`.
-  Candidates stay isolated under `capabilities/staging/`.
+  Candidates stay isolated under `capabilities/staging/`. An optional
+  `provenance` records the source it was taken from or adapted from
+  (`url` over https, `commit`, `license`); a URL carrying credentials is
+  refused, and the provenance is kept with the revision.
 - `validate`: checks the syntax without running the script, then requires two
   distinct successful observations (a positive test and a negative test) from
   the same scope, containing the exact path of the candidate and the expected
@@ -274,6 +277,14 @@ the effective calls. `cyber_toolbox usage` exposes their results and a
 conservative *candidateManagedCommand* hint: it never proves that a script
 produced the expected effects. No extra audit row is written on each injection
 of the capability block or each operational call.
+
+Acquiring a missing capability follows a fixed order: inventory with `plan`, search
+for an existing maintained tool, judge the fit, then install it under a bounded
+rule (pinned version, verified checksum, `~/.local/opt`, never root without the
+operator, never a remote script piped into a shell) and record the URL, version,
+licence and sha256. Adapt only when nothing fits, through `propose` with its
+provenance, then `validate` on distinct positive and negative observations, then
+`activate`.
 
 Creating files grants neither target authorisation nor extra system access.
 Validation is not a substitute for a human security review. Execution evidence
