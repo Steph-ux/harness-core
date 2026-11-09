@@ -199,17 +199,36 @@ module.exports = async ({ assert, jiti }) => {
       processStatus(registry.get(ran.scope, ran.id)),
     ),
   );
-  const read = JSON.parse((await command({ action: "read", id: ran.id })).content);
+  const readContext = {
+    sessionID: "ses_cap",
+    agent: "build",
+    messageID: "msg_cap",
+    id: "call-read",
+    progress: () => {},
+    signal: new AbortController().signal,
+  };
+  const read = JSON.parse(
+    (
+      await fixture.tools
+        .get("cyber_process")
+        .execute({ action: "read", id: ran.id }, readContext)
+    ).content,
+  );
   assert.match(read.trace, /marqueur-harness/, "the trace carries the output");
+  assert.equal(
+    read.observationId,
+    observationId("ses_cap", "call-read"),
+    "the read names the observation a capture binds to",
+  );
   await fixture.hooks.get("execute.after")({
     tool: "cyber_process",
     sessionID: "ses_cap",
-    id: "call-process-read",
+    id: "call-read",
     input: { action: "read", id: ran.id },
     status: "completed",
-    result: { content: JSON.stringify(await command({ action: "read", id: ran.id })) },
+    result: { content: JSON.stringify(read) },
   });
-  const readObservation = observationId("ses_cap", "call-process-read");
+  const readObservation = read.observationId;
 
   // The observation must be the read of the process that is rendered.
   await assert.rejects(

@@ -2599,6 +2599,9 @@ export default {
               ...publicProcess(record),
               ...result,
               status: outcome?.status ?? processStatus(record),
+              // The capture binds to the observation of this read, so name it
+              // here: the model should not have to guess its own call id.
+              observationId: observationId(context.sessionID, context.id),
               trace: readTrace(record.logPath, input.tail ?? 200),
             }),
             metadata: {
