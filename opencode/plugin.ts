@@ -1624,7 +1624,9 @@ export default {
               ...toolRegistry.list(scope).map((item: any) => ({
                 name: item.name, origin: "managed", description: item.description,
               })),
-              ...await hostTools(),
+              ...(await hostTools()).map((item: any) => ({
+                ...item, origin: "host" as const,
+              })),
             ];
             const gaps = identifyToolGaps(input.objectives ?? [], inventory);
             knowledge.audit(scope, "tools.gaps", {
