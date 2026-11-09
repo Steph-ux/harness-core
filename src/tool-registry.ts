@@ -197,10 +197,14 @@ export class ToolRegistry {
     const proofs = evidence(tests.map((test) => test.observationId));
     for (const test of tests) {
       const proof = proofs.find((entry) => entry.id === test.observationId);
+      const command = JSON.stringify(proof?.input ?? {});
+      // Echoing a file path through an unrelated tool must not validate code.
+      // Only recorded process/shell execution tools qualify as test evidence.
+      const executable = /(?:^|[\\/" ])(?:node|nodejs|python3?|bash|sh)(?:[ "])/i.test(command);
       if (!proof || proof.scope !== scope || !proof.success ||
           typeof test.contains !== "string" || test.contains.trim().length < 4 ||
           !proof.output.includes(test.contains) ||
-          !JSON.stringify(proof.input).includes(item.file))
+          !command.includes(item.file) || !executable)
         throw new Error("Test lacks successful, scope-bound execution of the exact candidate: " + test.observationId);
     }
     return this.mutate((state) => {
