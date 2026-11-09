@@ -34,6 +34,10 @@ for (const file of files) {
     if (text.includes(pattern))
       offenders.push(`${file} references ${pattern}`);
   }
+  // Runtime tool directories must come from environment configuration.
+  // A contributor-specific home fallback breaks when the lab is relocated.
+  if (/Mes-outils|[\\/]home[\\/][a-z0-9_-]+[\\/]hacking[\\/]|[\\/]Users[\\/][a-z0-9_-]+[\\/]hacking[\\/]/i.test(text))
+    offenders.push(`${file} embeds a personal tool directory`);
 }
 
 // The core must also resolve on its own: every internal import has to point
