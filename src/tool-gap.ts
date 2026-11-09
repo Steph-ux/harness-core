@@ -9,7 +9,7 @@ export interface CapabilityGap {
   status: "candidate-tools" | "unmatched";
   note: string;
 }
-const WORDS = new Set(["the", "and", "with", "for", "from", "une", "des", "les", "dans", "pour", "avec", "sur", "audit", "tool", "tools", "outil", "outils", "test"]);
+const WORDS = new Set(["the", "and", "with", "for", "from", "une", "des", "les", "dans", "pour", "avec", "sur", "audit", "tool", "tools", "outil", "outils", "test", "not", "never", "need", "needs"]);
 function words(text: string): Set<string> {
   return new Set(text.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .toLowerCase().split(/[^a-z0-9]+/).filter((part) => part.length > 2 && !WORDS.has(part)));
