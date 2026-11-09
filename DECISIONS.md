@@ -3,6 +3,22 @@
 One entry per decision that is expensive to reverse. Each states what was
 decided, why, and what it costs. New entries go at the top.
 
+## 2026-11-09 — An artifact is typed and filed by its kind
+
+**Decision.** An artifact carries one kind, and a mission that declared a root
+stores it in the folder of that kind: `poc`/`script` under `pocs/`, `capture`
+under `preuves/captures` and only as a PNG or JPEG, `dump` under
+`preuves/dumps`, `fixture` under `preuves/fixtures`, `evidence` under
+`preuves/extraits`, `rule` under `regles`. A capture whose bytes are not an
+image, a PoC whose file is not executable source, and a kind filed in another
+folder are refused.
+**Why.** One folder for everything produced 34 text files and 75 response bodies
+presented as evidence, and a 404 body cited as a proof. A body is an annex, not
+a proof; the proof of a request is the observation of the command and the
+capture of its recorded trace.
+**Cost.** Every artifact now needs its folder and its real type; an engagement
+created without a root keeps the old freedom until its next mission declares one.
+
 ## 2026-11-05 — The engagement root anchors the evidence
 
 **Decision.** `cyber_mission action=create` takes a `root`: the directory that

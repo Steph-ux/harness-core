@@ -84,7 +84,7 @@ La boîte à outils de l’opérateur est `/home/moon/hacking/Mes-outils/`. Un s
 ## Intégration au harnais
 
 - Lire `cyber_report action=status` avant la passe de capitalisation.
-- Enregistrer scripts, règles et fixtures avec `cyber_report action=artifact`, liés aux observations des tests réellement exécutés.
+- Enregistrer scripts, règles et fixtures avec `cyber_report action=artifact`, liés aux observations des tests réellement exécutés. Une mission qui a déclaré son `root` exige le bon dossier : `script` et `poc` sous `pocs/`, `rule` sous `regles/`, `fixture` sous `preuves/fixtures/`, `dump` sous `preuves/dumps/`, `capture` sous `preuves/captures/` et en PNG ou JPEG. Un corps de réponse n'est pas une preuve : il est un `dump`, et la preuve d'une commande est son observation puis sa capture.
 - Consigner une passe bornée par état de mission avec `cyber_capitalise action=record` : `none`, `candidate` ou `validated`. La validation exige un artefact et des observations distinctes pour les tests positif et négatif.
 - Utiliser `cyber_method` pour une méthode locale. L’activation exige toujours deux sessions et le seuil du noyau ; la promotion globale exige une décision explicite de l’opérateur.
 - **Le nettoyage se fait uniquement après restitution du rapport.** Préserver jusque-là les preuves, comptes et objets de test selon le mandat. Ne pas ajouter de suppression automatique dans un PoC, un test de validation ou une clause `finally` sur les ressources de mission.
