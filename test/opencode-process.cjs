@@ -186,6 +186,44 @@ module.exports = async ({ assert, jiti, modules }) => {
     fs.writeFileSync(large, "x".repeat(500000) + "\nlast-line\n");
     assert.match(readTrace(large, 2), /last-line/);
     assert.ok(readTrace(large).length <= 24000);
+    // A wrapper that cannot find its target exits 127 with an empty trace;
+    // the read says so instead of leaving an empty output as a result.
+    const wrapped = await call({
+      action: "run",
+      argv: ["nice", "no-such-binary-harness"],
+      timeout: 5,
+    });
+    await until(() =>
+      ["succeeded", "failed", "timed_out", "stopped"].includes(
+        processStatus(registry.get(wrapped.scope, wrapped.id)),
+      ),
+    );
+    const wrappedRead = await call({ action: "read", id: wrapped.id });
+    assert.equal(wrappedRead.exitCode, 127, "the wrapper exits 127");
+    assert.match(
+      String(wrappedRead.diagnosis),
+      /127/,
+      "the read names the missing-binary case",
+    );
+
+    // The executable itself is missing: a spawn error, no exit code.
+    const absent = await call({
+      action: "run",
+      argv: ["/nonexistent/harness-binary"],
+      timeout: 5,
+    });
+    await until(() =>
+      ["succeeded", "failed", "timed_out", "stopped"].includes(
+        processStatus(registry.get(absent.scope, absent.id)),
+      ),
+    );
+    const absentRead = await call({ action: "read", id: absent.id });
+    assert.match(
+      String(absentRead.diagnosis),
+      /missing/,
+      "the read names the missing executable",
+    );
+
   } finally {
     const file = path.join(state, "processes.json");
     for (const record of fs.existsSync(file) ? JSON.parse(fs.readFileSync(file)) : []) {

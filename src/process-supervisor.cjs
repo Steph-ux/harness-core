@@ -97,7 +97,9 @@ try {
                 : "failed",
           ...(descendantsOutlived
             ? { reason: "descendants-outlived-command" }
-            : {}),
+            : error
+              ? { reason: error.code || "spawn-error" }
+              : {}),
           exitCode: code,
           signal: signal || null,
           finishedAt: new Date().toISOString(),

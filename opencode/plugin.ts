@@ -608,6 +608,7 @@ export default {
       DEFAULT_DEADLINE_MS,
       MAX_DEADLINE_MS,
       ProcessRegistry,
+      processOutcome,
       processStatus,
       verifiedOutcome,
       publicProcess,
@@ -2771,6 +2772,22 @@ export default {
           const record = processes.get(scope, input.id),
             outcome = verifiedOutcome(record);
           const { runKey, ...result } = outcome ?? ({} as any);
+          const trace = readTrace(record.logPath, input.tail ?? 200),
+            seen = outcome ?? processOutcome(record);
+          // A missing binary is not always an ENOENT: a wrapper such as nice,
+          // mono or bash exits 127 with an empty trace, and an empty success is
+          // not a result. Say which case it is, from the recorded outcome.
+          const diagnosis =
+            seen?.exitCode === 127
+              ? "exit 127: a binary the command calls is missing (often a wrapper such as nice, mono or bash); an empty output is not a success"
+              : /ENOENT|EACCES|spawn-error/.test(String(seen?.reason ?? "")) ||
+                  /^Execution failed: (ENOENT|EACCES)/.test(trace)
+                ? "the executable itself is missing or not executable"
+                : seen?.status === "failed" && seen?.exitCode == null
+                  ? "the command failed without an exit code; the executable may not have started"
+                  : outcome?.status === "succeeded" && !trace.trim()
+                  ? "the command succeeded but printed nothing; that is not a result"
+                  : undefined;
           return {
             content: JSON.stringify({
               ...publicProcess(record),
@@ -2779,7 +2796,8 @@ export default {
               // The capture binds to the observation of this read, so name it
               // here: the model should not have to guess its own call id.
               observationId: observationId(context.sessionID, context.id),
-              trace: readTrace(record.logPath, input.tail ?? 200),
+              ...(diagnosis ? { diagnosis } : {}),
+              trace,
             }),
             metadata: {
               evidenceSuccess:
