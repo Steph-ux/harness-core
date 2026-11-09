@@ -627,6 +627,9 @@ export default {
     const { PlatformStore } = await import(
       path.join(coreRoot(), "src", "platform-store.ts")
     );
+    const { summarizeOsv } = await import(
+      path.join(coreRoot(), "src", "osv.ts")
+    );
     const {
       assertNotRoot,
       captureDestination,
@@ -1757,6 +1760,76 @@ export default {
       });
 
       editor.add({
+        name: "cyber_cve",
+        description:
+          "Look up known vulnerabilities for a package version in OSV, the public vulnerability database. The lookup is a tool call, so it leaves an observation; the answer is bounded before it reaches the model.",
+        input: {
+          type: "object",
+          properties: {
+            action: { type: "string", enum: ["lookup"] },
+            ecosystem: {
+              type: "string",
+              enum: [
+                "PyPI", "npm", "Go", "Debian", "Ubuntu", "Alpine", "Packagist",
+                "Maven", "NuGet", "RubyGems", "crates.io", "Hex", "GitHub Actions",
+              ],
+            },
+            package: {
+              type: "string",
+              description: "The package name, as the ecosystem writes it.",
+            },
+            version: { type: "string", description: "The version to test." },
+          },
+          required: ["action"],
+          additionalProperties: false,
+        },
+        execute: async (input: any) => {
+          if (input.action !== "lookup") throw new Error("Unknown CVE action");
+          const ecosystems = [
+            "PyPI", "npm", "Go", "Debian", "Ubuntu", "Alpine", "Packagist",
+            "Maven", "NuGet", "RubyGems", "crates.io", "Hex", "GitHub Actions",
+          ];
+          const ecosystem = String(input.ecosystem ?? "");
+          if (!ecosystems.includes(ecosystem))
+            throw new Error("Unsupported OSV ecosystem");
+          const name = String(input.package ?? "").trim();
+          if (!/^[A-Za-z0-9@][A-Za-z0-9._/@+-]{0,200}$/.test(name))
+            throw new Error("Invalid package name");
+          const version =
+            input.version === undefined ? undefined : String(input.version);
+          if (
+            version !== undefined &&
+            (!version.trim() ||
+              version.length > 100 ||
+              /[\s\u0000-\u001f]/.test(version))
+          )
+            throw new Error("Invalid package version");
+          const response = await fetch("https://api.osv.dev/v1/query", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              package: { ecosystem, name },
+              ...(version ? { version } : {}),
+            }),
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!response.ok)
+            throw new Error(`OSV refused the lookup (${response.status})`);
+          const text = await response.text();
+          if (text.length > 512000)
+            throw new Error("OSV response is too large");
+          return {
+            content: JSON.stringify({
+              ecosystem,
+              package: name,
+              version: version ?? null,
+              vulnerabilities: summarizeOsv(JSON.parse(text)),
+            }),
+          };
+        },
+      });
+
+      editor.add({
         name: "cyber_tasks",
         description:
           "Keep the running step list. A task closes only against a successful observation. A blocked task must give its reason. Use the cyber_memory action recent to obtain the observation ids that prove the work.",
@@ -2524,7 +2597,8 @@ export default {
               type: "string",
               enum: [
                 "domain", "host", "ip", "url", "org", "person", "account", "repo",
-                "secret", "certificate", "service", "technology", "other",
+                "secret", "certificate", "service", "technology", "vulnerability",
+                "other",
               ],
             },
             key: {

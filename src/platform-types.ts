@@ -89,6 +89,7 @@ export const ENTITY_TYPES = [
   "certificate",
   "service",
   "technology",
+  "vulnerability",
   "other",
 ] as const;
 export type EntityType = (typeof ENTITY_TYPES)[number];
