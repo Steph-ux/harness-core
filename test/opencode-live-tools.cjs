@@ -5,6 +5,7 @@ const { makeContext } = require("./opencode-fixture.cjs");
 const CORE = path.resolve(__dirname, "..");
 module.exports = async ({ assert, jiti }) => {
   const { ToolRegistry } = jiti(path.join(CORE, "src", "tool-registry.ts"));
+  const { toolNote } = jiti(path.join(CORE, "src", "tool-catalog.ts"));
   const { scopeFor } = jiti(path.join(CORE, "src", "util.ts"));
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "harness-live-tools-"));
   const state = path.join(base, "state");
@@ -167,6 +168,9 @@ module.exports = async ({ assert, jiti }) => {
     fs.writeFileSync(realTool, "#!/bin/sh\necho ok\n");
     fs.chmodSync(realTool, 0o755);
     fs.symlinkSync("real-tool", path.join(bin, "linked-tool"));
+    const known = path.join(bin, "nmap");
+    fs.writeFileSync(known, "");
+    fs.chmodSync(known, 0o755);
     fs.symlinkSync("missing-tool", path.join(bin, "broken-tool"));
     fs.mkdirSync(path.join(bin, "a-directory"));
     // A configured directory may be a symlink (`/bin` -> `/usr/bin`).
@@ -182,6 +186,15 @@ module.exports = async ({ assert, jiti }) => {
       assert.ok(names.includes("real-tool"), "a regular executable is discovered");
       assert.ok(!names.includes("broken-tool"), "a dangling link is ignored");
       assert.ok(!names.includes("a-directory"), "a directory is not a tool");
+      const described = registry
+        .scan(true)
+        .find((item) => item.name === "nmap");
+      assert.equal(
+        described.description,
+        toolNote("nmap"),
+        "a known binary carries its purpose",
+      );
+      assert.equal(toolNote("no-such-tool"), undefined, "an unknown name has no note");
     } finally {
       if (savedPaths === undefined) delete process.env.HARNESS_TOOL_PATHS;
       else process.env.HARNESS_TOOL_PATHS = savedPaths;

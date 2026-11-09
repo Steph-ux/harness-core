@@ -9,6 +9,7 @@ import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { assertPlainPath, atomicWrite, hash, redactText } from "./util";
+import { toolNote } from "./tool-catalog";
 
 export type ToolLanguage = "mjs" | "py" | "sh";
 export type ToolStatus = "candidate" | "validated" | "active" | "retired";
@@ -455,7 +456,9 @@ export class ToolRegistry {
             continue;
           found.set(entry.name, {
             name: entry.name, origin: "path",
-            description: "Executable from PATH or explicitly configured directory",
+            description:
+              toolNote(entry.name) ??
+              "Executable from PATH or explicitly configured directory",
             command: file,
           });
         }

@@ -278,8 +278,10 @@ not add a native OpenCode tool per script.
 
 - `discover`: ranks commands from `PATH`, from the `HARNESS_TOOL_HOME`
   directory (no default value), from `HARNESS_TOOL_PATHS`, the managed scripts
-  and the host catalogue tools. This is not proof of execution. Linked paths are
-  ignored.
+  and the host catalogue tools. A known binary carries its purpose (nmap: port,
+  service and NSE script scanning) from `src/tool-catalog.ts`; an unknown one
+  only says it is an executable. This is not proof of execution. Linked paths
+  are followed when they resolve to a regular file.
 - `plan`: compares up to 25 objectives with the current inventory. A match only
   indicates a candidate tool, never a genuinely tested coverage.
 - `list`: returns the versions of the scope, with candidates and history.
