@@ -57,8 +57,7 @@ const VALID_NAME = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const LANG: Record<ToolLanguage, string> = {
   mjs: "node", py: "python3", sh: "bash",
 };
-const MAX_SCAN = 8000;
-const MAX_PER_DIRECTORY = 3000;
+const MAX_SCAN = 20000;
 const MAX_DIRECTORY_COUNT = 40;
 const MAX_REVISIONS = 2000;
 const MAX_SCOPE_REVISIONS = 250;
@@ -435,7 +434,7 @@ export class ToolRegistry {
         assertPlainPath(real);
         if (!fs.statSync(real).isDirectory()) throw new Error("Not a directory");
         const entries = fs.readdirSync(real, { withFileTypes: true });
-        for (const entry of entries.slice(0, MAX_PER_DIRECTORY)) {
+        for (const entry of entries) {
           if (found.size >= MAX_SCAN) break;
           // Kali ships many tools as symlinks (msfconsole, msfvenom). Follow a
           // link to a regular executable, and ignore directories and dangling

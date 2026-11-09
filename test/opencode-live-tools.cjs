@@ -187,6 +187,29 @@ module.exports = async ({ assert, jiti }) => {
       else process.env.HARNESS_TOOL_PATHS = savedPaths;
     }
 
+    // A PATH directory can hold more entries than any per-directory cap:
+    // /usr/bin has more than 4000, so every executable must be seen.
+    const many = path.join(base, "many");
+    fs.mkdirSync(many);
+    for (let index = 0; index < 3205; index += 1) {
+      const file = path.join(many, `hc-${String(index).padStart(4, "0")}`);
+      fs.writeFileSync(file, "");
+      fs.chmodSync(file, 0o755);
+    }
+    const savedMany = process.env.HARNESS_TOOL_PATHS;
+    process.env.HARNESS_TOOL_PATHS = many;
+    try {
+      const names = registry.scan(true).map((item) => item.name);
+      assert.equal(
+        names.filter((name) => name.startsWith("hc-")).length,
+        3205,
+        "no executable is dropped by a per-directory cap",
+      );
+    } finally {
+      if (savedMany === undefined) delete process.env.HARNESS_TOOL_PATHS;
+      else process.env.HARNESS_TOOL_PATHS = savedMany;
+    }
+
     const plugin = jiti(path.join(CORE, "opencode", "plugin.ts")).default;
     const fixture = makeContext(base);
     await plugin.setup(fixture.ctx);
