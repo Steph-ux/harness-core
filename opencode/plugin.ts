@@ -1622,7 +1622,7 @@ export default {
             const inventory = [
               ...toolRegistry.scan(),
               ...toolRegistry.list(scope).map((item: any) => ({
-                name: item.name, origin: "managed", description: item.description,
+                name: item.name, origin: "managed" as const, description: item.description,
               })),
               ...(await hostTools()).map((item: any) => ({
                 ...item, origin: "host" as const,
