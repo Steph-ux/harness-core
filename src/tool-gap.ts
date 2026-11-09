@@ -15,7 +15,7 @@ function words(text: string): Set<string> {
     .toLowerCase().split(/[^a-z0-9]+/).filter((part) => part.length > 2 && !WORDS.has(part)));
 }
 export function identifyToolGaps(objectives: string[], available: ToolCapability[]): CapabilityGap[] {
-  if (!Array.isArray(objectives) || objectives.length > 25 ||
+  if (!Array.isArray(objectives) || !objectives.length || objectives.length > 25 ||
       objectives.some((item) => typeof item !== "string" || !item.trim() || item.length > 300))
     throw new Error("Provide 1-25 short, concrete objectives");
   return objectives.map((objective) => {
