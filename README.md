@@ -174,8 +174,20 @@ npm run check             # TypeScript, neutralité et ressources des procédure
 npm test                  # suites autonomes, sans modèle externe
 python3 test/report-pipeline.py
 npm run test:report       # dépendances de rendu nécessaires
+npm run verify            # les trois contrôles ci-dessus, en une commande
 OPENCODE_BINARY=/chemin/opencode2 node scripts/native-smoke.cjs
 ```
+
+Le workflow hébergé peut être indisponible (facturation Actions). Le dépôt
+fournit alors un contrôle local équivalent, exécuté avant chaque push :
+
+```bash
+git config core.hooksPath .githooks   # une fois par clone
+```
+
+`.githooks/pre-push` lance `npm run verify` : TypeScript et neutralité, les
+suites autonomes, puis les contrats du rapport. Un push qui échoue à l'un des
+trois est refusé localement.
 
 Les tests utilisent des fixtures synthétiques sans cible client. Le contrôle
 natif 2.0.26 couvre le catalogue, les outils dans leur périmètre et le refus du
