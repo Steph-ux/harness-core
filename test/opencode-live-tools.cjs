@@ -88,6 +88,11 @@ module.exports = async ({ assert, jiti }) => {
       action: "discover", query: "fixture validator",
     }, context)).content);
     assert.ok(exposed.tools.some((item) => item.origin === "managed"));
+    const coverage = JSON.parse((await toolbox.execute({
+      action: "plan", objectives: ["fixture validator", "uniquely-not-installed-123abc"],
+    }, context)).content);
+    assert.equal(coverage[0].status, "candidate-tools");
+    assert.equal(coverage[1].status, "unmatched");
     const prompt = fixture.contextEvent({
       sessionID: context.sessionID,
       messages: [{ info: { role: "user" }, parts: [{
