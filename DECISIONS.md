@@ -3,6 +3,19 @@
 One entry per decision that is expensive to reverse. Each states what was
 decided, why, and what it costs. New entries go at the top.
 
+## 2026-11-09 — A branch is a role, and it closes after its sub-steps
+
+**Decision.** `cyber_tasks assets` seeds one branch per known entity, with the
+steps its kind needs (`src/coverage-roles.ts`), and a task cannot be completed
+while a sub-step under it is still open.
+**Why.** A host is not "done" because someone looked at it once; it is done when
+its ports, TLS, HTTP surface and validation are observed. A role is data, so the
+checklist adapts to the kind of thing instead of being the same five words for
+everything.
+**Cost.** More tasks per asset and a stricter closure; a role that does not fit
+falls back to surface plus validation, and the model still has to observe each
+step.
+
 ## 2026-11-09 — A target is a tree, and its coverage is a file
 
 **Decision.** Tasks nest to a bounded depth, `cyber_tasks assets` seeds one branch

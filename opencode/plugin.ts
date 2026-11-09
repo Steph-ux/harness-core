@@ -631,6 +631,9 @@ export default {
     const { summarizeOsv } = await import(
       path.join(coreRoot(), "src", "osv.ts")
     );
+    const { assetSteps } = await import(
+      path.join(coreRoot(), "src", "coverage-roles.ts")
+    );
     const {
       assertNotRoot,
       captureDestination,
@@ -1919,7 +1922,19 @@ export default {
             return { content: JSON.stringify({ path: file }) };
           }
           if (action === "assets") {
-            const assets = ["host", "domain", "url"]
+            const assets = [
+              "host",
+              "domain",
+              "ip",
+              "url",
+              "service",
+              "technology",
+              "certificate",
+              "account",
+              "repo",
+              "org",
+              "person",
+            ]
               .flatMap((type) => platform.entities(scope, { type, limit: 100 }))
               .slice(0, 50);
             const existing = new Set(
@@ -1931,12 +1946,7 @@ export default {
               if (existing.has(title)) continue;
               const parent = taskStore.add(scope, { title });
               created.push(parent.id);
-              for (const step of [
-                "surface",
-                "fingerprint",
-                "web",
-                "validation",
-              ])
+              for (const step of assetSteps(asset.type))
                 created.push(
                   taskStore.add(scope, {
                     title: `${title} — ${step}`,

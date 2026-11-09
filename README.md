@@ -102,8 +102,10 @@ returns the hierarchy, `markdown` renders it as an indented checklist, and
 `export` writes `couverture.md` into the declared engagement — the map a
 person, or an outliner such as CherryTree, can read: the target, its branches,
 what is closed with its observations, and what is blocked with its reason.
-`assets` seeds one branch per known host, domain or URL, so a target list
-becomes a checklist instead of a paragraph.
+`assets` seeds one branch per known entity, with the steps its kind needs: a host
+gets surface, DNS, TLS, HTTP, ports then validation; an account gets OSINT,
+repositories, secrets then validation. A branch closes only after its sub-steps,
+so a target list becomes a checklist instead of a paragraph.
 
 ## Platforms and portability
 

@@ -67,6 +67,22 @@ module.exports = async ({ assert, jiti }) => {
       /subtasks/,
       "a parent with children is not removed",
     );
+    const pair = tasks.add(scope, { title: "pair" });
+    const pairChild = tasks.add(scope, {
+      title: "pair-child",
+      parent: pair.id,
+    });
+    assert.throws(
+      () => tasks.complete(scope, pair.id, ["obs-pair"]),
+      /subtasks/,
+      "a branch closes only after its sub-steps",
+    );
+    tasks.complete(scope, pairChild.id, ["obs-pair-child"]);
+    assert.equal(
+      tasks.complete(scope, pair.id, ["obs-pair"]).status,
+      "completed",
+      "the branch closes once its sub-steps are done",
+    );
 
     tasks.start(scope, leaf.id);
     tasks.complete(scope, leaf.id, ["obs-tree-1"]);
@@ -137,11 +153,32 @@ module.exports = async ({ assert, jiti }) => {
         (await tool.execute({ action: "assets" }, context)).content,
       );
       assert.equal(planted.assets, 2, "both assets are seen");
-      assert.equal(planted.created.length, 10, "one branch of five per asset");
+      assert.equal(planted.created.length, 13, "each asset grows its own branch");
       const second = JSON.parse(
         (await tool.execute({ action: "assets" }, context)).content,
       );
       assert.equal(second.created.length, 0, "the planting is idempotent");
+      platform.upsertEntity(scope, {
+        type: "account",
+        key: "github:someone",
+        observationIds: [proof.id],
+      });
+      const accountPlanted = JSON.parse(
+        (await tool.execute({ action: "assets" }, context)).content,
+      );
+      assert.equal(
+        accountPlanted.created.length,
+        5,
+        "an account gets its own role",
+      );
+      const accountBranch = tasks
+        .tree(scope)
+        .find((node) => node.title === "account:github:someone");
+      assert.deepEqual(
+        accountBranch.children.map((node) => node.title.split(" — ").pop()),
+        ["osint", "repos", "secrets", "validation"],
+        "an account is OSINT, repositories, secrets, then validation",
+      );
       const exported = JSON.parse(
         (await tool.execute({ action: "export" }, context)).content,
       );

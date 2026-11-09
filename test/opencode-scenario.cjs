@@ -125,7 +125,7 @@ module.exports = async ({ assert, jiti }) => {
       node.title.startsWith("host:www.bank.test"),
     );
     assert.ok(branch, "the asset is a branch");
-    assert.equal(branch.children.length, 4, "four steps hang off it");
+    assert.equal(branch.children.length, 6, "a host grows its own six steps");
     await call("cyber_tasks", {
       action: "complete",
       id: branch.children[0].id,

@@ -262,6 +262,12 @@ export class TaskStore {
         )
       )
         throw new Error("Task dependency is not completed");
+      // A branch is not done while a sub-step under it is still open.
+      if (
+        status === "completed" &&
+        rows.some((r) => r.parentId === id && r.status !== "completed")
+      )
+        throw new Error("A task closes only after its subtasks");
       row.status = status;
       row.updatedAt = now();
       if (status === "blocked")
