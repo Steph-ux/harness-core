@@ -428,7 +428,7 @@ module.exports = async ({ assert, jiti }) => {
             evidence: [okay.id],
           },
         ]),
-      /content changed/,
+      /changed/,
       "a rendered page changed after the review blocks the stage",
     );
     fs.writeFileSync(png, originalPage);
@@ -547,6 +547,25 @@ module.exports = async ({ assert, jiti }) => {
       ],
     });
     assert.equal(capitalized.outcome, "validated");
+    assert.equal(workflow.status(scope, m.id).capitalizations.length, 1);
+    const repeated = workflow.capitalization(scope, m.id, {
+      outcome: "validated",
+      reason: "Synthetic parser tested a second time",
+      artifactIds: [reusable.id],
+      tests: [
+        {
+          observationId: va.id,
+          contains: "POSITIF résultat",
+          kind: "positive",
+        },
+        { observationId: vb.id, contains: "NEGATIF témoin", kind: "negative" },
+      ],
+    });
+    assert.equal(
+      repeated.id,
+      capitalized.id,
+      "a repeated pass keeps the identity it was recorded under",
+    );
     assert.equal(workflow.status(scope, m.id).capitalizations.length, 1);
     fixture.ctx.permission.explicit = async () => "reject";
     await assert.rejects(

@@ -50,6 +50,8 @@ export function searchTokens(query: string): string[] {
 export class PlatformStore {
   private db: DatabaseSync;
   private closed = false;
+  /** The report gate, registered by the engagement workflow that owns it. */
+  private reportGuard?: (scope: string, missionId: string) => void;
   constructor(
     filename: string,
     private evidenceStore: StorePort,
@@ -341,6 +343,10 @@ export class PlatformStore {
       nodes,
     };
   }
+  /** The report gate lives with the engagement workflow; a host registers it once. */
+  setReportGuard(guard: (scope: string, missionId: string) => void) {
+    this.reportGuard = guard;
+  }
   active(scope: string): Mission | undefined {
     this.open(scope);
     const row = this.db
@@ -546,6 +552,11 @@ export class PlatformStore {
     if (!changed.changes) throw new Error("Lost node lease");
   }
   private assertReportReady(scope: string, id: string) {
+    // The report gate belongs to the engagement workflow, which owns the
+    // report tables and the rendered files. A host that mounts it registers
+    // the guard; the store no longer reads those tables on its own.
+    if (this.reportGuard) return this.reportGuard(scope, id);
+    // Legacy host without the workflow: the table is the only witness.
     const table = this.db
       .prepare(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='workflow_reports'",

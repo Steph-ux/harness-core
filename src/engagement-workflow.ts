@@ -107,6 +107,11 @@ export class EngagementWorkflow {
     UPDATE workflow_reports SET reviewed=0 WHERE scope=new.scope AND mission_id=new.mission_id;
     UPDATE nodes SET state='PENDING',result='null',lease=NULL,owner=NULL,expires=NULL WHERE scope=new.scope AND mission_id=new.mission_id AND id='report' AND state='COMPLETED'; END;
   `);
+    // The store asks the workflow to gate the report stage, instead of reading
+    // the workflow tables itself.
+    this.platform.setReportGuard((scope, missionId) =>
+      this.assertCurrentReport(scope, missionId),
+    );
   }
   close() {
     this.db.close();
@@ -407,6 +412,30 @@ export class EngagementWorkflow {
       ...JSON.parse(String(row.payload)),
       reviewed: Boolean(row.reviewed),
     };
+  }
+  /** The gate the platform store calls when the report stage closes. */
+  assertCurrentReport(scope: string, missionId: string) {
+    const row = this.db
+      .prepare(
+        "SELECT id FROM workflow_reports WHERE scope=? AND mission_id=? ORDER BY rowid DESC LIMIT 1",
+      )
+      .get(scope, missionId);
+    if (!row)
+      throw new Error(
+        "Report stage requires a registered, visually reviewed report artifact",
+      );
+    const r = this.report(scope, String(row.id));
+    this.current(r);
+    if (!r.reviewed)
+      throw new Error(
+        "Report stage requires a registered, visually reviewed report artifact",
+      );
+    for (const id of r.artifacts) {
+      const artifact = this.artifact(scope, id);
+      if (digestFile(artifact.path) !== artifact.sha256)
+        throw new Error("Reviewed report content changed");
+    }
+    this.checkPages(r);
   }
   private current(r: any) {
     const latest = this.db
@@ -801,8 +830,15 @@ export class EngagementWorkflow {
         }
       }
       const snapshotHash = this.platform.reportFingerprint(scope, missionId),
+        existing = this.db
+          .prepare(
+            "SELECT id FROM workflow_capitalizations WHERE scope=? AND mission_id=? AND snapshot_hash=?",
+          )
+          .get(scope, missionId, snapshotHash),
         value = {
-          id: `capitalization-${newId()}`,
+          // A repeated pass rewrites its record; it does not take a new
+          // identity, or every earlier reference to it would dangle.
+          id: existing ? String(existing.id) : `capitalization-${newId()}`,
           missionId,
           snapshotHash,
           ...input,
@@ -811,7 +847,7 @@ export class EngagementWorkflow {
         };
       this.db
         .prepare(
-          "INSERT INTO workflow_capitalizations VALUES(?,?,?,?,?) ON CONFLICT(scope,mission_id,snapshot_hash) DO UPDATE SET id=excluded.id,payload=excluded.payload",
+          "INSERT INTO workflow_capitalizations VALUES(?,?,?,?,?) ON CONFLICT(scope,mission_id,snapshot_hash) DO UPDATE SET payload=excluded.payload",
         )
         .run(value.id, scope, missionId, snapshotHash, json(value));
       this.event(scope, "capitalization.recorded", value);
