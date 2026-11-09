@@ -114,8 +114,12 @@ def validate(data):
             if not obs or not obs['success'] or check['contains'] not in obs['output']:
                 raise ValueError('Missing observed control')
         for artifact in f.get('artifacts', []):
-            if artifact['kind']=='capture' and (not artifact.get('caption') or sha(artifact['path'])!=artifact['sha256']):
-                raise ValueError('Capture changed or lacks a dated provenance caption')
+            if artifact['kind']=='capture':
+                path = artifact.get('path')
+                if not isinstance(path,str) or not path.lower().endswith(('.png','.jpg','.jpeg')):
+                    raise ValueError('A capture artifact must be a PNG or JPEG image')
+                if not artifact.get('caption') or sha(path)!=artifact['sha256']:
+                    raise ValueError('Capture changed or lacks a dated provenance caption')
     return data
 
 

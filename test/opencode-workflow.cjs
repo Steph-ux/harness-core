@@ -624,6 +624,95 @@ module.exports = async ({ assert, jiti }) => {
       registered.id,
       "a report artifact inside rapport-vN is accepted",
     );
+
+    // A response body is an annex, and the kind decides the folder.
+    const body = path.join(engagement, "delete-neg-999999999.txt");
+    fs.writeFileSync(body, '{"code":"rest_post_invalid_id","data":{"status":404}}');
+    await assert.rejects(
+      () =>
+        artifactTool({
+          action: "artifact",
+          path: body,
+          kind: "capture",
+          observationIds: [okay.id],
+          caption: "404",
+        }),
+      /PNG or JPEG/,
+      "a 404 body is not a capture",
+    );
+    await assert.rejects(
+      () =>
+        artifactTool({
+          action: "artifact",
+          path: body,
+          kind: "poc",
+          observationIds: [okay.id],
+        }),
+      /executable source/,
+      "a text file is not a PoC",
+    );
+    const capturesDir = path.join(engagement, "preuves", "captures");
+    fs.mkdirSync(capturesDir, { recursive: true });
+    const shot = path.join(capturesDir, "trace-404.png");
+    fs.copyFileSync(png, shot);
+    const capture = JSON.parse(
+      (
+        await artifactTool({
+          action: "artifact",
+          path: shot,
+          kind: "capture",
+          observationIds: [okay.id],
+          caption: "Trace enregistrée du 2026-11-09",
+        })
+      ).content,
+    );
+    assert.ok(capture.id, "an image inside preuves/captures is accepted");
+    const misplaced = path.join(engagement, "shot.png");
+    fs.copyFileSync(png, misplaced);
+    await assert.rejects(
+      () =>
+        artifactTool({
+          action: "artifact",
+          path: misplaced,
+          kind: "capture",
+          observationIds: [okay.id],
+          caption: "Trace enregistrée",
+        }),
+      /preuves\/captures/,
+      "an image outside preuves/captures is refused",
+    );
+    const dumpsDir = path.join(engagement, "preuves", "dumps"),
+      fixturesDir = path.join(engagement, "preuves", "fixtures");
+    fs.mkdirSync(dumpsDir, { recursive: true });
+    fs.mkdirSync(fixturesDir, { recursive: true });
+    fs.copyFileSync(body, path.join(dumpsDir, "delete-neg-999999999.txt"));
+    fs.copyFileSync(body, path.join(fixturesDir, "sample.json"));
+    const dump = JSON.parse(
+      (
+        await artifactTool({
+          action: "artifact",
+          path: path.join(dumpsDir, "delete-neg-999999999.txt"),
+          kind: "dump",
+          observationIds: [okay.id],
+          caption: "Corps 404 conservé comme annexe",
+        })
+      ).content,
+    );
+    const sample = JSON.parse(
+      (
+        await artifactTool({
+          action: "artifact",
+          path: path.join(fixturesDir, "sample.json"),
+          kind: "fixture",
+          observationIds: [okay.id],
+        })
+      ).content,
+    );
+    assert.ok(dump.id, "a body filed under preuves/dumps is accepted");
+    assert.ok(
+      sample.id,
+      "a test file filed under preuves/fixtures is accepted",
+    );
   } finally {
     unload();
     workflow.close();

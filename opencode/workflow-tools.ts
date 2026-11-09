@@ -55,6 +55,7 @@ export function addWorkflowTools(editor: any, s: any) {
           "evidence",
           "poc",
           "capture",
+          "dump",
           "script",
           "rule",
           "fixture",

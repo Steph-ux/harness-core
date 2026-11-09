@@ -24,6 +24,7 @@ const kinds = [
   "evidence",
   "poc",
   "capture",
+  "dump",
   "script",
   "rule",
   "fixture",
@@ -31,6 +32,49 @@ const kinds = [
   "report-pdf",
   "report-qa",
 ];
+/**
+ * Where each artifact kind lives inside an engagement that declared a root.
+ * One folder for everything mixes proofs, raw bodies and test fixtures, and a
+ * report then cites a response body as if it were a capture. Report artifacts
+ * are filed by the host under `rapport-vN` and keep their own check.
+ */
+const ARTIFACT_DIR: Record<string, string> = {
+  evidence: path.join("preuves", "extraits"),
+  poc: "pocs",
+  script: "pocs",
+  capture: path.join("preuves", "captures"),
+  dump: path.join("preuves", "dumps"),
+  fixture: path.join("preuves", "fixtures"),
+  rule: "regles",
+};
+const SOURCE_EXT = new Set([
+  ".py",
+  ".sh",
+  ".mjs",
+  ".cjs",
+  ".js",
+  ".rb",
+  ".pl",
+  ".ps1",
+]);
+const DUMP_EXT = new Set([
+  ".json",
+  ".txt",
+  ".html",
+  ".htm",
+  ".xml",
+  ".csv",
+  ".zip",
+  ".gz",
+  ".tgz",
+  ".har",
+  ".pcap",
+  ".sql",
+  ".log",
+  ".body",
+  ".headers",
+  ".md",
+]);
 export class EngagementWorkflow {
   private db: DatabaseSync;
   constructor(
@@ -119,6 +163,35 @@ export class EngagementWorkflow {
         signature.subarray(0, 5).toString() !== "%PDF-"
       )
         throw new Error("Invalid PDF artifact signature");
+      const extension = path.extname(file).toLowerCase();
+      // A response body is not a proof, and a text file is not a script.
+      if (input.kind === "capture") {
+        const png = signature.subarray(0, 4).toString("hex") === "89504e47",
+          jpeg = signature.subarray(0, 3).toString("hex") === "ffd8ff";
+        if (!png && !jpeg)
+          throw new Error(
+            "A capture must be a PNG or JPEG image, not a raw body",
+          );
+      }
+      if (
+        (input.kind === "poc" || input.kind === "script") &&
+        !SOURCE_EXT.has(extension)
+      )
+        throw new Error(
+          "A PoC or script must be executable source (.py, .sh, .mjs, .js)",
+        );
+      if (input.kind === "dump" && !DUMP_EXT.has(extension))
+        throw new Error("A dump must be data, not an executable");
+      // A mission that declared its engagement owns a typed layout.
+      const root = this.platform.missionRoot(scope, missionId),
+        folder = ARTIFACT_DIR[input.kind];
+      if (root && folder) {
+        const expected = path.join(fs.realpathSync(root), folder);
+        if (!fs.realpathSync(file).startsWith(expected + path.sep))
+          throw new Error(
+            `A ${input.kind} artifact belongs in ${folder}`,
+          );
+      }
       if (!Array.isArray(input.observationIds) || !input.observationIds.length)
         throw new Error("Artifact provenance needs observations");
       this.evidence.evidence(scope, input.observationIds);
