@@ -432,8 +432,8 @@ export class ToolRegistry {
       return null;
     // Only a direct interpreter invocation counts as a likely execution.
     // Do not interpret arbitrary shell scripts or pipelines as provenance.
-    if (/[;|&`\\n]/.test(line)) return null;
-    const argv = line.match(/(?:"[^"]*"|'[^']*'|\\S+)/g) ?? [];
+    if (/[;|&`]/.test(line)) return null;
+    const argv = line.match(/(?:"[^"]*"|'[^']*'|\S+)/g) ?? [];
     const argumentsOnly = argv.slice(1).map((token) => token.replace(/^["']|["']$/g, ""));
     for (const entry of this.available(scope)) {
       if (argumentsOnly.includes(entry.file))
