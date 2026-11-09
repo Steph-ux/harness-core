@@ -434,11 +434,23 @@ export class ToolRegistry {
         const entries = fs.readdirSync(directory, { withFileTypes: true });
         for (const entry of entries.slice(0, MAX_PER_DIRECTORY)) {
           if (found.size >= MAX_SCAN) break;
-          if (!entry.isFile() || !/^[A-Za-z0-9][A-Za-z0-9_.+-]{0,100}$/.test(entry.name))
+          // Kali ships many tools as symlinks (msfconsole, msfvenom). Follow a
+          // link to a regular executable, and ignore directories and dangling
+          // links.
+          if (
+            (!entry.isFile() && !entry.isSymbolicLink()) ||
+            !/^[A-Za-z0-9][A-Za-z0-9_.+-]{0,100}$/.test(entry.name)
+          )
             continue;
           const file = path.join(directory, entry.name);
-          const stat = fs.statSync(file);
-          if (!(stat.mode & 0o111) || found.has(entry.name)) continue;
+          let stat;
+          try {
+            stat = fs.statSync(file);
+          } catch {
+            continue;
+          }
+          if (!stat.isFile() || !(stat.mode & 0o111) || found.has(entry.name))
+            continue;
           found.set(entry.name, {
             name: entry.name, origin: "path",
             description: "Executable from PATH or explicitly configured directory",

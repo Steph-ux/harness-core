@@ -160,6 +160,31 @@ module.exports = async ({ assert, jiti }) => {
       "active tools cannot be pruned");
     assert.equal(registry.matchExecution(scope, { command: "echo " + active.file }, "shell"), null);
     assert.equal(registry.matchExecution(scope, { command: "node " + active.file }, "text-only"), null);
+    // Kali ships many tools as symlinks: a linked executable is discovered.
+    const bin = path.join(base, "bin");
+    fs.mkdirSync(bin, { recursive: true });
+    const realTool = path.join(bin, "real-tool");
+    fs.writeFileSync(realTool, "#!/bin/sh\necho ok\n");
+    fs.chmodSync(realTool, 0o755);
+    fs.symlinkSync("real-tool", path.join(bin, "linked-tool"));
+    fs.symlinkSync("missing-tool", path.join(bin, "broken-tool"));
+    fs.mkdirSync(path.join(bin, "a-directory"));
+    const savedPaths = process.env.HARNESS_TOOL_PATHS;
+    process.env.HARNESS_TOOL_PATHS = bin;
+    try {
+      const names = registry.scan(true).map((item) => item.name);
+      assert.ok(
+        names.includes("linked-tool"),
+        "a symlinked executable is discovered",
+      );
+      assert.ok(names.includes("real-tool"), "a regular executable is discovered");
+      assert.ok(!names.includes("broken-tool"), "a dangling link is ignored");
+      assert.ok(!names.includes("a-directory"), "a directory is not a tool");
+    } finally {
+      if (savedPaths === undefined) delete process.env.HARNESS_TOOL_PATHS;
+      else process.env.HARNESS_TOOL_PATHS = savedPaths;
+    }
+
     const plugin = jiti(path.join(CORE, "opencode", "plugin.ts")).default;
     const fixture = makeContext(base);
     await plugin.setup(fixture.ctx);
