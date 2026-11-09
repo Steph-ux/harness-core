@@ -430,14 +430,13 @@ export class ToolRegistry {
     const line = command.trim();
     if (!/^(?:(?:env)\s+)?(?:\/?[\w.\/-]+\/)?(?:node|nodejs|python|python3|bash|sh)\s+/.test(line))
       return null;
+    // Only a direct interpreter invocation counts as a likely execution.
+    // Do not interpret arbitrary shell scripts or pipelines as provenance.
+    if (/[;|&`\\n]/.test(line)) return null;
+    const argv = line.match(/(?:"[^"]*"|'[^']*'|\\S+)/g) ?? [];
+    const argumentsOnly = argv.slice(1).map((token) => token.replace(/^["']|["']$/g, ""));
     for (const entry of this.available(scope)) {
-      const escaped = entry.file.replace(/[.*+?^${}()|[\]\\]/g, "\\  matchExecution(scope: string, input: unknown): { name: string; version: number; scope: string } | null {
-    const raw = JSON.stringify(input ?? {});
-    for (const entry of this.available(scope))
-      if (raw.includes(entry.file)) return { name: entry.name, version: entry.version, scope: entry.scope };
-    return null;
-  }");
-      if (new RegExp('(?:^|[\\s"\\\'])' + escaped + '(?:$|[\\s"\\\'])').test(line))
+      if (argumentsOnly.includes(entry.file))
         return { name: entry.name, version: entry.version, scope: entry.scope };
     }
     return null;
