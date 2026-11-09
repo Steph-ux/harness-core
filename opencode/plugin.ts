@@ -540,9 +540,11 @@ function captureWindow(
   return { width, height, bytes: stat.size };
 }
 
-/** A path, quoted for the shell. */
-function shellQuote(value: string): string {
-  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+/** A path or argument, quoted for the shell only when it needs it. */
+function quoteArgument(value: string): string {
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(value)
+    ? value
+    : `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
 export default {
@@ -2458,7 +2460,7 @@ export default {
             };
           if (input.action === "run") {
             const argv = commandArguments(input.argv);
-            const command = argv.map(shellQuote).join(" ");
+            const command = argv.map(quoteArgument).join(" ");
             const seconds = input.timeout ?? DEFAULT_DEADLINE_MS / 1000;
             if (
               !Number.isFinite(seconds) ||
