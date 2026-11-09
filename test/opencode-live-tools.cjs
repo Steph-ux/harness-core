@@ -14,6 +14,26 @@ module.exports = async ({ assert, jiti }) => {
   try {
     const registry = new ToolRegistry(state);
     assert.equal(registry.discover(scope, "definitelynotinstalled-92347").total, 0);
+    // Context construction must not readdir PATH (regression: 31ms/turn).
+    const originalScan = registry.scan.bind(registry);
+    registry.scan = () => { throw new Error("context unexpectedly scanned PATH"); };
+    assert.match(registry.context(scope, "fixture"), /^Harness capabilities\./);
+    registry.scan = originalScan;
+    const originalCustom = process.env.HARNESS_TOOL_HOME;
+    process.env.HARNESS_TOOL_HOME = path.join(base, "missing-custom-tool-dir");
+    assert.throws(() => registry.scan(true), /Configured tool directory is unavailable/);
+    if (originalCustom === undefined) delete process.env.HARNESS_TOOL_HOME;
+    else process.env.HARNESS_TOOL_HOME = originalCustom;
+    // A configured tool directory has to be scanned only on explicit discovery.
+    const custom = path.join(base, "my-tools");
+    fs.mkdirSync(custom);
+    const executable = path.join(custom, "fixture-cli");
+    fs.writeFileSync(executable, "#!/bin/sh\necho fixture\n", { mode: 0o700 });
+    process.env.HARNESS_TOOL_HOME = custom;
+    assert.ok(registry.discover(scope, "fixture cli", [], 0, 15, true)
+      .tools.some((entry) => entry.name === "fixture-cli"));
+    if (originalCustom === undefined) delete process.env.HARNESS_TOOL_HOME;
+    else process.env.HARNESS_TOOL_HOME = originalCustom;
     assert.throws(() => registry.propose("other", {
       name: "example", description: "Example script", language: "mjs", source: "console.log('ok')",
     }), /scope/);
