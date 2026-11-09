@@ -22,7 +22,7 @@ module.exports = async ({ assert, jiti }) => {
 
   const plugin = jiti(PLUGIN).default;
   const { KnowledgeStore } = jiti(path.join(CORE, "src", "store.ts"));
-  const { operatorSnapshot, operatorBlock } = jiti(
+  const { operatorSnapshot, operatorBlock, learnedKnowledge } = jiti(
     path.join(CORE, "src", "context.ts"),
   );
   const { scopeFor } = jiti(path.join(CORE, "src", "util.ts"));
@@ -67,6 +67,12 @@ module.exports = async ({ assert, jiti }) => {
     kind: "workflow",
     evidence: [seed.id],
   });
+
+  assert.deepEqual(
+    learnedKnowledge(store, scope).map((row) => row.key),
+    ["appris-fact"],
+    "learned knowledge excludes the operator rules",
+  );
 
   const { ctx, hooks } = makeContext(workspace);
   await plugin.setup(ctx);

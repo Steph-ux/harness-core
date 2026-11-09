@@ -98,5 +98,7 @@ export function learnedKnowledge(
   store: StorePort,
   scope: string,
 ): KnowledgeRecord[] {
-  return store.getKnowledge(scope, undefined, 200);
+  return store
+    .getKnowledge(scope, undefined, 200)
+    .filter((row) => row.kind !== "operator");
 }

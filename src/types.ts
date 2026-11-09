@@ -48,9 +48,11 @@ export interface KnowledgeProposal {
   kind: "environment" | "workflow" | "false-positive" | "preference";
   evidence: string[];
 }
-export interface KnowledgeRecord extends KnowledgeProposal {
+export interface KnowledgeRecord extends Omit<KnowledgeProposal, "kind"> {
   id: string;
   scope: string;
+  /** Stored rows also carry the rules the operator set, which a proposal cannot claim. */
+  kind: KnowledgeProposal["kind"] | "operator";
   status: "active" | "pending";
   createdAt: string;
 }
