@@ -81,7 +81,7 @@ them: `domain`, `host`, `ip`, `url`, `org`, `person`, `account`, `repo`,
 `secret`, `certificate`, `service`, `technology`. Every fact carries the
 observations it was read from, and the same `type`/`key` merges instead of
 duplicating. `relate` links two entities (`owns`, `resolves-to`, `member-of`,
-`uses`, `leaks`), and `path` returns the shortest chain between two of them —
+`uses`, `leaks`, `chains-with`), and `path` returns the shortest chain between two of them —
 the pivot a report cites as an attack path. The graph is scope-local: another
 project sees nothing.
 
