@@ -5,7 +5,6 @@
  * sees an independently promoted tool without restarting its model.
  */
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -48,6 +47,11 @@ const LANG: Record<ToolLanguage, string> = {
 const MAX_SCAN = 8000;
 const MAX_PER_DIRECTORY = 3000;
 const MAX_DIRECTORY_COUNT = 40;
+const MAX_REVISIONS = 2000;
+const MAX_SCOPE_REVISIONS = 250;
+const MAX_SCOPE_CANDIDATES = 25;
+const EXPIRED_CANDIDATE_MS = 30 * 86400_000;
+const CLI_CACHE_MS = 60_000;
 const STOP = new Set(["the", "and", "for", "with", "from", "dans", "pour", "une", "les", "des", "avec", "sur", "de", "du", "un", "la", "le", "tool", "outil", "run", "use"]);
 
 function checkScope(scope: string): void {
@@ -87,6 +91,7 @@ export class ToolRegistry {
   private readonly root: string;
   private readonly index: string;
   private readonly lock: string;
+  private cliCache: { key: string; expires: number; entries: ToolCapability[] } | null = null;
   constructor(stateRoot: string) {
     this.root = path.resolve(stateRoot, "capabilities");
     this.index = path.join(this.root, "registry.json");
@@ -110,6 +115,9 @@ export class ToolRegistry {
     try {
       const current = this.read();
       const result = fn(current);
+      if (current.revisions.length > MAX_REVISIONS)
+        throw new Error("Tool registry at capacity; prune old candidates");
+      this.cliCache = null;
       atomicWrite(this.index, JSON.stringify(current, null, 2) + "\n");
       return result;
     } finally {
@@ -164,7 +172,12 @@ export class ToolRegistry {
       throw new Error("Invalid tool description");
     safeSource(input.source);
     return this.mutate((state) => {
-      const prior = state.revisions.filter((item) => item.scope === scope && item.name === input.name);
+      const inScope = state.revisions.filter((item) => item.scope === scope);
+      if (inScope.length >= MAX_SCOPE_REVISIONS)
+        throw new Error("Scope revision quota reached; prune unused candidates");
+      if (inScope.filter((item) => item.status === "candidate").length >= MAX_SCOPE_CANDIDATES)
+        throw new Error("Candidate quota reached; prune or validate candidates");
+      const prior = inScope.filter((item) => item.name === input.name);
       const version = Math.max(0, ...prior.map((entry) => entry.version)) + 1;
       const id = randomUUID();
       const folder = path.join(this.root, "staging", scope, input.name, "v" + version + "-" + id);
@@ -248,65 +261,151 @@ export class ToolRegistry {
       return { ...shared };
     });
   }
-  rollback(scope: string, name: string, version: number): ToolRevision {
+  rollback(scope: string, name: string, version: number, global = false): ToolRevision {
     checkScope(scope); checkName(name);
+    const targetScope = global ? "global" : scope;
     return this.mutate((state) => {
-      const candidate = state.revisions.find((item) => item.scope === scope && item.name === name && item.version === version);
+      const candidate = state.revisions.find((item) => item.scope === targetScope && item.name === name && item.version === version);
       if (!candidate || !["active", "retired"].includes(candidate.status) || !candidate.tests.length)
         throw new Error("Only a previously validated active revision can be restored");
       this.verifyFile(candidate);
       for (const item of state.revisions)
-        if (item.scope === scope && item.name === name && item.status === "active")
+        if (item.scope === targetScope && item.name === name && item.status === "active")
           item.status = "retired";
       candidate.status = "active";
       return { ...candidate };
     });
   }
-  /** Enumerate PATH and configured tool directories, never recursively execute or probe binaries. */
-  scan(): ToolCapability[] {
-    const home = process.env.HARNESS_TOOL_HOME || path.join(os.homedir(), "hacking", "Mes-outils");
-    const dirs = [...new Set([
-      ...(process.env.PATH ?? "").split(path.delimiter),
-      home,
+  /** Retire one active version, including a global one if explicitly requested. */
+  retire(scope: string, name: string, global = false): ToolRevision {
+    checkScope(scope); checkName(name);
+    const targetScope = global ? "global" : scope;
+    return this.mutate((state) => {
+      const active = state.revisions.find((item) =>
+        item.scope === targetScope && item.name === name && item.status === "active");
+      if (!active) throw new Error("No active version to retire");
+      active.status = "retired";
+      return { ...active };
+    });
+  }
+  /**
+   * Remove stale or explicitly selected unvalidated candidates only.
+   * Never delete validated, active or retired code here: rollback and
+   * evidence records must remain intact.
+   */
+  prune(scope: string, ids: string[] = [], days = 30): { removed: string[] } {
+    checkScope(scope);
+    if (!Number.isFinite(days) || days < 0 || days > 3650 ||
+        !Array.isArray(ids) || ids.length > 100)
+      throw new Error("Invalid prune request");
+    const cutoff = Date.now() - days * 86400_000;
+    const selected = this.mutate((state) => {
+      const removed: ToolRevision[] = [];
+      state.revisions = state.revisions.filter((item) => {
+        const eligible = item.scope === scope && item.status === "candidate" &&
+          (ids.includes(item.id) ||
+            (ids.length === 0 && Date.parse(item.createdAt) < cutoff));
+        if (eligible) removed.push(item);
+        return !eligible;
+      });
+      return removed;
+    });
+    for (const item of selected) {
+      try {
+        this.verifyFile(item);
+        fs.unlinkSync(item.file);
+        fs.rmdirSync(path.dirname(item.file));
+      } catch {
+        // Missing/tampered candidate files stay untouched. The index has
+        // already dropped the candidate, and no working version was changed.
+      }
+    }
+    return { removed: selected.map((item) => item.id) };
+  }
+
+  /**
+   * Do not probe/exe CLI commands. PATH is environment configuration;
+   * explicit custom tool directories must exist and be ordinary directories.
+   * Readdir is cached and never performed for routine context injection.
+   */
+  scan(refresh = false): ToolCapability[] {
+    const configured = [
+      process.env.HARNESS_TOOL_HOME,
       ...(process.env.HARNESS_TOOL_PATHS ?? "").split(path.delimiter),
-    ].filter(Boolean).map((entry) => path.resolve(entry)))].slice(0, MAX_DIRECTORY_COUNT);
+    ].filter((v): v is string => Boolean(v?.trim()));
+    const inherited = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
+    const dirs = [...new Set([...inherited, ...configured].map((entry) => path.resolve(entry)))];
+    const key = JSON.stringify(dirs);
+    if (!refresh && this.cliCache?.key === key && this.cliCache.expires > Date.now())
+      return [...this.cliCache.entries];
+    if (dirs.length > MAX_DIRECTORY_COUNT)
+      throw new Error("Too many tool directories; restrict PATH or HARNESS_TOOL_PATHS");
+    const explicit = new Set(configured.map((entry) => path.resolve(entry)));
     const found = new Map<string, ToolCapability>();
     for (const directory of dirs) {
       try {
         assertPlainPath(directory);
-        const entries = fs.readdirSync(directory, { withFileTypes: true }).slice(0, MAX_PER_DIRECTORY);
-        for (const entry of entries) {
+        if (!fs.statSync(directory).isDirectory()) throw new Error("Not a directory");
+        const entries = fs.readdirSync(directory, { withFileTypes: true });
+        for (const entry of entries.slice(0, MAX_PER_DIRECTORY)) {
           if (found.size >= MAX_SCAN) break;
           if (!entry.isFile() || !/^[A-Za-z0-9][A-Za-z0-9_.+-]{0,100}$/.test(entry.name))
             continue;
           const file = path.join(directory, entry.name);
           const stat = fs.statSync(file);
-          if (!(stat.mode & 0o111)) continue;
-          found.set(entry.name, { name: entry.name, origin: "path", description: "Executable on PATH or configured tool directory", command: file });
+          if (!(stat.mode & 0o111) || found.has(entry.name)) continue;
+          found.set(entry.name, {
+            name: entry.name, origin: "path",
+            description: "Executable from PATH or explicitly configured directory",
+            command: file,
+          });
         }
-      } catch { /* A missing, protected or linked directory is not trusted. */ }
+      } catch (error) {
+        if (explicit.has(directory))
+          throw new Error("Configured tool directory is unavailable: " + directory +
+            " (" + String(error).slice(0, 100) + ")");
+        // Inherited PATH directories may disappear during a session.
+      }
     }
-    return [...found.values()];
+    const entries = [...found.values()];
+    this.cliCache = { key, expires: Date.now() + CLI_CACHE_MS, entries };
+    return [...entries];
   }
-  discover(scope: string, query: string, host: { name: string; description?: string }[] = [], offset = 0, limit = 15) {
+  /** Prefer the managed/host capability over duplicate CLI names. */
+  inventory(scope: string, host: { name: string; description?: string }[] = [], includePath = true): ToolCapability[] {
     checkScope(scope);
     const managed: ToolCapability[] = this.available(scope).map((item) => ({
-      name: item.name, origin: "managed", description: item.description, command: commandFor(item),
-      scope: item.scope, version: item.version,
+      name: item.name, origin: "managed", description: item.description,
+      command: commandFor(item), scope: item.scope, version: item.version,
     }));
-    const hosted: ToolCapability[] = host.filter((item) => typeof item?.name === "string").map((item) => ({
-      name: item.name, origin: "host", description: String(item.description ?? "").slice(0, 300),
-    }));
-    const entries = [...managed, ...hosted, ...this.scan()];
+    const hosted: ToolCapability[] = host.filter((item) =>
+      typeof item?.name === "string" && item.name.trim()).map((item) => ({
+        name: item.name, origin: "host",
+        description: String(item.description ?? "").slice(0, 300),
+      }));
+    const unique = new Map<string, ToolCapability>();
+    for (const entry of [...managed, ...hosted, ...(includePath ? this.scan() : [])]) {
+      if (!unique.has(entry.name)) unique.set(entry.name, entry);
+    }
+    return [...unique.values()];
+  }
+  discover(scope: string, query: string, host: { name: string; description?: string }[] = [],
+    offset = 0, limit = 15, refresh = false, includePath = true) {
+    checkScope(scope);
+    if (refresh) this.cliCache = null;
+    const entries = this.inventory(scope, host, includePath);
     const scored = entries.map((item) => ({ item, score: relevance(query, item) }))
       .filter((entry) => !query.trim() || entry.score > 0)
       .sort((a, b) => b.score - a.score || a.item.name.localeCompare(b.item.name));
     const start = Number.isSafeInteger(offset) ? Math.max(0, offset) : 0;
     const size = Number.isSafeInteger(limit) ? Math.max(1, Math.min(40, limit)) : 15;
-    return { query, total: scored.length, offset: start, tools: scored.slice(start, start + size).map((entry) => entry.item) };
+    return {
+      query, total: scored.length, offset: start,
+      tools: scored.slice(start, start + size).map((entry) => entry.item),
+    };
   }
   context(scope: string, query: string, host: { name: string; description?: string }[] = []): string {
-    const result = this.discover(scope, query, host, 0, 6);
+    const result = this.discover(scope, query, host, 0, 6, false, false);
     const rows = result.tools.map((item) => "- " + item.name + " [" + item.origin + "]: " +
       (item.command ?? item.description).slice(0, 140));
     return [
@@ -317,10 +416,30 @@ export class ToolRegistry {
       "A validated managed script is immediately callable via the normal permissioned shell/process tool; no new session required.",
     ].filter(Boolean).join("\n").slice(0, 1500);
   }
-  matchExecution(scope: string, input: unknown): { name: string; version: number; scope: string } | null {
+  /**
+   * A conservative command-line hint. Mentions, comments and echo are never
+   * evidence of execution. The caller must also identify an execution tool.
+   */
+  matchExecution(scope: string, input: unknown, tool = ""):
+    { name: string; version: number; scope: string } | null {
+    if (!/(?:shell|bash|process|exec|terminal|command)/i.test(tool))
+      return null;
+    const source = input && typeof input === "object" ? input as Record<string, unknown> : {};
+    const command = source.command ?? source.cmd;
+    if (typeof command !== "string") return null;
+    const line = command.trim();
+    if (!/^(?:(?:env)\s+)?(?:\/?[\w.\/-]+\/)?(?:node|nodejs|python|python3|bash|sh)\s+/.test(line))
+      return null;
+    for (const entry of this.available(scope)) {
+      const escaped = entry.file.replace(/[.*+?^${}()|[\]\\]/g, "\\  matchExecution(scope: string, input: unknown): { name: string; version: number; scope: string } | null {
     const raw = JSON.stringify(input ?? {});
     for (const entry of this.available(scope))
       if (raw.includes(entry.file)) return { name: entry.name, version: entry.version, scope: entry.scope };
+    return null;
+  }");
+      if (new RegExp('(?:^|[\\s"\\\'])' + escaped + '(?:$|[\\s"\\\'])').test(line))
+        return { name: entry.name, version: entry.version, scope: entry.scope };
+    }
     return null;
   }
 }
