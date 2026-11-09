@@ -36,7 +36,10 @@
           "purpose": "negative-control"
         }
       ],
-      "evidence": ["obs-negative", "obs-positive"],
+      "evidence": [
+        "obs-negative",
+        "obs-positive"
+      ],
       "sources": [
         {
           "id": "C-32b5b02cf260b30d053245db29a41e7c",
@@ -66,8 +69,13 @@
       "preconditions": "Accès au banc local",
       "impact": "Différence de réponse prouvée dans la fixture.",
       "closure": "Les deux contrôles passent.",
-      "steps": ["Exécuter le cas positif.", "Exécuter le contrôle négatif."],
-      "remediation": ["Conserver la séparation des cas."],
+      "steps": [
+        "Exécuter le cas positif.",
+        "Exécuter le contrôle négatif."
+      ],
+      "remediation": [
+        "Conserver la séparation des cas."
+      ],
       "cvss": {
         "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:N/A:N",
         "score": 4.3
@@ -101,5 +109,31 @@
       ]
     }
   ],
-  "cleanupPolicy": "after-restitution-only"
+  "cleanupPolicy": "after-restitution-only",
+  "coverage": {
+    "owasp": [
+      {
+        "id": "A01:2021",
+        "status": "tested",
+        "note": ""
+      },
+      {
+        "id": "A05:2021",
+        "status": "not-tested",
+        "note": "Hors fixture : aucune configuration serveur exposée"
+      }
+    ],
+    "mitre": [
+      {
+        "id": "T1595",
+        "status": "tested",
+        "note": ""
+      },
+      {
+        "id": "T1190",
+        "status": "not-applicable",
+        "note": "Pas d'application exposée dans la fixture"
+      }
+    ]
+  }
 }

@@ -330,6 +330,14 @@ export class EngagementWorkflow {
           throw new Error("Report snapshot size limit exceeded");
         return entry;
       });
+      const coverage = config?.coverage;
+      if (
+        coverage !== undefined &&
+        (coverage === null ||
+          typeof coverage !== "object" ||
+          Array.isArray(coverage))
+      )
+        throw new Error("Invalid coverage block");
       const reportId = `report-${newId()}`;
       const reference = config?.reference
           ? text(config.reference, 120)
@@ -352,6 +360,7 @@ export class EngagementWorkflow {
         period: text(config.period),
         method: text(config.method),
         boundaries: m.boundaries,
+        ...(coverage ? { coverage } : {}),
         findings,
         cleanupPolicy: "after-restitution-only",
       };

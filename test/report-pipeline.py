@@ -17,6 +17,13 @@ class ReportContract(unittest.TestCase):
     def test_invalid_vectors(self):
         for vector in ['CVSS:4.0/AV:N','CVSS:3.1/AV:N','CVSS:3.1/AV:N/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H','CVSS:3.1/AV:X/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H']:
             with self.assertRaises(ValueError): REPORT.cvss31(vector)
+    def test_coverage_contract(self):
+        base=json.loads((ROOT/'test/fixtures/report-snapshot.json').read_text())
+        REPORT.validate(base)
+        bad=copy.deepcopy(base); bad['coverage']['owasp'].append({'id':'A99:2020','status':'tested','note':''})
+        with self.assertRaises(ValueError): REPORT.validate(bad)
+        mute=copy.deepcopy(base); mute['coverage']['mitre'].append({'id':'T1000','status':'not-tested','note':''})
+        with self.assertRaises(ValueError): REPORT.validate(mute)
     def test_evidence_and_score(self):
         data=json.loads((ROOT/'test/fixtures/report-snapshot.json').read_text());REPORT.validate(data)
         for mutate in [lambda f:f.update(status='unverified'),lambda f:f.update(observations=[]),lambda f:f['cvss'].update(score=9.9)]:

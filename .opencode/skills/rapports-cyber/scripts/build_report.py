@@ -14,6 +14,7 @@ import hashlib
 import json
 import math
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -81,6 +82,34 @@ def cvss31(vector):
     return integer/100000 if integer%10000==0 else (integer//10000+1)/10
 
 
+COVERAGE_STATUS = {'tested': 'Testé', 'not-tested': 'Non testé', 'not-applicable': 'Non applicable'}
+
+
+def validate_coverage(value):
+    """Every OWASP category and MITRE technique is tested, or carries its reason."""
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise ValueError('Invalid coverage block')
+    for key, pattern in (('owasp', r'A\d{2}:2021'), ('mitre', r'T\d{4}(?:\.\d{3})?')):
+        rows = value.get(key, [])
+        if not isinstance(rows, list) or len(rows) > 200:
+            raise ValueError(f'Invalid coverage list {key}')
+        for row in rows:
+            if not isinstance(row, dict):
+                raise ValueError('Invalid coverage row')
+            ident = row.get('id')
+            if not isinstance(ident, str) or not re.fullmatch(pattern, ident):
+                raise ValueError(f'Invalid coverage id in {key}')
+            if row.get('status') not in COVERAGE_STATUS:
+                raise ValueError('Invalid coverage status')
+            note = row.get('note', '')
+            if not isinstance(note, str) or len(note) > 500:
+                raise ValueError('Invalid coverage note')
+            if row['status'] != 'tested' and not note.strip():
+                raise ValueError('A coverage gap needs a reason')
+
+
 def validate(data):
     if data.get('schemaVersion') != 1 or data.get('cleanupPolicy') != 'after-restitution-only':
         raise ValueError('Unsupported snapshot or cleanup policy')
@@ -92,6 +121,7 @@ def validate(data):
             raise ValueError(f'Invalid snapshot field {key}')
     if not isinstance(data.get('findings'), list) or len(data['findings']) > 100:
         raise ValueError('Missing or excessive findings')
+    validate_coverage(data.get('coverage'))
     allowed = {'vulnerability','observation','not-reproduced','not-tested','blocked'}
     for f in data['findings']:
         if f.get('classification') not in allowed:
@@ -436,6 +466,21 @@ def render_body(doc, data, headings):
         [(f['title'], LABELS[f['classification']], SEVERITY[f['severity']], f['asset'])
          for f in data['findings']],
     )
+
+    coverage = data.get('coverage') or {}
+    if coverage.get('owasp') or coverage.get('mitre'):
+        headings.append((1, 'Couverture'))
+        doc.add_page_break()
+        add_heading(doc, 'Couverture', 1)
+        doc.add_paragraph('Chaque ligne dit si la catégorie a été testée, ne l’a pas été, ou ne s’applique pas. Une catégorie non testée porte sa raison.')
+        for label, rows in (('OWASP Top 10 (2021)', coverage.get('owasp') or []),
+                            ('MITRE ATT&CK', coverage.get('mitre') or [])):
+            if not rows:
+                continue
+            add_heading(doc, label, 2)
+            add_table(doc, ('Référence', 'État', 'Note'),
+                      [(row['id'], COVERAGE_STATUS[row['status']], row.get('note', ''))
+                       for row in rows])
 
     for number, f in enumerate(data['findings'], 1):
         doc.add_page_break()
