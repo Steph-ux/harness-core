@@ -359,7 +359,7 @@ const DEBUG = process.env.HARNESS_PROOF_DEBUG === "1";
 
 /** Bookkeeping cannot prove itself; operational harness tools still leave observations. */
 const OWN_TOOL =
-  /^(?:cyber_tasks|cyber_mission|cyber_approval|cyber_finding|cyber_review|cyber_memory|cyber_method|cyber_lessons|cyber_verification|cyber_report|cyber_capitalise|cyber_cleanup|cyber_toolbox)$/;
+  /^(?:cyber_tasks|cyber_mission|cyber_approval|cyber_finding|cyber_review|cyber_memory|cyber_method|cyber_lessons|cyber_verification|cyber_report|cyber_capitalise|cyber_cleanup|cyber_toolbox|cyber_entity)$/;
 
 /** The first words of the injected operator block, used to detect a duplicate. */
 const OPERATOR_MARKER = "Operator rules.";
@@ -2448,6 +2448,86 @@ export default {
           return {
             content: JSON.stringify(platform.rejectFinding(scope, input.id)),
           };
+        },
+      });
+
+      editor.add({
+        name: "cyber_entity",
+        description:
+          "Record what the engagement learned as typed entities and relations, then query them or find the shortest pivot path. Every fact carries the observations it was read from; a second read merges into the same entity.",
+        input: {
+          type: "object",
+          properties: {
+            action: {
+              type: "string",
+              enum: ["upsert", "relate", "get", "query", "path"],
+              description:
+                "Record an entity, link two entities, read one with its relations, list or search, or compute a path.",
+            },
+            type: {
+              type: "string",
+              enum: [
+                "domain", "host", "ip", "url", "org", "person", "account", "repo",
+                "secret", "certificate", "service", "technology", "other",
+              ],
+            },
+            key: {
+              type: "string",
+              description:
+                "The identity inside the type (a domain, an IP, github:user, an email).",
+            },
+            label: { type: "string" },
+            attributes: { type: "object", additionalProperties: true },
+            observationIds: {
+              type: "array",
+              items: { type: "string" },
+              description: "The observations this fact was read from.",
+            },
+            from: { type: "string", description: "Source entity id, for relate and path." },
+            to: { type: "string", description: "Target entity id, for relate and path." },
+            kind: {
+              type: "string",
+              description: "The relation kind, for relate (owns, resolves-to, member-of, uses, leaks).",
+            },
+            id: { type: "string", description: "The entity id, for get." },
+            query: { type: "string", description: "A substring of the key or label, for query." },
+            limit: { type: "integer", minimum: 1, maximum: 500 },
+            maxDepth: { type: "integer", minimum: 1, maximum: 6 },
+          },
+          required: ["action"],
+          additionalProperties: false,
+        },
+        execute: async (input: any, context: any) => {
+          const scope = await scopeOf(context.sessionID);
+          ensureSession(context.sessionID, scope);
+          if (input.action === "upsert")
+            return { content: JSON.stringify(platform.upsertEntity(scope, input)) };
+          if (input.action === "relate")
+            return { content: JSON.stringify(platform.relate(scope, input)) };
+          if (input.action === "get")
+            return {
+              content: JSON.stringify({
+                entity: platform.entity(scope, input.id),
+                relations: platform.relations(scope, input.id),
+              }),
+            };
+          if (input.action === "query")
+            return {
+              content: JSON.stringify(
+                platform.entities(scope, {
+                  type: input.type,
+                  query: input.query,
+                  limit: input.limit,
+                }),
+              ),
+            };
+          if (input.action === "path")
+            return {
+              content: JSON.stringify(
+                platform.path(scope, input.from, input.to, input.maxDepth ?? 4),
+              ),
+            };
+          throw new Error("Unknown entity action");
         },
       });
 

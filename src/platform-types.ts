@@ -74,3 +74,42 @@ export interface SourceChunk {
   current: boolean;
   ordinal: number;
 }
+
+/** The kinds of things an engagement can learn about, and link. */
+export const ENTITY_TYPES = [
+  "domain",
+  "host",
+  "ip",
+  "url",
+  "org",
+  "person",
+  "account",
+  "repo",
+  "secret",
+  "certificate",
+  "service",
+  "technology",
+  "other",
+] as const;
+export type EntityType = (typeof ENTITY_TYPES)[number];
+export interface Entity {
+  id: string;
+  scope: string;
+  type: EntityType;
+  key: string;
+  label: string;
+  attributes: Record<string, unknown>;
+  observationIds: string[];
+  created: string;
+  updated: string;
+}
+export interface Relation {
+  id: string;
+  scope: string;
+  source: string;
+  target: string;
+  kind: string;
+  attributes: Record<string, unknown>;
+  observationIds: string[];
+  created: string;
+}

@@ -5,10 +5,14 @@ import { DatabaseSync } from "node:sqlite";
 import type { StorePort, WorkerResult } from "./types";
 import { WORKER_ROLES } from "./types";
 import {
+  ENTITY_TYPES,
   STAGES,
+  type Entity,
+  type EntityType,
   type FindingProposal,
   type GraphNode,
   type Mission,
+  type Relation,
   type SearchResult,
   type SourceChunk,
   type SourceSpec,
@@ -29,6 +33,7 @@ const text = (value: string, max = 24000) => {
   return redactText(value);
 };
 const parse = (value: unknown) => JSON.parse(String(value));
+type Row = Record<string, any>;
 const STOP = new Set(
   "a an the and or to of in for is it this that have we already seen technique avons nous deja déjà vu cette technique les des une un le la et dans pour que est de du".split(
     " ",
@@ -75,9 +80,9 @@ export class PlatformStore {
     const version = Number(
       this.db.prepare("PRAGMA user_version").get()!.user_version,
     );
-    if (version > 5)
+    if (version > 6)
       throw new Error("Platform database version is newer than this harness");
-    if (version === 5) return;
+    if (version === 6) return;
     if (version === 0)
       this.db.exec(`BEGIN IMMEDIATE;
    CREATE TABLE missions(id TEXT PRIMARY KEY,scope TEXT NOT NULL,title TEXT NOT NULL,boundaries TEXT NOT NULL,created TEXT NOT NULL,UNIQUE(id,scope));
@@ -136,6 +141,14 @@ export class PlatformStore {
       this.db.exec(`BEGIN IMMEDIATE;
       CREATE TABLE IF NOT EXISTS mission_roots(mission_id TEXT NOT NULL,scope TEXT NOT NULL,root TEXT NOT NULL,PRIMARY KEY(mission_id,scope),FOREIGN KEY(mission_id,scope) REFERENCES missions(id,scope));
       PRAGMA user_version=5;COMMIT;`);
+    if (version < 6)
+      this.db.exec(`BEGIN IMMEDIATE;
+      CREATE TABLE IF NOT EXISTS entities(id TEXT PRIMARY KEY,scope TEXT NOT NULL,type TEXT NOT NULL,key TEXT NOT NULL,label TEXT NOT NULL,attributes TEXT NOT NULL,observation_ids TEXT NOT NULL,created TEXT NOT NULL,updated TEXT NOT NULL,UNIQUE(scope,type,key),UNIQUE(id,scope));
+      CREATE INDEX IF NOT EXISTS entities_scope ON entities(scope,type);
+      CREATE TABLE IF NOT EXISTS relations(id TEXT PRIMARY KEY,scope TEXT NOT NULL,source TEXT NOT NULL,target TEXT NOT NULL,kind TEXT NOT NULL,attributes TEXT NOT NULL,observation_ids TEXT NOT NULL,created TEXT NOT NULL,UNIQUE(scope,source,target,kind),FOREIGN KEY(source,scope) REFERENCES entities(id,scope),FOREIGN KEY(target,scope) REFERENCES entities(id,scope));
+      CREATE INDEX IF NOT EXISTS relations_source ON relations(scope,source);
+      CREATE INDEX IF NOT EXISTS relations_target ON relations(scope,target);
+      PRAGMA user_version=6;COMMIT;`);
   }
   private open(scope: string) {
     if (this.closed) throw new Error("Platform store is closed");
@@ -1638,6 +1651,291 @@ export class PlatformStore {
         );
     });
   }
+  /** A fact needs the observations it was read from, in this scope. */
+  private checkObservations(scope: string, ids: unknown): string[] {
+    if (!Array.isArray(ids) || !ids.length || ids.length > 50)
+      throw new Error("An entity or relation needs 1..50 observations");
+    const unique = [...new Set(ids.map((value) => String(value)))];
+    if (unique.length !== ids.length)
+      throw new Error("Duplicate observation id");
+    let found: unknown[] = [];
+    try {
+      found = this.evidenceStore.evidence(scope, unique);
+    } catch {
+      throw new Error("Observation missing in this scope");
+    }
+    if (found.length !== unique.length)
+      throw new Error("Observation missing in this scope");
+    return unique;
+  }
+  private checkAttributes(value: unknown): Record<string, unknown> {
+    if (value === undefined) return {};
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      throw new Error("Attributes must be an object");
+    const serialized = JSON.stringify(value);
+    if (serialized.length > 20000) throw new Error("Attributes are too large");
+    if (redactText(serialized) !== serialized)
+      throw new Error("Attributes carry a secret; redact it first");
+    return value as Record<string, unknown>;
+  }
+  private entityFrom(row: Row): Entity {
+    return {
+      id: String(row.id),
+      scope: String(row.scope),
+      type: row.type as EntityType,
+      key: String(row.key),
+      label: String(row.label),
+      attributes: parse(row.attributes) as Record<string, unknown>,
+      observationIds: parse(row.observation_ids) as string[],
+      created: String(row.created),
+      updated: String(row.updated),
+    };
+  }
+  private relationFrom(row: Row): Relation {
+    return {
+      id: String(row.id),
+      scope: String(row.scope),
+      source: String(row.source),
+      target: String(row.target),
+      kind: String(row.kind),
+      attributes: parse(row.attributes) as Record<string, unknown>,
+      observationIds: parse(row.observation_ids) as string[],
+      created: String(row.created),
+    };
+  }
+  /**
+   * Record one thing the engagement learned. The key is the identity inside
+   * its type, so a second read merges instead of duplicating.
+   */
+  upsertEntity(
+    scope: string,
+    input: {
+      type: string;
+      key: string;
+      label?: string;
+      attributes?: unknown;
+      observationIds: unknown;
+    },
+  ): Entity {
+    this.open(scope);
+    if (!ENTITY_TYPES.includes(input.type as EntityType))
+      throw new Error("Unsupported entity type");
+    const key = String(input.key ?? "").trim();
+    if (!key || key.length > 300 || /[\u0000-\u001f]/.test(key))
+      throw new Error("Invalid entity key");
+    const label =
+      input.label === undefined ? "" : text(String(input.label), 500);
+    const attributes = this.checkAttributes(input.attributes);
+    const observations = this.checkObservations(scope, input.observationIds);
+    return this.tx(() => {
+      const existing = this.db
+        .prepare("SELECT * FROM entities WHERE scope=? AND type=? AND key=?")
+        .get(scope, input.type, key) as Row | undefined;
+      if (!existing) {
+        const id = `entity-${newId()}`;
+        this.db
+          .prepare("INSERT INTO entities VALUES(?,?,?,?,?,?,?,?,?)")
+          .run(
+            id,
+            scope,
+            input.type,
+            key,
+            label,
+            json(attributes),
+            json(observations),
+            now(),
+            now(),
+          );
+        return this.entity(scope, id);
+      }
+      const current = this.entityFrom(existing);
+      this.db
+        .prepare(
+          "UPDATE entities SET label=?,attributes=?,observation_ids=?,updated=? WHERE id=? AND scope=?",
+        )
+        .run(
+          label || current.label,
+          json({ ...current.attributes, ...attributes }),
+          json([...new Set([...current.observationIds, ...observations])]),
+          now(),
+          current.id,
+          scope,
+        );
+      return this.entity(scope, current.id);
+    });
+  }
+  entity(scope: string, id: string): Entity {
+    this.open(scope);
+    identifier(id);
+    const row = this.db
+      .prepare("SELECT * FROM entities WHERE id=? AND scope=?")
+      .get(id, scope);
+    if (!row) throw new Error("Missing entity in this scope");
+    return this.entityFrom(row);
+  }
+  entities(
+    scope: string,
+    filter: { type?: string; query?: string; limit?: number } = {},
+  ): Entity[] {
+    this.open(scope);
+    if (
+      filter.type !== undefined &&
+      !ENTITY_TYPES.includes(filter.type as EntityType)
+    )
+      throw new Error("Unsupported entity type");
+    const limit = filter.limit === undefined ? 100 : filter.limit;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500)
+      throw new Error("Invalid entity limit");
+    const query = filter.query ? String(filter.query) : "";
+    const rows = (
+      filter.type
+        ? this.db
+            .prepare(
+              "SELECT * FROM entities WHERE scope=? AND type=? AND (?='' OR instr(lower(key),lower(?))>0 OR instr(lower(label),lower(?))>0) ORDER BY created DESC LIMIT ?",
+            )
+            .all(scope, filter.type, query, query, query, limit)
+        : this.db
+            .prepare(
+              "SELECT * FROM entities WHERE scope=? AND (?='' OR instr(lower(key),lower(?))>0 OR instr(lower(label),lower(?))>0) ORDER BY created DESC LIMIT ?",
+            )
+            .all(scope, query, query, query, limit)
+    ) as Row[];
+    return rows.map((row) => this.entityFrom(row));
+  }
+  /** Link two known things. The same edge merges its evidence. */
+  relate(
+    scope: string,
+    input: {
+      from: string;
+      to: string;
+      kind: string;
+      attributes?: unknown;
+      observationIds: unknown;
+    },
+  ): Relation {
+    this.open(scope);
+    const source = this.entity(scope, String(input.from ?? "")),
+      target = this.entity(scope, String(input.to ?? ""));
+    if (source.id === target.id)
+      throw new Error("An entity cannot relate to itself");
+    const kind = String(input.kind ?? "").trim();
+    if (!/^[a-z][a-z0-9-]{1,40}$/.test(kind))
+      throw new Error("Invalid relation kind");
+    const attributes = this.checkAttributes(input.attributes);
+    const observations = this.checkObservations(scope, input.observationIds);
+    return this.tx(() => {
+      const existing = this.db
+        .prepare(
+          "SELECT * FROM relations WHERE scope=? AND source=? AND target=? AND kind=?",
+        )
+        .get(scope, source.id, target.id, kind) as Row | undefined;
+      if (!existing) {
+        const id = `relation-${newId()}`;
+        this.db
+          .prepare("INSERT INTO relations VALUES(?,?,?,?,?,?,?,?)")
+          .run(
+            id,
+            scope,
+            source.id,
+            target.id,
+            kind,
+            json(attributes),
+            json(observations),
+            now(),
+          );
+        return this.relation(scope, id);
+      }
+      const current = this.relationFrom(existing);
+      this.db
+        .prepare(
+          "UPDATE relations SET attributes=?,observation_ids=? WHERE id=? AND scope=?",
+        )
+        .run(
+          json({ ...current.attributes, ...attributes }),
+          json([...new Set([...current.observationIds, ...observations])]),
+          current.id,
+          scope,
+        );
+      return this.relation(scope, current.id);
+    });
+  }
+  relation(scope: string, id: string): Relation {
+    this.open(scope);
+    identifier(id);
+    const row = this.db
+      .prepare("SELECT * FROM relations WHERE id=? AND scope=?")
+      .get(id, scope);
+    if (!row) throw new Error("Missing relation in this scope");
+    return this.relationFrom(row);
+  }
+  relations(scope: string, id?: string): Relation[] {
+    this.open(scope);
+    if (id !== undefined) {
+      this.entity(scope, id);
+      return (
+        this.db
+          .prepare(
+            "SELECT * FROM relations WHERE scope=? AND (source=? OR target=?) ORDER BY created",
+          )
+          .all(scope, id, id) as Row[]
+      ).map((row) => this.relationFrom(row));
+    }
+    return (
+      this.db
+        .prepare("SELECT * FROM relations WHERE scope=? ORDER BY created")
+        .all(scope) as Row[]
+    ).map((row) => this.relationFrom(row));
+  }
+  /**
+   * The shortest chain between two entities, following relations in either
+   * direction. This is what turns a list of facts into a pivot.
+   */
+  path(
+    scope: string,
+    from: string,
+    to: string,
+    maxDepth = 4,
+  ): { entities: Entity[]; relations: Relation[] } | null {
+    this.open(scope);
+    const start = this.entity(scope, from),
+      end = this.entity(scope, to);
+    if (!Number.isInteger(maxDepth) || maxDepth < 1 || maxDepth > 6)
+      throw new Error("Invalid path depth");
+    const adjacency = new Map<
+      string,
+      { next: string; relation: Relation }[]
+    >();
+    for (const relation of this.relations(scope)) {
+      const out = adjacency.get(relation.source) ?? [];
+      out.push({ next: relation.target, relation });
+      adjacency.set(relation.source, out);
+      const back = adjacency.get(relation.target) ?? [];
+      back.push({ next: relation.source, relation });
+      adjacency.set(relation.target, back);
+    }
+    const queue: { id: string; chain: string[]; path: Relation[] }[] = [
+      { id: start.id, chain: [start.id], path: [] },
+    ];
+    const seen = new Set([start.id]);
+    while (queue.length) {
+      const current = queue.shift()!;
+      if (current.path.length >= maxDepth) continue;
+      for (const edge of adjacency.get(current.id) ?? []) {
+        if (seen.has(edge.next)) continue;
+        const chain = [...current.chain, edge.next],
+          path = [...current.path, edge.relation];
+        if (edge.next === end.id)
+          return {
+            entities: chain.map((id) => this.entity(scope, id)),
+            relations: path,
+          };
+        seen.add(edge.next);
+        queue.push({ id: edge.next, chain, path });
+      }
+    }
+    return null;
+  }
+
   close() {
     if (!this.closed) {
       this.closed = true;
