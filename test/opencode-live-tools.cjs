@@ -19,17 +19,22 @@ module.exports = async ({ assert, jiti }) => {
     }), /scope/);
     const candidate = registry.propose(scope, {
       name: "fixture-validator", description: "Parse and check a synthetic fixture",
-      language: "mjs", source: "console.log(process.argv[2] || 'empty');",
+      language: "mjs", source: "const value = process.argv[2]; if(value === 'positive') console.log('positive case passed'); else { console.log('negative case rejected'); }",
     });
     assert.equal(candidate.status, "candidate");
     assert.equal(registry.list(scope).length, 0, "candidate is not exposed");
     assert.throws(() => registry.activate(scope, candidate.id), /Validated/);
     assert.throws(() => registry.validate(scope, candidate.id, [], () => []),
       /positive and negative/);
+    const { spawnSync } = require("node:child_process");
+    const positives = spawnSync(process.execPath, [candidate.file, "positive"], { encoding: "utf8" });
+    const negatives = spawnSync(process.execPath, [candidate.file, "negative"], { encoding: "utf8" });
+    assert.equal(positives.status, 0);
+    assert.equal(negatives.status, 0);
     const proofs = [
-      { id: "good", scope, success: true, output: "positive case passed",
+      { id: "good", scope, success: positives.status === 0, output: positives.stdout,
         input: { command: "node " + candidate.file + " positive" } },
-      { id: "bad", scope, success: true, output: "negative case rejected",
+      { id: "bad", scope, success: negatives.status === 0, output: negatives.stdout,
         input: { command: "node " + candidate.file + " negative" } },
     ];
     const tests = [
@@ -44,6 +49,8 @@ module.exports = async ({ assert, jiti }) => {
       /scope-bound/);
     const valid = registry.validate(scope, candidate.id, tests, () => proofs);
     assert.equal(valid.status, "validated");
+    const shared = registry.activate(scope, candidate.id, true);
+    assert.equal(shared.scope, "global", "explicitly promoted version is shared");
     const active = registry.activate(scope, candidate.id);
     assert.equal(active.status, "active");
     const sibling = new ToolRegistry(state);
@@ -66,8 +73,6 @@ module.exports = async ({ assert, jiti }) => {
     fs.appendFileSync(second.file, "// tampered\n");
     assert.throws(() => registry.validate(scope, second.id, tests, () => proofs),
       /changed since proposal/);
-    const shared = registry.activate(scope, candidate.id, true);
-    assert.equal(shared.scope, "global", "explicitly promoted version is shared");
     assert.ok(registry.list(scopeFor(os.tmpdir())).some((entry) =>
       entry.scope === "global" && entry.name === "fixture-validator"));
     const plugin = jiti(path.join(CORE, "opencode", "plugin.ts")).default;
