@@ -1583,7 +1583,7 @@ export default {
         input: {
           type: "object",
           properties: {
-            action: { type: "string", enum: ["discover", "plan", "usage", "list", "propose", "validate", "activate", "promote", "rollback", "retire"] },
+            action: { type: "string", enum: ["discover", "plan", "usage", "list", "propose", "validate", "activate", "promote", "rollback", "retire", "prune"] },
             query: { type: "string" },
             refresh: { type: "boolean" },
             global: { type: "boolean" },
@@ -1596,6 +1596,8 @@ export default {
             source: { type: "string" },
             candidateId: { type: "string" },
             version: { type: "integer", minimum: 1 },
+            days: { type: "integer", minimum: 0, maximum: 3650 },
+            candidateIds: { type: "array", items: { type: "string" }, maxItems: 100 },
             tests: {
               type: "array",
               items: {
@@ -1681,6 +1683,15 @@ export default {
               version: restored.version,
             });
             return { content: JSON.stringify(restored) };
+          }
+          if (action === "prune") {
+            const result = toolRegistry.prune(scope, input.candidateIds ?? [], input.days ?? 30);
+            if (result.removed.length)
+              knowledge.audit(scope, "tools.pruned", {
+                sessionID: context.sessionID,
+                removed: result.removed,
+              });
+            return { content: JSON.stringify(result) };
           }
           if (action === "retire") {
             await assertOperatorDecision(
