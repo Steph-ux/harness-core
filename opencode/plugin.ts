@@ -295,7 +295,7 @@ const DEBUG = process.env.HARNESS_PROOF_DEBUG === "1";
 
 /** Bookkeeping cannot prove itself; operational harness tools still leave observations. */
 const OWN_TOOL =
-  /^(?:cyber_tasks|cyber_mission|cyber_approval|cyber_finding|cyber_review|cyber_memory|cyber_method|cyber_lessons|cyber_verification|cyber_report|cyber_capitalise|cyber_cleanup)$/;
+  /^(?:cyber_tasks|cyber_mission|cyber_approval|cyber_finding|cyber_review|cyber_memory|cyber_method|cyber_lessons|cyber_verification|cyber_report|cyber_capitalise|cyber_cleanup|cyber_toolbox)$/;
 
 /** The first words of the injected operator block, used to detect a duplicate. */
 const OPERATOR_MARKER = "Operator rules.";
@@ -1360,11 +1360,19 @@ export default {
         );
         if (existingCapability >= 0)
           event.system.splice(existingCapability, 1);
-        event.system.splice(1, 0, { type: "text", text: capabilities });
-        knowledge.audit(scope, "tools.discovered", {
-          sessionID: event.sessionID,
-          query: (requestBySession.get(event.sessionID) ?? "").slice(0, 100),
-        });
+        // Keep the immutable authority order: host -> operator -> route.
+        // Capabilities are advisory and must never precede operator rules.
+        const routeAt = event.system.findIndex(
+          (block: any) => typeof block?.text === "string" &&
+            block.text.startsWith(ROUTER_MARKER),
+        );
+        const operatorAt = event.system.findIndex(
+          (block: any) => typeof block?.text === "string" &&
+            block.text.startsWith(OPERATOR_MARKER),
+        );
+        const position = routeAt >= 0 ? routeAt + 1 :
+          operatorAt >= 0 ? operatorAt + 1 : 1;
+        event.system.splice(position, 0, { type: "text", text: capabilities });
 
         // The closing gate. It answers "are we done?" from the state, not
         // from the model's story: whatever still stands is named, and a plan
@@ -1378,11 +1386,12 @@ export default {
               block.text.startsWith(GATE_MARKER),
           )
         ) {
-          const anchor = event.system.findIndex(
+          const anchor = event.system.findLastIndex(
             (block: any) =>
               typeof block?.text === "string" &&
               (block.text.startsWith("Continuity.") ||
-                block.text.startsWith(ROUTER_MARKER)),
+                block.text.startsWith(ROUTER_MARKER) ||
+                block.text.startsWith("Harness capabilities.")),
           );
           event.system.splice(anchor >= 0 ? anchor + 1 : 1, 0, {
             type: "text",
@@ -1542,14 +1551,8 @@ export default {
           success: succeeded(event),
           timestamp: new Date().toISOString(),
         });
-        const managed = toolRegistry.matchExecution(scope, event.input);
-        knowledge.audit(scope, "tools.executed", {
-          sessionID: event.sessionID,
-          tool: observation.tool,
-          observationId: observation.id,
-          success: observation.success,
-          managed,
-        });
+        // The immutable observation is the usage record. Do not duplicate
+        // every tool invocation in the unbounded audit log.
         debug(
           `observed ${observation.id} tool=${observation.tool} success=${observation.success} scope=${scope}`,
         );
@@ -1580,8 +1583,10 @@ export default {
         input: {
           type: "object",
           properties: {
-            action: { type: "string", enum: ["discover", "plan", "list", "propose", "validate", "activate", "promote", "rollback"] },
+            action: { type: "string", enum: ["discover", "plan", "usage", "list", "propose", "validate", "activate", "promote", "rollback", "retire"] },
             query: { type: "string" },
+            refresh: { type: "boolean" },
+            global: { type: "boolean" },
             objectives: { type: "array", items: { type: "string" }, maxItems: 25 },
             offset: { type: "integer", minimum: 0 },
             limit: { type: "integer", minimum: 1, maximum: 40 },
@@ -1614,30 +1619,28 @@ export default {
           const action = String(input.action);
           if (action === "discover")
             return { content: JSON.stringify(toolRegistry.discover(
-              scope, input.query ?? "", await hostTools(), input.offset, input.limit,
+              scope, input.query ?? "", await hostTools(), input.offset, input.limit, input.refresh === true,
             )) };
           if (action === "plan") {
             // A bounded top-level inventory can be insufficient: scan the complete
             // CLI list once and combine it with the full managed registry.
-            const inventory = [
-              ...toolRegistry.scan(),
-              ...toolRegistry.list(scope).map((item: any) => ({
-                name: item.name, origin: "managed" as const, description: item.description,
-              })),
-              ...(await hostTools()).map((item: any) => ({
-                ...item, origin: "host" as const,
-              })),
-            ];
+            const inventory = toolRegistry.inventory(scope, await hostTools(), true);
             const gaps = identifyToolGaps(input.objectives ?? [], inventory);
-            knowledge.audit(scope, "tools.gaps", {
-              sessionID: context.sessionID,
-              objectives: gaps.map((gap: any) => gap.objective.slice(0, 120)),
-              unmatched: gaps.filter((gap: any) => gap.status === "unmatched").length,
-            });
+            // An explicit plan is a read: no extra audit row per query.
             return { content: JSON.stringify(gaps) };
           }
           if (action === "list")
             return { content: JSON.stringify(toolRegistry.list(scope, true)) };
+          if (action === "usage") {
+            const storedID = registered.get(`${context.sessionID}\0${scope}`) ?? context.sessionID;
+            const rows = knowledge.observationsForSession(storedID, scope, 200);
+            return { content: JSON.stringify(rows.map((row: any) => ({
+              observationId: row.id,
+              tool: row.tool,
+              success: row.success,
+              candidateManagedCommand: toolRegistry.matchExecution(scope, row.input, row.tool),
+            }))) };
+          }
           if (action === "propose") {
             const candidate = toolRegistry.propose(scope, input);
             knowledge.audit(scope, "tools.proposed", {
@@ -1670,12 +1673,25 @@ export default {
           }
           if (action === "rollback") {
             await assertOperatorDecision(ctx, context, "rollback-tool:" + input.name);
-            const restored = toolRegistry.rollback(scope, input.name, input.version);
+            const restored = toolRegistry.rollback(
+              scope, input.name, input.version, input.global === true,
+            );
             knowledge.audit(scope, "tools.rolled-back", {
               sessionID: context.sessionID, name: restored.name,
               version: restored.version,
             });
             return { content: JSON.stringify(restored) };
+          }
+          if (action === "retire") {
+            await assertOperatorDecision(
+              ctx, context, "retire-tool:" + (input.global ? "global:" : "local:") + input.name,
+            );
+            const retired = toolRegistry.retire(scope, input.name, input.global === true);
+            knowledge.audit(scope, "tools.retired", {
+              sessionID: context.sessionID, name: retired.name,
+              scope: retired.scope, version: retired.version,
+            });
+            return { content: JSON.stringify(retired) };
           }
           throw new Error("Unknown toolbox action");
         },
