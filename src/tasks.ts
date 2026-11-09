@@ -15,6 +15,7 @@ const MAX_TASKS = 1000;
 const MAX_TITLE = 200;
 const MAX_REASON = 400;
 const MAX_DEPENDS = 10;
+const MAX_DEPTH = 6;
 const identifier = (value: unknown): value is string =>
   typeof value === "string" &&
   /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/.test(value);
@@ -24,11 +25,17 @@ export interface Task {
   title: string;
   status: TaskStatus;
   dependsOn: string[];
+  /** The parent task, when this one is a sub-step of a larger one. */
+  parentId?: string;
   reason?: string;
   /** Observation ids that close this task. A completed task carries its proof. */
   evidence?: string[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface TaskNode extends Task {
+  children: TaskNode[];
 }
 
 export class TaskStore {
@@ -147,7 +154,10 @@ export class TaskStore {
     return { ...row, dependsOn: [...row.dependsOn] };
   }
 
-  add(scope: string, input: { title: string; dependsOn?: string[] }): Task {
+  add(
+    scope: string,
+    input: { title: string; dependsOn?: string[]; parent?: string },
+  ): Task {
     return this.mutate(scope, () => {
       const title = bounded(input?.title, MAX_TITLE, "task title");
       const dependsOn = Array.isArray(input?.dependsOn)
@@ -158,18 +168,79 @@ export class TaskStore {
       const rows = this.load(scope);
       if (dependsOn.some((id) => !rows.some((r) => r.id === id)))
         throw new Error("Missing task dependency");
+      let parentId: string | undefined;
+      if (input?.parent !== undefined) {
+        if (!identifier(input.parent)) throw new Error("Invalid parent task id");
+        let cursor = rows.find((row) => row.id === input.parent),
+          depth = 1;
+        if (!cursor) throw new Error("Unknown parent task");
+        while (cursor?.parentId) {
+          depth += 1;
+          if (depth > MAX_DEPTH) throw new Error("Task tree is too deep");
+          cursor = rows.find((row) => row.id === cursor!.parentId);
+        }
+        parentId = input.parent;
+      }
       const stamp = now();
       const task: Task = {
         id: newId(),
         title,
         status: "pending",
         dependsOn,
+        ...(parentId ? { parentId } : {}),
         createdAt: stamp,
         updatedAt: stamp,
       };
       this.save(scope, [...rows, task]);
       return { ...task };
     });
+  }
+
+  /** The list as a forest, newest branch last. */
+  tree(scope: string): TaskNode[] {
+    const rows = this.load(scope);
+    const nodes = new Map<string, TaskNode>();
+    for (const row of rows)
+      nodes.set(row.id, {
+        ...row,
+        dependsOn: [...row.dependsOn],
+        children: [],
+      });
+    const roots: TaskNode[] = [];
+    for (const row of rows) {
+      const node = nodes.get(row.id)!;
+      const parent = row.parentId ? nodes.get(row.parentId) : undefined;
+      if (parent) parent.children.push(node);
+      else roots.push(node);
+    }
+    return roots;
+  }
+
+  /** A Markdown outline a person can read, and an editor like CherryTree can import. */
+  markdown(scope: string): string {
+    const lines = ["# Coverage map", ""];
+    const walk = (nodes: TaskNode[], depth: number) => {
+      for (const node of nodes) {
+        const mark =
+          node.status === "completed"
+            ? "x"
+            : node.status === "in-progress"
+              ? "~"
+              : node.status === "blocked"
+                ? "!"
+                : " ";
+        const evidence = node.evidence?.length
+          ? ` — ${node.evidence.join(", ")}`
+          : "";
+        const reason = node.reason ? ` — blocked: ${node.reason}` : "";
+        lines.push(
+          `${"  ".repeat(depth)}- [${mark}] ${node.title}${evidence}${reason}`,
+        );
+        walk(node.children, depth + 1);
+      }
+    };
+    walk(this.tree(scope), 0);
+    return lines.join("\n") + "\n";
   }
 
   private transition(
@@ -232,6 +303,8 @@ export class TaskStore {
       const rows = this.load(scope);
       if (rows.some((r) => r.dependsOn.includes(id)))
         throw new Error("Task is still a dependency");
+      if (rows.some((r) => r.parentId === id))
+        throw new Error("Task still has subtasks");
       this.save(
         scope,
         rows.filter((r) => r.id !== id),
@@ -261,6 +334,8 @@ const task = (value: unknown): boolean =>
   typeof (value as Task).title === "string" &&
   STATUS.includes((value as Task).status) &&
   Array.isArray((value as Task).dependsOn) &&
+  ((value as Task).parentId === undefined ||
+    identifier((value as Task).parentId)) &&
   ((value as Task).evidence === undefined ||
     (Array.isArray((value as Task).evidence) &&
       (value as Task).evidence!.every((id) => identifier(id))));

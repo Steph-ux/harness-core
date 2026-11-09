@@ -1773,8 +1773,13 @@ export default {
                 "remove",
                 "list",
                 "review",
+                "tree",
+                "markdown",
+                "export",
+                "assets",
               ],
-              description: "What to do with the task list.",
+              description:
+                "What to do with the task list. tree reads the hierarchy, markdown renders it, export writes couverture.md into the engagement, assets creates one branch per known host/domain/url.",
             },
             title: { type: "string", description: "Task title, for add." },
             id: {
@@ -1792,6 +1797,10 @@ export default {
               items: { type: "string" },
               description: "Tasks that must close first.",
             },
+            parent: {
+              type: "string",
+              description: "The parent task, for add: a sub-step of a larger one.",
+            },
           },
           required: ["action"],
           additionalProperties: false,
@@ -1806,6 +1815,7 @@ export default {
                 taskStore.add(scope, {
                   title: input.title,
                   dependsOn: input.dependsOn,
+                  parent: input.parent,
                 }),
               ),
             };
@@ -1816,6 +1826,52 @@ export default {
                 tasks: taskStore.list(scope),
                 delegable: taskStore.delegable(scope),
               }),
+            };
+          }
+          if (action === "tree")
+            return { content: JSON.stringify(taskStore.tree(scope)) };
+          if (action === "markdown")
+            return { content: taskStore.markdown(scope) };
+          if (action === "export") {
+            const mission = platform.active(scope),
+              root = mission ? platform.missionRoot(scope, mission.id) : undefined;
+            if (!root)
+              throw new Error(
+                "An engagement root is required to write the coverage map",
+              );
+            const file = path.join(root, "couverture.md");
+            fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+            fs.writeFileSync(file, taskStore.markdown(scope), { mode: 0o600 });
+            return { content: JSON.stringify({ path: file }) };
+          }
+          if (action === "assets") {
+            const assets = ["host", "domain", "url"]
+              .flatMap((type) => platform.entities(scope, { type, limit: 100 }))
+              .slice(0, 50);
+            const existing = new Set(
+              taskStore.list(scope).map((entry: any) => entry.title),
+            );
+            const created: string[] = [];
+            for (const asset of assets) {
+              const title = `${asset.type}:${asset.key}`.slice(0, 200);
+              if (existing.has(title)) continue;
+              const parent = taskStore.add(scope, { title });
+              created.push(parent.id);
+              for (const step of [
+                "surface",
+                "fingerprint",
+                "web",
+                "validation",
+              ])
+                created.push(
+                  taskStore.add(scope, {
+                    title: `${title} — ${step}`,
+                    parent: parent.id,
+                  }).id,
+                );
+            }
+            return {
+              content: JSON.stringify({ assets: assets.length, created }),
             };
           }
           if (action === "review") {
