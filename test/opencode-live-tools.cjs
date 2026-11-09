@@ -49,8 +49,6 @@ module.exports = async ({ assert, jiti }) => {
       /scope-bound/);
     const valid = registry.validate(scope, candidate.id, tests, () => proofs);
     assert.equal(valid.status, "validated");
-    const shared = registry.activate(scope, candidate.id, true);
-    assert.equal(shared.scope, "global", "explicitly promoted version is shared");
     const active = registry.activate(scope, candidate.id);
     assert.equal(active.status, "active");
     const sibling = new ToolRegistry(state);
@@ -58,9 +56,10 @@ module.exports = async ({ assert, jiti }) => {
       t.name === "fixture-validator" && t.version === 1),
     "another registry instance sees the activation immediately");
     assert.equal(sibling.list(scope).length, 1);
-    assert.equal(sibling.list(scopeFor(os.tmpdir())).length, 0,
-      "a different project cannot see project-local scripts");
-    assert.deepEqual(sibling.matchExecution(scope, { command: "node " + active.file }), {
+    const otherScope = scopeFor(os.tmpdir());
+    assert.equal(sibling.list(otherScope).length, 0,
+      "different project cannot see local tools before promotion");
+    assert.deepEqual(sibling.matchExecution(scope, { command: "node " + active.file }, "shell"), {
       name: "fixture-validator", version: 1, scope,
     });
     const second = registry.propose(scope, {
@@ -73,8 +72,20 @@ module.exports = async ({ assert, jiti }) => {
     fs.appendFileSync(second.file, "// tampered\n");
     assert.throws(() => registry.validate(scope, second.id, tests, () => proofs),
       /changed since proposal/);
-    assert.ok(registry.list(scopeFor(os.tmpdir())).some((entry) =>
-      entry.scope === "global" && entry.name === "fixture-validator"));
+    const shared = registry.activate(scope, candidate.id, true);
+    assert.equal(shared.scope, "global");
+    assert.equal(registry.list(otherScope).length, 1,
+      "other project sees globally promoted version only");
+    assert.equal(registry.list(otherScope)[0].scope, "global");
+    registry.retire(scope, "fixture-validator", true);
+    assert.equal(registry.list(otherScope).length, 0);
+    registry.rollback(scope, "fixture-validator", shared.version, true);
+    assert.equal(registry.list(otherScope).length, 1);
+    assert.deepEqual(registry.prune(scope, [second.id]).removed, [second.id]);
+    assert.deepEqual(registry.prune(scope, [active.id]).removed, [],
+      "active tools cannot be pruned");
+    assert.equal(registry.matchExecution(scope, { command: "echo " + active.file }, "shell"), null);
+    assert.equal(registry.matchExecution(scope, { command: "node " + active.file }, "text-only"), null);
     const plugin = jiti(path.join(CORE, "opencode", "plugin.ts")).default;
     const fixture = makeContext(base);
     await plugin.setup(fixture.ctx);
