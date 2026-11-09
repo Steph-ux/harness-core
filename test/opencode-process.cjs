@@ -10,7 +10,7 @@ module.exports = async ({ assert, jiti, modules }) => {
   const state = path.join(workspace, "state");
   process.env.HARNESS_STATE_ROOT = state;
   process.env.HARNESS_CORE = CORE;
-  const { ProcessRegistry, spawnTraced, readTrace, processStatus } = jiti(path.join(CORE, "src/process.ts"));
+  const { ProcessRegistry, spawnTraced, readTrace, processStatus, verifiedOutcome } = jiti(path.join(CORE, "src/process.ts"));
   const registry = new ProcessRegistry(state);
   const { KnowledgeStore } = jiti(path.join(CORE, "src/store.ts"));
   const { observationId } = jiti(path.join(CORE, "src/observation-id.ts"));
@@ -138,6 +138,49 @@ module.exports = async ({ assert, jiti, modules }) => {
     fs.writeFileSync(path.join(state, "processes.json"), JSON.stringify(records));
     assert.throws(()=>registry.stop("crash-scope",orphan.id),/Unknown process identity/);
     assert.equal(processStatus(fake), "unknown", "a reused pid is not treated as the old command");
+    const legacyLog = path.join(workspace, "legacy.log");
+    fs.writeFileSync(legacyLog, "trace\n");
+    const legacy = {
+      ...orphan,
+      id: "proc-legacy",
+      runKey: "legacy-run",
+      logPath: legacyLog,
+      pid: 2147483647,
+      deadlineMs: 1000,
+      startedAt: new Date(Date.now() - 60000).toISOString(),
+    };
+    fs.writeFileSync(
+      legacyLog + ".result.json",
+      JSON.stringify({
+        runKey: "legacy-run",
+        status: "succeeded",
+        exitCode: 0,
+        finishedAt: new Date().toISOString(),
+      }),
+    );
+    assert.equal(
+      verifiedOutcome(legacy),
+      undefined,
+      "a terminal result without its trace hash is unknown, not a tampered trace",
+    );
+    fs.writeFileSync(
+      legacyLog + ".result.json",
+      JSON.stringify({
+        runKey: "legacy-run",
+        status: "running",
+        startedAt: legacy.startedAt,
+      }),
+    );
+    assert.equal(
+      processStatus(legacy),
+      "unknown",
+      "a dead supervisor leaves no running command",
+    );
+    assert.equal(
+      verifiedOutcome(legacy),
+      undefined,
+      "a running result with no live process is not verified",
+    );
     assert.throws(() => registry.tracePath("../../escape"), /Invalid process id/);
     const large = path.join(workspace, "large.log");
     fs.writeFileSync(large, "x".repeat(500000) + "\nlast-line\n");

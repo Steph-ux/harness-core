@@ -159,7 +159,20 @@ export function verifiedOutcome(
   record: ProcessRecord,
 ): ProcessOutcome | undefined {
   const value = processOutcome(record);
-  if (!value || value.status === "running") return value;
+  if (!value) return undefined;
+  if (value.status === "running") {
+    // A stored "running" is only trusted while the supervisor is alive and
+    // inside its deadline. Otherwise it died before its terminal write, and
+    // the command is unknown, not still running.
+    return processStatus(record) === "running" ? value : undefined;
+  }
+  // A terminal result without its trace hash cannot be verified: it is a
+  // legacy or truncated write, so the outcome is unknown, not tampered.
+  if (
+    typeof value.traceHash !== "string" ||
+    !Number.isFinite(value.traceBytes)
+  )
+    return undefined;
   assertPlainPath(record.logPath);
   const fd = fs.openSync(record.logPath, "r"),
     digest = createHash("sha256");
