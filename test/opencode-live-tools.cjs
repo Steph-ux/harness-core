@@ -102,12 +102,38 @@ module.exports = async ({ assert, jiti }) => {
     await fixture.hooks.get("context")(prompt);
     assert.ok(prompt.system.some((entry) =>
       String(entry.text).includes("Harness capabilities.")), "live catalogue injected");
+    // A new version is validated after the plugin and session already exist.
+    // The next context read must see it, without reload or a new session ID.
+    const live = registry.propose(scope, {
+      name: "fixture-validator", description: "Live refresh validator",
+      language: "mjs", source: "console.log(process.argv[2] === 'positive' ? 'positive case passed' : 'negative case rejected');",
+    });
+    assert.equal(live.version, 3);
+    const liveGood = spawnSync(process.execPath, [live.file, "positive"], { encoding: "utf8" });
+    const liveBad = spawnSync(process.execPath, [live.file, "negative"], { encoding: "utf8" });
+    const liveTests = [
+      { observationId: "live-good", contains: "positive case passed", kind: "positive" },
+      { observationId: "live-bad", contains: "negative case rejected", kind: "negative" },
+    ];
+    registry.validate(scope, live.id, liveTests, () => [
+      { id: "live-good", scope, tool: "shell", success: liveGood.status === 0,
+        output: liveGood.stdout, input: { command: "node " + live.file + " positive" } },
+      { id: "live-bad", scope, tool: "shell", success: liveBad.status === 0,
+        output: liveBad.stdout, input: { command: "node " + live.file + " negative" } },
+    ]);
+    registry.activate(scope, live.id);
+    const liveDiscover = JSON.parse((await toolbox.execute({
+      action: "discover", query: "fixture validator",
+    }, context)).content);
+    assert.ok(liveDiscover.tools.some((item) => item.origin === "managed" &&
+      item.scope === scope && item.version === 3),
+      "already-running plugin sees a newly activated version");
     const secondPrompt = fixture.contextEvent({
       sessionID: context.sessionID, messages: prompt.messages,
     });
     await fixture.hooks.get("context")(secondPrompt);
     assert.ok(secondPrompt.system.some((entry) =>
-      String(entry.text).includes("fixture-validator")), "same session sees the tool");
+      String(entry.text).includes(live.file)), "same session sees the newest executable path");
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
