@@ -32,9 +32,9 @@ module.exports = async ({ assert, jiti }) => {
     assert.equal(positives.status, 0);
     assert.equal(negatives.status, 0);
     const proofs = [
-      { id: "good", scope, success: positives.status === 0, output: positives.stdout,
+      { id: "good", scope, tool: "shell", success: positives.status === 0, output: positives.stdout,
         input: { command: "node " + candidate.file + " positive" } },
-      { id: "bad", scope, success: negatives.status === 0, output: negatives.stdout,
+      { id: "bad", scope, tool: "shell", success: negatives.status === 0, output: negatives.stdout,
         input: { command: "node " + candidate.file + " negative" } },
     ];
     const tests = [
