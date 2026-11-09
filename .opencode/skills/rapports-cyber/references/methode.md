@@ -35,6 +35,16 @@ Un corps de réponse n'est pas une preuve. La preuve d'une requête est l'observ
 
 Le dossier d'une version de rapport est créé par `cyber_report action=snapshot` et renvoyé dans `reportDir` ; le générateur refuse d'écraser une version existante.
 
+## Captures navigateur
+
+Aucune capture ne doit montrer la mention « Chrome est contrôlé par un logiciel de test automatisé », ni son équivalent dans un autre navigateur. Une image qui porte ce bandeau est refusée : elle prouve l'outillage, pas la page.
+
+- Chromium, Chrome et Edge : lancer avec `--test-type`, qui supprime précisément ce bandeau. Jamais `--no-sandbox`.
+- Playwright ou Puppeteer : `ignoreDefaultArgs: ["--enable-automation"]` (le pilote ajoute ce drapeau par défaut), ou `--test-type` dans les `args`.
+- Firefox et Safari n'affichent pas ce bandeau ; vérifier quand même l'image.
+- Ne jamais rogner l'image pour faire disparaître le bandeau : la barre d'adresse reste visible, elle porte l'URL de la preuve.
+- Relire l'image après la capture. Si le bandeau est présent, relancer avec le bon drapeau et reprendre la capture.
+
 ## Contrat du générateur
 
 Entrée : snapshot JSON issu de `cyber_report snapshot`, schéma 1. Sorties : `rapport.docx`, `rapport.pdf`, `page-N.png`, `qa.json`, écrites dans le `reportDir` renvoyé par le snapshot, sous `<engagement>/rapport-vN`. Le DOCX porte la couverture (client, référence, périmètre, période, édition, classification en pied de première page), un sommaire paginé calculé sur le rendu réel, un en-tête courant et un pied de page avec `page / total`. Les trois artefacts enregistrés (DOCX, PDF, QA) doivent rester sous ce dossier ; `cyber_report action=artifact` refuse un chemin hors de `<engagement>/rapport-vN`. Le manifeste porte les empreintes du snapshot, des livrables et des images, sans déclarer la revue visuelle effectuée. Le script n’exécute aucun PoC ni commande fournie dans le snapshot et ne télécharge pas d’image.
