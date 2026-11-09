@@ -235,18 +235,49 @@ function runCommand(
 }
 
 /**
- * Render a recorded trace as the terminal window a report can print.
+ * Render a recorded trace the way a report can print it.
  *
- * The body goes through a temporary file, the command and the title through
- * argv. No harness metadata is drawn: the provenance lives in the capture
- * link.
+ * On the operator's display the trace is shown in their own terminal, with
+ * their theme, then the window is captured and closed. Without a display, or
+ * when the terminal is switched off, a printed rendering is produced instead.
+ * Neither path runs the command again.
  */
 function renderTrace(
   text: string,
   dest: string,
   title: string,
   command: string,
-): void {
+  cwd: string,
+): "qterminal" | "printed" {
+  const display = process.env.DISPLAY?.trim();
+  const mode = (process.env.HARNESS_CAPTURE_TERMINAL ?? "auto").trim();
+  const terminal = ["/usr/bin/qterminal", "/usr/local/bin/qterminal"].find(
+    (file) => fs.existsSync(file),
+  );
+  if (mode !== "off" && display && terminal) {
+    const source = path.join(path.dirname(dest), `.trace-${randomUUID()}.txt`);
+    fs.writeFileSync(source, `$ ${command}\n\n${text}\n`, { mode: 0o600 });
+    try {
+      runCommand(
+        "sh",
+        [
+          path.join(coreRoot(), "scripts", "capture_terminal.sh"),
+          display,
+          cwd,
+          title,
+          source,
+          dest,
+        ],
+        45000,
+      );
+      if (fs.existsSync(dest) && fs.statSync(dest).size > 100)
+        return "qterminal";
+    } catch {
+      /* the printed rendering below is the fallback */
+    } finally {
+      fs.rmSync(source, { force: true });
+    }
+  }
   const source = path.join(path.dirname(dest), `.trace-${randomUUID()}.txt`);
   fs.writeFileSync(source, text, { mode: 0o600 });
   try {
@@ -264,6 +295,7 @@ function renderTrace(
   } finally {
     fs.rmSync(source, { force: true });
   }
+  return "printed";
 }
 
 function commandArguments(value: unknown): string[] {
@@ -2684,11 +2716,17 @@ export default {
             const lines = body.split("\n"),
               shown = lines.slice(0, 40);
             if (lines.length > shown.length) shown.push("…");
-            renderTrace(
+            const home = os.homedir(),
+              cwd = sessionCwd.get(context.sessionID) ?? instanceCwd,
+              title = cwd.startsWith(home)
+                ? "~" + cwd.slice(home.length)
+                : cwd;
+            const renderer = renderTrace(
               shown.join("\n"),
               dest,
-              path.basename(record.command.trim().split(/\s+/)[0] || "shell"),
+              title,
               record.command,
+              cwd,
             );
             const image = fs.readFileSync(dest);
             const link = {
@@ -2697,7 +2735,7 @@ export default {
               traceHash: outcome.traceHash,
               observationId: input.observationId ?? "",
               path: dest,
-              renderer: "terminal",
+              renderer,
               width: image.readUInt32BE(16),
               height: image.readUInt32BE(20),
               bytes: image.length,

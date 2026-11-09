@@ -5,8 +5,10 @@ constats, tâches et méthodes restent dans un état partagé indépendant de l�
 L’adaptateur est dans `opencode/` ; `src/` utilise les modules natifs de Node.
 Node 24 ou supérieur est requis. La supervision des commandes nécessite Linux
 et un exécutable `node` accessible au serveur (`HARNESS_NODE` peut fixer son chemin).
-La capture d’une trace exige Python 3 et Pillow ; la capture d’une fenêtre réelle
-exige X11 (`import`, `identify`) et un écran.
+La capture d’une trace s’ouvre dans le terminal de l’opérateur (qterminal), décorations
+comprises, puis la fenêtre est refermée ; sans écran, ou avec
+`HARNESS_CAPTURE_TERMINAL=off`, un rendu imprimé est produit à la place (Python 3 et
+Pillow). La capture d’une fenêtre réelle exige X11 (`import`, `identify`) et un écran.
 
 ## Installer dans OpenCode v2
 

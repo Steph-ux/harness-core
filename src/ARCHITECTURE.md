@@ -34,7 +34,7 @@ database, so a test can hand it a stub and a host can hand it the real store.
 | `routing.ts` | One route per request, weighted triggers, an anti-noise guard (a single hit on a long text is not a route) |
 | `lessons.ts` | The extractor proposes; the ordinary gates dispose. A proposal without a successful observation is refused |
 | `process.ts` | A long command is owned: full output to a named file, detached lifetime, stop by id |
-| `capture.ts` | A visual attestation is one window, framed, never the desktop; a recorded trace is rendered as the terminal view a report can print |
+| `capture.ts` | A visual attestation is one window, framed, never the desktop; a recorded trace is captured in the operator's terminal when a display exists, or printed otherwise |
 | `memory-ranking.ts` | Operator rules keep a reserved budget (`operatorModelChars`) and learned facts never crowd them out |
 | `util.ts` | The scope slug (`project-<24 hex>`), hashing, and the text redaction used before anything reaches an audit row |
 

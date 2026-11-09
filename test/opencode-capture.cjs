@@ -20,6 +20,8 @@ module.exports = async ({ assert, jiti }) => {
   fs.mkdirSync(state, { recursive: true });
   process.env.HARNESS_STATE_ROOT = state;
   process.env.HARNESS_CORE = CORE;
+  // The suite never opens a terminal window: the printed rendering is tested here.
+  process.env.HARNESS_CAPTURE_TERMINAL = "off";
 
   const plugin = jiti(PLUGIN).default;
   const {
@@ -274,7 +276,7 @@ module.exports = async ({ assert, jiti }) => {
     /^[0-9a-f]{64}$/,
     "the capture binds the whole recorded trace",
   );
-  assert.equal(shot.renderer, "terminal", "the trace is rendered, not re-run");
+  assert.equal(shot.renderer, "printed", "the trace is rendered, not re-run");
   assert.ok(shot.bytes > 1000, "the capture has content");
   assert.ok(
     shot.width >= 200 && shot.height >= 40,
