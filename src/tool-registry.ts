@@ -50,7 +50,6 @@ const MAX_DIRECTORY_COUNT = 40;
 const MAX_REVISIONS = 2000;
 const MAX_SCOPE_REVISIONS = 250;
 const MAX_SCOPE_CANDIDATES = 25;
-const EXPIRED_CANDIDATE_MS = 30 * 86400_000;
 const CLI_CACHE_MS = 60_000;
 const STOP = new Set(["the", "and", "for", "with", "from", "dans", "pour", "une", "les", "des", "avec", "sur", "de", "du", "un", "la", "le", "tool", "outil", "run", "use"]);
 
@@ -171,6 +170,8 @@ export class ToolRegistry {
         redactText(input.description) !== input.description)
       throw new Error("Invalid tool description");
     safeSource(input.source);
+    // Candidates abandoned for 30 days are cleaned before new proposals.
+    this.prune(scope);
     return this.mutate((state) => {
       const inScope = state.revisions.filter((item) => item.scope === scope);
       if (inScope.length >= MAX_SCOPE_REVISIONS)
@@ -312,12 +313,14 @@ export class ToolRegistry {
     });
     for (const item of selected) {
       try {
-        this.verifyFile(item);
+        assertPlainPath(item.file);
+        if (!item.file.startsWith(this.root + path.sep))
+          throw new Error("Candidate is outside the registry");
         fs.unlinkSync(item.file);
         fs.rmdirSync(path.dirname(item.file));
       } catch {
-        // Missing/tampered candidate files stay untouched. The index has
-        // already dropped the candidate, and no working version was changed.
+        // Index cleanup has already committed. No validated/active tool
+        // is touched, and a failed filesystem cleanup is safe to retry.
       }
     }
     return { removed: selected.map((item) => item.id) };
