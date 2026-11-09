@@ -22,3 +22,5 @@ export * from "./memory-ranking";
 export * from "./routing";
 
 export * from "./engagement-workflow";
+export * from "./tool-registry";
+export * from "./tool-gap";

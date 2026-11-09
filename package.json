@@ -19,7 +19,9 @@
     "./platform-store": "./src/platform-store.ts",
     "./platform-types": "./src/platform-types.ts",
     "./skill-trace": "./src/skill-trace.ts",
-    "./engagement-workflow": "./src/engagement-workflow.ts"
+    "./engagement-workflow": "./src/engagement-workflow.ts",
+    "./tool-registry": "./src/tool-registry.ts",
+    "./tool-gap": "./src/tool-gap.ts"
   },
   "scripts": {
     "test": "node test/run.cjs",

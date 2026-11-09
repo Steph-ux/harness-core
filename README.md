@@ -190,3 +190,67 @@ Les pages rendues sont conservées comme artefact CI pour la revue visuelle huma
 `ci/verify.yml` en conserve une copie ; seul le chemin `.github/workflows/` est actif.
 
 Les décisions sont dans `DECISIONS.md`, la carte des modules dans `src/ARCHITECTURE.md`.
+
+## Outils vivants : découverte, création et réutilisation pendant la session
+
+Le plugin OpenCode expose `cyber_toolbox`. Son registre partagé est conservé sous
+`HARNESS_STATE_ROOT/capabilities/registry.json`, hors du dépôt. Une mission
+peut proposer, tester, valider et activer un script **sans changer de session**.
+Les sessions ouvertes relisent l'index au prochain contexte ou appel à
+`cyber_toolbox discover`. Les scripts activés sont accessibles **immédiatement**
+à travers les outils de shell/processus existants et leurs permissions. Le
+plugin n'ajoute pas dynamiquement un outil natif OpenCode par script.
+
+- `discover` : classe les commandes du `PATH`, du répertoire
+  `HARNESS_TOOL_HOME` (aucune valeur par défaut), des chemins
+  `HARNESS_TOOL_PATHS`, les scripts gérés et les outils du catalogue hôte.
+  Ce n'est pas une preuve d'exécution. Les chemins liés sont ignorés.
+- `plan` : compare jusqu'à 25 objectifs à l'inventaire courant. Un match
+  indique seulement un outil candidat, jamais une couverture réellement testée.
+- `list` : renvoie les versions du périmètre, avec les candidats et l'historique.
+- `propose` : écrit une version **candidate**, sans l'exécuter ni la rendre
+  disponible pour d'autres missions. Formats pris en charge : `mjs`, `py`,
+  `sh`. Les candidats restent isolés sous `capabilities/staging/`.
+- `validate` : contrôle la syntaxe sans lancer le script, puis exige deux
+  observations réussies distinctes (test positif et test négatif) issues du
+  même périmètre, contenant le chemin exact du candidat et le résultat
+  attendu. Les deux exécutions doivent préalablement avoir été effectuées
+  avec les outils autorisés de l'hôte ; la simple sortie d'un générateur de
+  texte ne constitue pas une preuve.
+- `activate` : rend immédiatement la version validée visible pour son projet,
+  en retirant la précédente de l'index actif. Les fichiers publiés sont
+  contrôlés par SHA-256 avant chaque utilisation.
+- `promote` : requiert une décision explicite de l'opérateur, copie le script
+  validé dans le registre global et vérifie l'absence d'identifiants de cible
+  courants. Les preuves restent dans le projet source.
+- `rollback` : requiert une décision explicite de l'opérateur, et ne peut
+  restaurer qu'une version ayant déjà été validée. Passer `global: true` pour
+  restaurer une version globale précédemment retirée.
+- `retire` : retire la version active d'un projet, ou celle du catalogue
+  global avec `global: true`, après accord opérateur.
+- `prune` : retire les candidats abandonnés de plus de 30 jours par défaut,
+  ou les candidats désignés par `candidateIds`, sans toucher aux versions
+  validées ou actives. Quotas : 25 candidats et 250 révisions par projet,
+  2 000 révisions dans le registre. Une saturation nécessite une purge
+  explicite des candidats, pas un écrasement silencieux.
+
+Le contexte présente une sélection courte des outils gérés et natifs, **sans
+scanner le PATH** à chaque message. Le scan CLI est réservé à `discover` et
+`plan`, avec cache de 60 secondes, et `discover refresh:true` pour forcer
+la mise à jour. Un chemin `HARNESS_TOOL_HOME` ou `HARNESS_TOOL_PATHS`
+inaccessible déclenche une erreur explicite. Les outils aux noms identiques
+sont dédupliqués par priorité géré → hôte → PATH.
+
+Le catalogue n'est pas un journal d'exécution. Les observations immuables
+existantes portent les appels effectifs. `cyber_toolbox usage` expose leurs
+résultats et une indication *candidateManagedCommand* conservatrice : cette
+dernière ne prouve jamais qu'un script a exécuté les effets attendus.
+Aucune ligne d'audit supplémentaire n'est écrite à chaque injection du
+bloc de capacités ou chaque appel opérationnel.
+
+La création de fichiers n'accorde ni autorisation de cible ni accès système
+supplémentaire. La validation ne remplace pas une revue de sécurité humaine.
+Les preuves d'exécution et les tests en conditions réelles sous Kali restent
+à effectuer sur l'environnement de l'opérateur. Aucun outil candidat n'est
+exécuté automatiquement par le registre.
+
