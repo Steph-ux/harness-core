@@ -1,288 +1,281 @@
 # Harness core
 
-Noyau de preuve et de suivi de mission pour OpenCode v2. Les observations,
-constats, tâches et méthodes restent dans un état partagé indépendant de l’hôte.
-L’adaptateur est dans `opencode/` ; `src/` utilise les modules natifs de Node.
-Node 24 ou supérieur est requis. La supervision des commandes nécessite Linux
-et un exécutable `node` accessible au serveur (`HARNESS_NODE` peut fixer son chemin).
-La capture d’une trace s’ouvre dans le terminal de l’opérateur (qterminal), décorations
-comprises, puis la fenêtre est refermée ; sans écran, ou avec
-`HARNESS_CAPTURE_TERMINAL=off`, un rendu imprimé est produit à la place (Python 3 et
-Pillow). La capture d’une fenêtre réelle exige X11 (`import`, `identify`) et un écran.
+Evidence and mission-tracking kernel for OpenCode v2. Observations, findings,
+tasks and methods live in a shared state that stays independent of the host.
+The adapter is in `opencode/`; `src/` uses Node's native modules.
+Node 24 or newer is required. Command supervision needs Linux and a `node`
+executable the server can reach (`HARNESS_NODE` can pin its path).
+A trace capture opens in the operator's terminal (qterminal), decorations
+included, then the window is closed; without a display, or with
+`HARNESS_CAPTURE_TERMINAL=off`, a printed rendering is produced instead (Python 3
+and Pillow). Capturing a real window needs X11 (`import`, `identify`) and a
+display.
 
-## Installer dans OpenCode v2
+## Install in OpenCode v2
 
-La version native vérifiée est **2.0.26**, paquet npm `@opencode/cli`, commande
-`opencode2`. Le paquet `opencode-ai` appartient à l’autre ligne de versions.
+The verified native version is **2.0.26**, npm package `@opencode/cli`, command
+`opencode2`. The `opencode-ai` package belongs to the other version line.
 
-Définir `HARNESS_CORE` avec le chemin absolu de ce dépôt. Ajouter le **dossier**
-`opencode/` au tableau `plugins` de la configuration existante, en conservant
-les autres réglages et plugins :
+Set `HARNESS_CORE` to the absolute path of this repository. Add the `opencode/`
+**directory** to the `plugins` array of the existing configuration, keeping the
+other settings and plugins:
 
 ```json
 {
-  "plugins": ["/chemin/absolu/harness-core/opencode"],
+  "plugins": ["/absolute/path/harness-core/opencode"],
   "permissions": [
     {"action": "harness_operator", "resource": "*", "effect": "ask"}
   ]
 }
 ```
 
-Le dossier expose `index.ts`. La découverte via
-`~/.config/opencode/plugins/harness-core` est une autre possibilité ; choisir
-une seule méthode pour éviter un identifiant de plugin en double. Attendre
-l’activation du lieu avant de lire son catalogue. Vérifier ensuite
-`harness-core.proof` dans `plugin.list` et les deux procédures dans `skill.list`.
+The directory exposes `index.ts`. Discovery through
+`~/.config/opencode/plugins/harness-core` is another option; choose a single
+method to avoid a duplicate plugin identifier. Wait for the host to activate the
+plugin before reading its catalogue. Then check `harness-core.proof` in
+`plugin.list` and the two procedures in `skill.list`.
 
-`capitaliser-cyber` et `rapports-cyber` sont servies depuis `.opencode/skills/`.
-Les autres méthodes `harness-*` du routeur appartiennent à un catalogue externe.
-Leur absence doit être résolue avant une opération qui les exige. Un chargement
-en erreur ne satisfait jamais cette exigence.
+`capitaliser-cyber` and `rapports-cyber` are served from `.opencode/skills/`.
+The other `harness-*` methods of the router belong to an external catalogue.
+Their absence must be resolved before an operation that requires them. A failed
+load never satisfies that requirement.
 
-## Garanties et limites
+## Guarantees and limits
 
-- Les observations opérationnelles sont immuables et limitées à leur périmètre.
-  L’empreinte couvre toute la sortie, même au-delà de l’extrait conservé. Les
-  entrées et sorties destinées au modèle sont expurgées.
-- Un lancement de commande ne prouve pas sa réussite. `cyber_process read`
-  vérifie toute la trace et ne donne une preuve réussie qu’après une fin avec
-  code 0. États : `running`, `succeeded`, `failed`, `timed_out`, `stopped`,
-  `unknown`. Un processus ancien sans résultat fiable reste `unknown`.
-- Le superviseur Node est indépendant du serveur. Délai par défaut : 120 s ;
-  maximum : 600 s. Les descendants dans le groupe qui survivent à leur parent
-  sont arrêtés et font échouer le résultat. Un programme qui quitte
-  volontairement son groupe n’est pas entièrement supervisable ici.
-- Les commandes du registre et les lectures sont expurgées. Les traces,
-  résultats et fichiers de contrôle complets restent locaux, sous accès
-  restreint. La clé de contrôle d’une exécution n’est pas renvoyée au modèle.
-- Un verrou couvre toute mutation des tâches. Un conflit demande une nouvelle
-  tentative. Les tâches ne sont pas tronquées aux vingt dernières. Une
-  dépendance absente ou bloquée empêche le départ ; une clôture sans preuve
-  valide reste visible comme blocage lors de la reprise.
-- La vérification d’un constat lie sa révision à une reproduction et un
-  contrôle négatif observés dans une session distincte, après sa création et
-  après toute reprise de validation. Elle ne vaut pas approbation humaine.
-  Un marqueur prouve le résultat observé ; l’analyse doit justifier l’impact.
-- Le harnais suit les preuves et les permissions. Il ne constitue pas un
-  confinement réseau et ne déduit pas une autorisation de cible d’un dossier.
-  Définir le mandat et le périmètre dans la mission.
+- Operational observations are immutable and confined to their scope. The
+  fingerprint covers the whole output, even beyond the kept excerpt. Inputs and
+  outputs shown to the model are redacted.
+- Launching a command does not prove it succeeded. `cyber_process read` checks
+  the whole trace and only reports a successful result after a clean exit with
+  code 0. States: `running`, `succeeded`, `failed`, `timed_out`, `stopped`,
+  `unknown`. An old process without a reliable result stays `unknown`.
+- The Node supervisor is independent of the server. Default deadline: 120 s;
+  maximum: 600 s. Descendants in the group that outlive their parent are killed
+  and make the result fail. A program that deliberately leaves its group cannot
+  be fully supervised here.
+- Registry commands and reads are redacted. Full traces, results and control
+  files stay local, under restricted access. The control key of a run is never
+  returned to the model.
+- A lock covers every task mutation. A conflict asks for a retry. Tasks are not
+  truncated to the last twenty. A missing or blocked dependency prevents
+  starting; a closure without valid evidence stays visible as a blocker on
+  resume.
+- Verifying a finding binds its revision to a reproduction and a negative
+  control observed in a distinct session, after its creation and after any
+  reopened validation. It is not human approval. A marker proves the observed
+  result; the analysis must justify the impact.
+- The harness tracks evidence and permissions. It is not a network sandbox and
+  does not infer a target authorisation from a folder. Define the mandate and
+  the scope in the mission.
 
-Les permissions shell natives restent obligatoires. Sur 2.0.26, le repli par
-le client CLI officiel vérifie qu’il atteint le même PID serveur. Un serveur
-privé différent est refusé. Les versions qui exposent
-`ctx.permission.assert` l’utilisent directement. Les transitions opérateur
-exigent une réponse `once` à `harness_operator` en `ask` ; un `allow` mémorisé
-ne vaut pas décision humaine.
+Native shell permissions remain mandatory. On 2.0.26, the fallback through the
+official CLI client checks that it reaches the same server PID. A different
+private server is refused. Versions that expose `ctx.permission.assert` use it
+directly. Operator transitions require a `once` answer to `harness_operator` in
+`ask`; a remembered `allow` is not a human decision.
 
-## Rapports et restitution
+## Reports and restitution
 
-La procédure `rapports-cyber` décrit ce parcours :
+The `rapports-cyber` procedure describes this path:
 
-1. Enregistrer observations, sources et constats. Produire les attestations
-   avec `cyber_verification`, puis terminer l’étape `validation` en les citant
-   et vérifier les constats avec `cyber_finding verify`.
-2. Créer `cyber_report snapshot` avec les détails éditoriaux. Les vulnérabilités
-   doivent être vérifiées ; les observations et cas non testés gardent leur
-   classement. Les sources et empreintes sont figées.
-3. Générer Word, PDF et images de toutes les pages avec le script fourni.
-   Enregistrer les trois artefacts et les relier avec `cyber_report register`.
-4. Relire toutes les pages et enregistrer la décision du responsable. L’étape
-   `report` exige le dernier rapport approuvé et ses fichiers inchangés. Une
-   modification des constats invalide la revue et rouvre le rapport.
-5. Si la validation doit être reprise, utiliser `cyber_mission reopen-validation`
-   avec une raison. Après décision de l’opérateur, le harnais conserve les
-   checkpoints, remet les constats à vérifier et rouvre validation, preuves et
-   rapport. Les anciennes observations de vérification ne peuvent pas être
-   réutilisées comme preuves fraîches de cette reprise. Aucun test externe
-   n’est relancé automatiquement.
-6. Consigner la restitution effective avec l’accord de l’opérateur et sa
-   preuve. Une restitution prévue ne vaut pas restitution effectuée.
-7. **Nettoyer uniquement après restitution** avec `cyber_cleanup` :
+1. Record observations, sources and findings. Produce the attestations with
+   `cyber_verification`, then close the `validation` stage citing them and
+   verify the findings with `cyber_finding verify`.
+2. Create `cyber_report snapshot` with the editorial details. Vulnerabilities
+   must be verified; observations and untested cases keep their classification.
+   Sources and fingerprints are frozen.
+3. Generate Word, PDF and images of every page with the provided script.
+   Register the three artifacts and link them with `cyber_report register`.
+4. Read every page and record the owner's decision. The `report` stage requires
+   the latest approved report and its unchanged files. A change to the findings
+   invalidates the review and reopens the report.
+5. If validation must be reopened, use `cyber_mission reopen-validation` with a
+   reason. After the operator's decision, the harness keeps the checkpoints,
+   returns the findings to verification and reopens validation, evidence and
+   report. The old verification observations cannot be reused as fresh
+   evidence for that reopen. No external test is replayed automatically.
+6. Record the effective restitution with the operator's agreement and its
+   evidence. A planned restitution is not a performed one.
+7. **Clean only after restitution** with `cyber_cleanup`:
    `plan` → `run` → `result` → `verify` → `result`.
-   L’exécution et sa vérification utilisent des processus distincts. Conserver
-   jusque-là les preuves, comptes et objets de test selon le mandat. Aucun PoC,
-   générateur ou passage de capitalisation ne les supprime automatiquement.
+   Execution and its verification use distinct processes. Until then, keep the
+   evidence, accounts and test objects according to the mandate. No PoC,
+   generator or capitalisation pass removes them automatically.
 
-Les transitions et leurs événements sont écrits dans une transaction. Les
-transitions concurrentes de nettoyage sont refusées avant le lancement. Une
-clôture de rapport et le suivi après restitution sont distincts :
-`cyber_report status` expose restitution, capitalisation et nettoyage. Ne pas
-annoncer le dossier entièrement clos si ces actions restent à traiter.
+Transitions and their events are written in one transaction. Concurrent cleanup
+transitions are refused before launch. Closing a report and the follow-up after
+restitution are distinct: `cyber_report status` exposes restitution,
+capitalisation and cleanup. Do not announce the folder as fully closed while
+these actions remain.
 
-Le générateur local ne lance pas les PoC du snapshot :
+The local generator does not run the snapshot's PoCs:
 
 ```bash
 python3 -m pip install -r .opencode/skills/rapports-cyber/scripts/requirements.txt
-# Installer aussi LibreOffice, Poppler et DejaVu Sans Mono ou une police équivalente.
+# Also install LibreOffice, Poppler and DejaVu Sans Mono or an equivalent font.
 python3 .opencode/skills/rapports-cyber/scripts/build_report.py /mission/snapshot.json --out /mission/rapport-v2
 ```
 
-Il refuse d’écraser une version existante et produit `rapport.docx`,
-`rapport.pdf`, `page-N.png`, `qa.json`. `SOFFICE` peut désigner LibreOffice.
-Le manifeste relie les empreintes et laisse la revue visuelle en attente.
-Le calcul couvre le **score de base CVSS 3.1 uniquement**, selon
-[FIRST](https://www.first.org/cvss/v3.1/specification-document). Un vecteur non
-pris en charge ou un score incohérent est refusé. Justifier séparément les
-métriques et le risque métier.
+It refuses to overwrite an existing version and produces `rapport.docx`,
+`rapport.pdf`, `page-N.png`, `qa.json`. `SOFFICE` can point at LibreOffice.
+The manifest links the fingerprints and leaves the visual review pending.
+The computation covers the **CVSS 3.1 base score only**, per
+[FIRST](https://www.first.org/cvss/v3.1/specification-document). An unsupported
+vector or an inconsistent score is refused. Justify the metrics and the
+business risk separately.
 
-`cyber_capture shot` photographie une fenêtre réelle. `evidence` affiche une
-trace enregistrée liée au processus lu, sans le rejouer. Cette seconde forme
-porte `rendered-trace` et ne doit pas être présentée comme capture native du test.
+`cyber_capture shot` photographs a real window. `evidence` shows a recorded
+trace tied to the process that was read, without replaying it. This second form
+carries `rendered-trace` and must not be presented as a native capture of the
+test.
 
-## Capitaliser Cyber
+## Capitalise Cyber
 
-Une passe bornée transforme les apprentissages vérifiés en scripts, règles,
-fixtures ou procédures. `cyber_capitalise` consigne `none`, `candidate` ou
-`validated`. La validation exige un artefact ainsi que des tests positifs et
-négatifs distincts. L’absence d’apprentissage utile est un résultat valable. Cette
-passe ne modifie pas les poids du modèle et ne génère pas récursivement des skills.
+A bounded pass turns verified learnings into scripts, rules, fixtures or
+procedures. `cyber_capitalise` records `none`, `candidate` or `validated`.
+Validation requires an artifact plus distinct positive and negative tests. No
+useful learning is a valid outcome. This pass does not change the model weights
+and does not generate skills recursively.
 
-Les méthodes apprises exigent toujours deux sessions de support et une confiance
-≥ 0,75 pour devenir actives. La promotion globale exige une décision de l’opérateur
-et des exemples anonymisés. La capitalisation ne vaut pas autorisation de nettoyage.
+Learned methods always require two supporting sessions and a confidence ≥ 0.75
+to become active. Global promotion requires an operator decision and anonymised
+examples. Capitalisation is not authorisation to clean up.
 
-L’extraction automatique attend dix minutes d’inactivité. Elle compare les
-empreintes des observations : une session reprise peut être relue et un échec
-retenté après une minute. `HARNESS_VERIFIER` ou `state/verifier` fixe un modèle
-exclusif. Sans modèle fixé, le fournisseur de la session demandeuse est réutilisé ; les autres
-ne sont envisagés que dans `HARNESS_VERIFIER_PROVIDERS`. Maximum trois candidats,
-30 s par appel et 24 000 caractères de réponse acceptée. **L’API stateless de
-2.0.26 n’expose pas de plafond de tokens en sortie** ; la limite de caractères
-n’est pas un plafond de facturation serveur.
+Automatic extraction waits for ten minutes of inactivity. It compares
+observation fingerprints: a resumed session can be read again and a failure
+retried after one minute. `HARNESS_VERIFIER` or `state/verifier` pins a single
+model. Without a pinned model, the requesting session's provider is reused;
+others are only considered in `HARNESS_VERIFIER_PROVIDERS`. At most three
+candidates, 30 s per call and 24,000 characters of accepted answer. **The
+stateless 2.0.26 API exposes no output token ceiling**; the character limit is
+not a server billing cap.
 
-## État et migration
+## State and migration
 
-`HARNESS_HOME` vaut par défaut `~/.local/share/harness-core`.
-`HARNESS_STATE_ROOT` peut fixer directement le dossier d’état.
+`HARNESS_HOME` defaults to `~/.local/share/harness-core`.
+`HARNESS_STATE_ROOT` can set the state directory directly.
 
-| Fichier | Contenu |
+| File | Contents |
 |---|---|
-| `knowledge.sqlite` | Sessions, observations, connaissances, règles et audits |
-| `platform.sqlite` | Missions, constats, sources, artefacts, rapports, restitutions et nettoyage |
-| `tasks-<scope>.json` | Tâches verrouillées par périmètre |
-| `processes.json`, `traces/` | Exécutions, traces privées, résultats et fichiers de contrôle |
-| `reports/` | Snapshots de rapport conservés par version |
-| `skills/` | Révisions et méthodes apprises |
+| `knowledge.sqlite` | Sessions, observations, knowledge, rules and audits |
+| `platform.sqlite` | Missions, findings, sources, artifacts, reports, restitutions and cleanup |
+| `tasks-<scope>.json` | Tasks locked per scope |
+| `processes.json`, `traces/` | Runs, private traces, results and control files |
+| `reports/` | Report snapshots kept by version |
+| `skills/` | Revisions and learned methods |
 
-Les migrations SQLite sont additives. Aucun hash complet manquant n’est inventé
-pour les anciennes observations, et aucun ancien processus n’est transformé en
-réussite. Sauvegarder l’état avant une mise à niveau ; ne pas ouvrir une base
-migrée avec une version antérieure. Un verrou abandonné nécessite une inspection,
-pas une suppression automatique.
+SQLite migrations are additive. No missing full hash is invented for old
+observations, and no old process is turned into a success. Back up the state
+before an upgrade; do not open a migrated database with an older version. An
+abandoned lock needs an inspection, not an automatic removal.
 
-## Vérifier
+## Verify
 
 ```bash
 npm ci --ignore-scripts --no-audit --no-fund
-npm run check             # TypeScript, neutralité et ressources des procédures
-npm test                  # suites autonomes, sans modèle externe
+npm run check             # TypeScript, host neutrality and procedure resources
+npm test                  # standalone suites, no external model
 python3 test/report-pipeline.py
-npm run test:report       # dépendances de rendu nécessaires
-npm run verify            # les trois contrôles ci-dessus, en une commande
-OPENCODE_BINARY=/chemin/opencode2 node scripts/native-smoke.cjs
+npm run test:report       # render dependencies required
+npm run verify            # the three checks above, in one command
+OPENCODE_BINARY=/path/opencode2 node scripts/native-smoke.cjs
 ```
 
-Le workflow hébergé peut être indisponible (facturation Actions). Le dépôt
-fournit alors un contrôle local équivalent, exécuté avant chaque push :
+The hosted workflow may be unavailable (Actions billing). The repository then
+provides an equivalent local check, run before every push:
 
 ```bash
-git config core.hooksPath .githooks   # une fois par clone
+git config core.hooksPath .githooks   # once per clone
 ```
 
-`.githooks/pre-push` lance `npm run verify` : TypeScript et neutralité, les
-suites autonomes, puis les contrats du rapport. Un push qui échoue à l'un des
-trois est refusé localement.
+`.githooks/pre-push` runs `npm run verify`: TypeScript and neutrality, the
+standalone suites, then the report contracts. A push that fails one of the
+three is refused locally.
 
-## Entretien
+## Maintenance
 
-Les observations sont les preuves d'un constat : elles ne sont jamais purgées,
-et le journal d'audit est append-only par schéma. L'entretien porte sur le
-transcript et sur l'espace disque :
+Observations are the evidence of a finding: they are never pruned, and the audit
+log is append-only by schema. Maintenance covers the transcript and disk space:
 
 ```bash
-npm run prune -- --messages-days 180 --dry-run   # ce qui serait retiré
-npm run prune -- --messages-days 180             # retrait puis VACUUM
+npm run prune -- --messages-days 180 --dry-run   # what would be removed
+npm run prune -- --messages-days 180             # removal, then VACUUM
 ```
 
-Le script supprime les messages plus anciens que la fenêtre (l'index de
-recherche suit), laisse les observations et l'audit intacts, puis compacte la
-base et replie le WAL. Il se lance à la main : aucun outil du modèle ne peut
-déclencher une suppression.
+The script removes messages older than the window (the search index follows),
+leaves observations and the audit log untouched, then compacts the database and
+folds the WAL. It is run by hand: no model tool can trigger a deletion.
 
-Les tests utilisent des fixtures synthétiques sans cible client. Le contrôle
-natif 2.0.26 couvre le catalogue, les outils dans leur périmètre et le refus du
-serveur privé. Les événements d’exécution, décisions `once` et résultats de
-commandes sont vérifiés avec un hôte de test. Aucun parcours natif avec modèle
-externe n’est revendiqué. Les captures sur fenêtres réelles exigent un écran.
-Le contrôle Pi externe reste optionnel avec `npm run test:gate` ou `HARNESS_PI_GATE`.
+The tests use synthetic fixtures with no client target. The native 2.0.26 check
+covers the catalogue, the tools within their scope and the refusal of the
+private server. Execution events, `once` decisions and command results are
+checked with a test host. No native run with an external model is claimed.
+Captures of real windows require a display. The external Pi check remains
+optional with `npm run test:gate` or `HARNESS_PI_GATE`.
 
-Le workflow `.github/workflows/verify.yml` exécute trois contrôles sur les PR :
-contrats du noyau, génération réelle Word/PDF et chargement natif OpenCode 2.0.26.
-Les pages rendues sont conservées comme artefact CI pour la revue visuelle humaine.
-`ci/verify.yml` en conserve une copie ; seul le chemin `.github/workflows/` est actif.
+The `.github/workflows/verify.yml` workflow runs three checks on pull requests:
+kernel contracts, a real Word/PDF render and the native OpenCode 2.0.26 load.
+The rendered pages are kept as a CI artifact for the human visual review.
+`ci/verify.yml` keeps a copy; only the `.github/workflows/` path is active.
 
-Les décisions sont dans `DECISIONS.md`, la carte des modules dans `src/ARCHITECTURE.md`.
+Decisions are in `DECISIONS.md`, the module map in `src/ARCHITECTURE.md`.
 
-## Outils vivants : découverte, création et réutilisation pendant la session
+## Live tools: discovery, creation and reuse during a session
 
-Le plugin OpenCode expose `cyber_toolbox`. Son registre partagé est conservé sous
-`HARNESS_STATE_ROOT/capabilities/registry.json`, hors du dépôt. Une mission
-peut proposer, tester, valider et activer un script **sans changer de session**.
-Les sessions ouvertes relisent l'index au prochain contexte ou appel à
-`cyber_toolbox discover`. Les scripts activés sont accessibles **immédiatement**
-à travers les outils de shell/processus existants et leurs permissions. Le
-plugin n'ajoute pas dynamiquement un outil natif OpenCode par script.
+The OpenCode plugin exposes `cyber_toolbox`. Its shared registry is kept under
+`HARNESS_STATE_ROOT/capabilities/registry.json`, outside the repository. A
+mission can propose, test, validate and activate a script **without changing
+session**. Open sessions re-read the index on the next context or call to
+`cyber_toolbox discover`. Activated scripts are available **immediately**
+through the existing shell/process tools and their permissions. The plugin does
+not add a native OpenCode tool per script.
 
-- `discover` : classe les commandes du `PATH`, du répertoire
-  `HARNESS_TOOL_HOME` (aucune valeur par défaut), des chemins
-  `HARNESS_TOOL_PATHS`, les scripts gérés et les outils du catalogue hôte.
-  Ce n'est pas une preuve d'exécution. Les chemins liés sont ignorés.
-- `plan` : compare jusqu'à 25 objectifs à l'inventaire courant. Un match
-  indique seulement un outil candidat, jamais une couverture réellement testée.
-- `list` : renvoie les versions du périmètre, avec les candidats et l'historique.
-- `propose` : écrit une version **candidate**, sans l'exécuter ni la rendre
-  disponible pour d'autres missions. Formats pris en charge : `mjs`, `py`,
-  `sh`. Les candidats restent isolés sous `capabilities/staging/`.
-- `validate` : contrôle la syntaxe sans lancer le script, puis exige deux
-  observations réussies distinctes (test positif et test négatif) issues du
-  même périmètre, contenant le chemin exact du candidat et le résultat
-  attendu. Les deux exécutions doivent préalablement avoir été effectuées
-  avec les outils autorisés de l'hôte ; la simple sortie d'un générateur de
-  texte ne constitue pas une preuve.
-- `activate` : rend immédiatement la version validée visible pour son projet,
-  en retirant la précédente de l'index actif. Les fichiers publiés sont
-  contrôlés par SHA-256 avant chaque utilisation.
-- `promote` : requiert une décision explicite de l'opérateur, copie le script
-  validé dans le registre global et vérifie l'absence d'identifiants de cible
-  courants. Les preuves restent dans le projet source.
-- `rollback` : requiert une décision explicite de l'opérateur, et ne peut
-  restaurer qu'une version ayant déjà été validée. Passer `global: true` pour
-  restaurer une version globale précédemment retirée.
-- `retire` : retire la version active d'un projet, ou celle du catalogue
-  global avec `global: true`, après accord opérateur.
-- `prune` : retire les candidats abandonnés de plus de 30 jours par défaut,
-  ou les candidats désignés par `candidateIds`, sans toucher aux versions
-  validées ou actives. Quotas : 25 candidats et 250 révisions par projet,
-  2 000 révisions dans le registre. Une saturation nécessite une purge
-  explicite des candidats, pas un écrasement silencieux.
+- `discover`: ranks commands from `PATH`, from the `HARNESS_TOOL_HOME`
+  directory (no default value), from `HARNESS_TOOL_PATHS`, the managed scripts
+  and the host catalogue tools. This is not proof of execution. Linked paths are
+  ignored.
+- `plan`: compares up to 25 objectives with the current inventory. A match only
+  indicates a candidate tool, never a genuinely tested coverage.
+- `list`: returns the versions of the scope, with candidates and history.
+- `propose`: writes a **candidate** version, without executing it or making it
+  available to other missions. Supported formats: `mjs`, `py`, `sh`.
+  Candidates stay isolated under `capabilities/staging/`.
+- `validate`: checks the syntax without running the script, then requires two
+  distinct successful observations (a positive test and a negative test) from
+  the same scope, containing the exact path of the candidate and the expected
+  result. Both runs must first have been performed with the host's authorised
+  tools; the mere output of a text generator is not evidence.
+- `activate`: makes the validated version immediately visible to its project,
+  removing the previous one from the active index. Published files are checked
+  by SHA-256 before every use.
+- `promote`: requires an explicit operator decision, copies the validated
+  script into the global registry and checks for the absence of current target
+  identifiers. The evidence stays in the source project.
+- `rollback`: requires an explicit operator decision, and can only restore a
+  version that was already validated. Pass `global: true` to restore a
+  previously retired global version.
+- `retire`: retires a project's active version, or the global catalogue's with
+  `global: true`, after operator agreement.
+- `prune`: removes abandoned candidates older than 30 days by default, or the
+  candidates named by `candidateIds`, without touching validated or active
+  versions. Quotas: 25 candidates and 250 revisions per project, 2,000 revisions
+  in the registry. Saturation requires an explicit purge of candidates, not a
+  silent overwrite.
 
-Le contexte présente une sélection courte des outils gérés et natifs, **sans
-scanner le PATH** à chaque message. Le scan CLI est réservé à `discover` et
-`plan`, avec cache de 60 secondes, et `discover refresh:true` pour forcer
-la mise à jour. Un chemin `HARNESS_TOOL_HOME` ou `HARNESS_TOOL_PATHS`
-inaccessible déclenche une erreur explicite. Les outils aux noms identiques
-sont dédupliqués par priorité géré → hôte → PATH.
+The context shows a short selection of managed and native tools, **without
+scanning PATH** on every message. The CLI scan is reserved for `discover` and
+`plan`, with a 60-second cache, and `discover refresh:true` to force the update.
+An unreachable `HARNESS_TOOL_HOME` or `HARNESS_TOOL_PATHS` path raises an
+explicit error. Tools with identical names are deduplicated by priority
+managed → host → PATH.
 
-Le catalogue n'est pas un journal d'exécution. Les observations immuables
-existantes portent les appels effectifs. `cyber_toolbox usage` expose leurs
-résultats et une indication *candidateManagedCommand* conservatrice : cette
-dernière ne prouve jamais qu'un script a exécuté les effets attendus.
-Aucune ligne d'audit supplémentaire n'est écrite à chaque injection du
-bloc de capacités ou chaque appel opérationnel.
+The catalogue is not an execution log. The existing immutable observations carry
+the effective calls. `cyber_toolbox usage` exposes their results and a
+conservative *candidateManagedCommand* hint: it never proves that a script
+produced the expected effects. No extra audit row is written on each injection
+of the capability block or each operational call.
 
-La création de fichiers n'accorde ni autorisation de cible ni accès système
-supplémentaire. La validation ne remplace pas une revue de sécurité humaine.
-Les preuves d'exécution et les tests en conditions réelles sous Kali restent
-à effectuer sur l'environnement de l'opérateur. Aucun outil candidat n'est
-exécuté automatiquement par le registre.
-
+Creating files grants neither target authorisation nor extra system access.
+Validation is not a substitute for a human security review. Execution evidence
+and real-condition tests under Kali remain to be performed on the operator's
+environment. No candidate tool is executed automatically by the registry.
