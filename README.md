@@ -205,6 +205,8 @@ plugin n'ajoute pas dynamiquement un outil natif OpenCode par script.
   `HARNESS_TOOL_HOME` (par défaut `~/hacking/Mes-outils`), des chemins
   `HARNESS_TOOL_PATHS`, les scripts gérés et les outils du catalogue hôte.
   Ce n'est pas une preuve d'exécution. Les chemins liés sont ignorés.
+- `plan` : compare jusqu'à 25 objectifs à l'inventaire courant. Un match
+  indique seulement un outil candidat, jamais une couverture réellement testée.
 - `list` : renvoie les versions du périmètre, avec les candidats et l'historique.
 - `propose` : écrit une version **candidate**, sans l'exécuter ni la rendre
   disponible pour d'autres missions. Formats pris en charge : `mjs`, `py`,
