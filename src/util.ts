@@ -176,10 +176,16 @@ export function assertPlainPath(file: string): void {
       process.platform === "win32"
         ? path.normalize(s).toLowerCase()
         : path.normalize(s);
-    if (
-      normalize(fs.realpathSync.native(current)) !==
-      normalize(path.resolve(current))
-    )
+    // A file can disappear between lstat and realpath: another owner removed
+    // it. An absent path is not a redirected one.
+    let real: string;
+    try {
+      real = fs.realpathSync.native(current);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
+    if (normalize(real) !== normalize(path.resolve(current)))
       throw new Error("Redirected harness paths are not allowed");
   }
 }
