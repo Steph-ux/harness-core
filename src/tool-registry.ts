@@ -184,6 +184,8 @@ export class ToolRegistry {
     // Candidates abandoned for 30 days are cleaned before new proposals.
     this.prune(scope);
     return this.mutate((state) => {
+      if (state.revisions.length >= MAX_REVISIONS)
+        throw new Error("Tool registry at capacity; prune unused candidates");
       const inScope = state.revisions.filter((item) => item.scope === scope);
       if (inScope.length >= MAX_SCOPE_REVISIONS)
         throw new Error("Scope revision quota reached; prune unused candidates");
@@ -263,6 +265,8 @@ export class ToolRegistry {
         item.status = "active";
         return { ...item };
       }
+      if (state.revisions.length >= MAX_REVISIONS)
+        throw new Error("Tool registry at capacity; prune unused candidates");
       const idGlobal = randomUUID();
       const folder = path.join(this.root, "published", "global", item.name, "v" + targetVersion + "-" + idGlobal);
       const file = path.join(folder, "tool." + item.language);
