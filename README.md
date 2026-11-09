@@ -189,6 +189,22 @@ git config core.hooksPath .githooks   # une fois par clone
 suites autonomes, puis les contrats du rapport. Un push qui échoue à l'un des
 trois est refusé localement.
 
+## Entretien
+
+Les observations sont les preuves d'un constat : elles ne sont jamais purgées,
+et le journal d'audit est append-only par schéma. L'entretien porte sur le
+transcript et sur l'espace disque :
+
+```bash
+npm run prune -- --messages-days 180 --dry-run   # ce qui serait retiré
+npm run prune -- --messages-days 180             # retrait puis VACUUM
+```
+
+Le script supprime les messages plus anciens que la fenêtre (l'index de
+recherche suit), laisse les observations et l'audit intacts, puis compacte la
+base et replie le WAL. Il se lance à la main : aucun outil du modèle ne peut
+déclencher une suppression.
+
 Les tests utilisent des fixtures synthétiques sans cible client. Le contrôle
 natif 2.0.26 couvre le catalogue, les outils dans leur périmètre et le refus du
 serveur privé. Les événements d’exécution, décisions `once` et résultats de

@@ -54,7 +54,7 @@ function stamp(value: string): void {
 export class KnowledgeStore implements StorePort {
   private db: DatabaseSync;
   private closed = false;
-  constructor(filename: string) {
+  constructor(private filename: string) {
     assertPlainPath(filename);
     fs.mkdirSync(path.dirname(filename), { recursive: true, mode: 0o700 });
     for (const suffix of ["", "-wal", "-shm"])
@@ -74,9 +74,9 @@ export class KnowledgeStore implements StorePort {
     const version = Number(
       this.db.prepare("PRAGMA user_version").get()!.user_version,
     );
-    if (version > 2)
+    if (version > 3)
       throw new Error("Knowledge database is newer than this harness");
-    if (version === 2) return;
+    if (version === 3) return;
     if (version === 0)
       this.db.exec(`BEGIN IMMEDIATE;
       CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, scope TEXT NOT NULL, cwd TEXT NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(id,scope));
@@ -98,13 +98,40 @@ export class KnowledgeStore implements StorePort {
       INSERT INTO messages_fts(entry_id,scope,text) SELECT entry_id,scope,text FROM messages;
       PRAGMA user_version = 1;
       COMMIT;`);
-    this.db.exec(`BEGIN IMMEDIATE;
-      ALTER TABLE observations ADD COLUMN raw_hash TEXT;
-      ALTER TABLE observations ADD COLUMN raw_bytes INTEGER;
-      ALTER TABLE observations ADD COLUMN truncated INTEGER;
-      CREATE TRIGGER observations_no_update BEFORE UPDATE ON observations BEGIN SELECT RAISE(ABORT,'Immutable observation'); END;
-      CREATE TRIGGER observations_no_delete BEFORE DELETE ON observations BEGIN SELECT RAISE(ABORT,'Immutable observation'); END;
+    if (version < 2) {
+      // Idempotent: a database that kept its columns but lost its version tag
+      // must migrate, not fail on a duplicate column.
+      const columns = new Set(
+        this.db
+          .prepare("PRAGMA table_info(observations)")
+          .all()
+          .map((row) => String(row.name)),
+      );
+      this.db.exec("BEGIN IMMEDIATE;");
+      try {
+        for (const [name, type] of [
+          ["raw_hash", "TEXT"],
+          ["raw_bytes", "INTEGER"],
+          ["truncated", "INTEGER"],
+        ] as const)
+          if (!columns.has(name))
+            this.db.exec(
+              `ALTER TABLE observations ADD COLUMN ${name} ${type};`,
+            );
+        this.db.exec(`
+      CREATE TRIGGER IF NOT EXISTS observations_no_update BEFORE UPDATE ON observations BEGIN SELECT RAISE(ABORT,'Immutable observation'); END;
+      CREATE TRIGGER IF NOT EXISTS observations_no_delete BEFORE DELETE ON observations BEGIN SELECT RAISE(ABORT,'Immutable observation'); END;
       PRAGMA user_version=2; COMMIT;`);
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+    if (version < 3)
+      this.db.exec(`BEGIN IMMEDIATE;
+      CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages BEGIN DELETE FROM messages_fts WHERE entry_id=old.entry_id; END;
+      CREATE INDEX IF NOT EXISTS messages_timestamp ON messages(timestamp);
+      PRAGMA user_version=3; COMMIT;`);
   }
   private open(): void {
     if (this.closed) throw new Error("Knowledge store is closed");
@@ -720,6 +747,50 @@ export class KnowledgeStore implements StorePort {
         result[row.status] = Number(row.n);
     }
     return result;
+  }
+  /**
+   * Remove transcript messages older than the window. Observations are the
+   * evidence a claim rests on and are never pruned; the audit log is
+   * append-only by schema. The search rows follow the delete trigger.
+   */
+  pruneMessages(days: number, dryRun = false): number {
+    this.open();
+    if (!Number.isFinite(days) || days < 1 || days > 3650)
+      throw new Error("Invalid message retention window (1..3650 days)");
+    const cutoff = new Date(Date.now() - days * 86400_000).toISOString();
+    if (dryRun)
+      return Number(
+        this.db
+          .prepare("SELECT COUNT(*) AS n FROM messages WHERE timestamp < ?")
+          .get(cutoff)!.n,
+      );
+    return Number(
+      this.db.prepare("DELETE FROM messages WHERE timestamp < ?").run(cutoff)
+        .changes,
+    );
+  }
+  /** Reclaim free pages after a prune. Never runs inside a transaction. */
+  vacuum(): void {
+    this.open();
+    this.db.exec("VACUUM");
+    // Fold the rebuilt pages back; otherwise the WAL keeps a second copy of
+    // the whole database until the last connection closes.
+    try {
+      this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    } catch {
+      /* a reader holds the checkpoint; the next close folds it */
+    }
+  }
+  /** Bytes held by the database and its WAL, for a before/after report. */
+  size(): number {
+    let total = 0;
+    for (const suffix of ["", "-wal", "-shm"])
+      try {
+        total += fs.statSync(this.filename + suffix).size;
+      } catch {
+        /* a suffix that does not exist holds no bytes */
+      }
+    return total;
   }
   close(): void {
     if (!this.closed) {
