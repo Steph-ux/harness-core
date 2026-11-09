@@ -74,6 +74,21 @@ private server is refused. Versions that expose `ctx.permission.assert` use it
 directly. Operator transitions require a `once` answer to `harness_operator` in
 `ask`; a remembered `allow` is not a human decision.
 
+## Platforms and portability
+
+- Linux is required for command supervision and for X11 captures. The core
+  stores, the reports and the printed trace rendering are plain Node and Python.
+- A tool directory may be a symlink (`/bin` to `/usr/bin`) and a tool may be a
+  symlink (`msfconsole` to `/etc/alternatives/msfconsole`): both are resolved to
+  a regular executable. Dangling links and directories are ignored.
+- `HARNESS_TOOL_HOME` and `HARNESS_TOOL_PATHS` have no default. Set them to the
+  directories that hold the tools of the installation; nothing about the
+  operator's home is assumed.
+- The real-terminal capture is an adapter for qterminal on X11. Elsewhere, set
+  `HARNESS_CAPTURE_TERMINAL=off`: the trace is rendered as an image by Python
+  and Pillow, without a display.
+- `cyber_capture shot` needs X11 (`import`, `identify`) and a display.
+
 ## Reports and restitution
 
 The `rapports-cyber` procedure describes this path:
