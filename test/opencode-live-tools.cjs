@@ -169,8 +169,10 @@ module.exports = async ({ assert, jiti }) => {
     fs.symlinkSync("real-tool", path.join(bin, "linked-tool"));
     fs.symlinkSync("missing-tool", path.join(bin, "broken-tool"));
     fs.mkdirSync(path.join(bin, "a-directory"));
+    // A configured directory may be a symlink (`/bin` -> `/usr/bin`).
+    fs.symlinkSync(bin, path.join(base, "bin-link"));
     const savedPaths = process.env.HARNESS_TOOL_PATHS;
-    process.env.HARNESS_TOOL_PATHS = bin;
+    process.env.HARNESS_TOOL_PATHS = path.join(base, "bin-link");
     try {
       const names = registry.scan(true).map((item) => item.name);
       assert.ok(

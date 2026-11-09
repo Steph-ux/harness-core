@@ -429,9 +429,12 @@ export class ToolRegistry {
     const found = new Map<string, ToolCapability>();
     for (const directory of dirs) {
       try {
-        assertPlainPath(directory);
-        if (!fs.statSync(directory).isDirectory()) throw new Error("Not a directory");
-        const entries = fs.readdirSync(directory, { withFileTypes: true });
+        // A PATH entry may itself be a symlink (`/bin` -> `/usr/bin` on
+        // merged-/usr systems): resolve it, then check the real directory.
+        const real = fs.realpathSync(directory);
+        assertPlainPath(real);
+        if (!fs.statSync(real).isDirectory()) throw new Error("Not a directory");
+        const entries = fs.readdirSync(real, { withFileTypes: true });
         for (const entry of entries.slice(0, MAX_PER_DIRECTORY)) {
           if (found.size >= MAX_SCAN) break;
           // Kali ships many tools as symlinks (msfconsole, msfvenom). Follow a
