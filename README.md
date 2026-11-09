@@ -85,6 +85,16 @@ duplicating. `relate` links two entities (`owns`, `resolves-to`, `member-of`,
 the pivot a report cites as an attack path. The graph is scope-local: another
 project sees nothing.
 
+## Vulnerability lookup
+
+`cyber_cve` asks OSV, the public vulnerability database, for a package version:
+`ecosystem` (`PyPI`, `npm`, `Go`, `Debian`, …), `package`, `version`. The answer is
+bounded (100 entries, 500 characters per summary, a 512 KB response cap), and the
+call itself is an observation, so a finding can cite it. Pair it with the entity
+graph: a `technology` entity (`wordpress:6.5`), a `vulnerability` entity
+(`CVE-2024-…`), and an `affected-by` relation. A version is not a vulnerability
+until the lookup says so, and a lookup is not an exploit.
+
 ## The task tree and the coverage map
 
 Tasks nest: `cyber_tasks add` takes a `parent`, to a bounded depth. `tree`
