@@ -74,6 +74,17 @@ private server is refused. Versions that expose `ctx.permission.assert` use it
 directly. Operator transitions require a `once` answer to `harness_operator` in
 `ask`; a remembered `allow` is not a human decision.
 
+## Entities and pivots
+
+`cyber_entity` records what an engagement learned as typed nodes and links
+them: `domain`, `host`, `ip`, `url`, `org`, `person`, `account`, `repo`,
+`secret`, `certificate`, `service`, `technology`. Every fact carries the
+observations it was read from, and the same `type`/`key` merges instead of
+duplicating. `relate` links two entities (`owns`, `resolves-to`, `member-of`,
+`uses`, `leaks`), and `path` returns the shortest chain between two of them —
+the pivot a report cites as an attack path. The graph is scope-local: another
+project sees nothing.
+
 ## Platforms and portability
 
 - Linux is required for command supervision and for X11 captures. The core

@@ -3,6 +3,19 @@
 One entry per decision that is expensive to reverse. Each states what was
 decided, why, and what it costs. New entries go at the top.
 
+## 2026-11-09 — A fact is a typed entity, and a pivot is a path
+
+**Decision.** `cyber_entity` records typed nodes (`domain`, `host`, `ip`, `url`,
+`org`, `person`, `account`, `repo`, `secret`, `certificate`, `service`,
+`technology`) and typed relations, each bound to the observations it was read
+from. The same `type`/`key` merges instead of duplicating; `path` returns the
+shortest chain between two entities.
+**Why.** A list of findings cannot answer "how do we reach this asset". OSINT and
+recon produce relations, not only claims: partner → account → repository → host
+is a pivot, and it must be queryable instead of retyped in prose.
+**Cost.** Two more tables and a graph to keep current. An entity without an
+observation is refused, so every node needs the read that produced it.
+
 ## 2026-11-09 — An artifact is typed and filed by its kind
 
 **Decision.** An artifact carries one kind, and a mission that declared a root

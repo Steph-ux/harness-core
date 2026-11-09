@@ -27,7 +27,7 @@ database, so a test can hand it a stub and a host can hand it the real store.
 | Module | Enforces |
 |---|---|
 | `store.ts` | An observation is written once and never edited; a finding cites only evidence from its own scope; operator rules override inferred knowledge |
-| `platform-store.ts` | A mission takes its stages in order; a scope is approved before work is dispatched; a finding is verified by an observation that is not its own evidence |
+| `platform-store.ts` | A mission takes its stages in order; a scope is approved before work is dispatched; a finding is verified by an observation that is not its own evidence; entities and relations form the scope-local pivot graph |
 | `tasks.ts` | Mutations are locked; `complete` takes evidence ids resolved by the host; `block` requires a reason |
 | `capsule.ts` | The returning session gets the exact state: open steps, blocked steps with reasons, the mission stage, pending approvals, commands the harness still owns. `closingGate` answers "are we done?" from that state alone |
 | `skills.ts` | A method becomes active only with support from two sessions and confidence ≥ 0.75; a global method is promotion-only, evidence-free, identifier-free, and visible from every project (project shadows global) |
