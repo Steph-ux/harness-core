@@ -67,6 +67,14 @@ module.exports = async ({ assert, jiti }) => {
     assert.throws(() => registry.validate(scope, candidate.id, tests, () =>
       proofs.map((proof) => ({ ...proof, scope: "global" }))),
       /scope-bound/);
+    assert.throws(() => registry.validate(scope, candidate.id, tests, () =>
+      proofs.map((proof) => ({
+        ...proof, input: { command: "echo node " + candidate.file },
+      }))), /exact candidate/, "echoed candidate command is not validation");
+    assert.throws(() => registry.validate(scope, candidate.id, tests, () =>
+      proofs.map((proof) => ({
+        ...proof, input: { command: "node " + candidate.file + "; echo PASS" },
+      }))), /exact candidate/, "chained commands cannot validate");
     const valid = registry.validate(scope, candidate.id, tests, () => proofs);
     assert.equal(valid.status, "validated");
     const active = registry.activate(scope, candidate.id);
