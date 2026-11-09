@@ -30,7 +30,12 @@ export interface ToolRevision {
   createdAt: string;
   tests: ToolTest[];
 }
-interface RegistryState { schema: 1; revisions: ToolRevision[] }
+interface RegistryState {
+  schema: 1;
+  revisions: ToolRevision[];
+  /** Highest version ever issued per `scope/name`; pruning never lowers it. */
+  versions?: Record<string, number>;
+}
 export interface ToolCapability {
   name: string;
   origin: "path" | "managed" | "host";
@@ -115,6 +120,10 @@ export class ToolRegistry {
     const value = JSON.parse(fs.readFileSync(this.index, "utf8"));
     if (value.schema !== 1 || !Array.isArray(value.revisions))
       throw new Error("Unsupported tool registry schema");
+    if (value.versions !== undefined &&
+        (typeof value.versions !== "object" || value.versions === null ||
+          Array.isArray(value.versions)))
+      throw new Error("Unsupported tool registry counters");
     return value;
   }
   private mutate<T>(fn: (state: RegistryState) => T): T {
@@ -192,7 +201,13 @@ export class ToolRegistry {
       if (inScope.filter((item) => item.status === "candidate").length >= MAX_SCOPE_CANDIDATES)
         throw new Error("Candidate quota reached; prune or validate candidates");
       const prior = inScope.filter((item) => item.name === input.name);
-      const version = Math.max(0, ...prior.map((entry) => entry.version)) + 1;
+      const counter = scope + "/" + input.name;
+      const version = Math.max(
+        state.versions?.[counter] ?? 0,
+        ...prior.map((entry) => entry.version),
+      ) + 1;
+      // Pruned candidates must not give their number to a later script.
+      state.versions = { ...(state.versions ?? {}), [counter]: version };
       const id = randomUUID();
       const folder = path.join(this.root, "staging", scope, input.name, "v" + version + "-" + id);
       const file = path.join(folder, "tool." + input.language);
@@ -255,9 +270,17 @@ export class ToolRegistry {
       this.verifyFile(item);
       if (global) globallyReusable(fs.readFileSync(item.file, "utf8"));
       const targetScope = global ? "global" : scope;
+      const globalCounter = "global/" + item.name;
       const targetVersion = global
-        ? Math.max(0, ...state.revisions.filter((entry) => entry.scope === "global" && entry.name === item.name).map((entry) => entry.version)) + 1
+        ? Math.max(
+            state.versions?.[globalCounter] ?? 0,
+            ...state.revisions
+              .filter((entry) => entry.scope === "global" && entry.name === item.name)
+              .map((entry) => entry.version),
+          ) + 1
         : item.version;
+      if (global)
+        state.versions = { ...(state.versions ?? {}), [globalCounter]: targetVersion };
       for (const entry of state.revisions)
         if (entry.scope === targetScope && entry.name === item.name && entry.status === "active")
           entry.status = "retired";
@@ -425,8 +448,10 @@ export class ToolRegistry {
   }
   context(scope: string, query: string, host: { name: string; description?: string }[] = []): string {
     const result = this.discover(scope, query, host, 0, 6, false, false);
-    const rows = result.tools.map((item) => "- " + item.name + " [" + item.origin + "]: " +
-      (item.command ?? item.description).slice(0, 140));
+    const rows = result.tools.map((item) =>
+      "- " + item.name + (item.version ? " v" + item.version : "") +
+      " [" + item.origin + "]: " +
+      (item.description || item.command || "").slice(0, 120));
     return [
       "Harness capabilities. The inventory is live and is not proof of tool use.",
       "Before acting, compare applicable tools with cyber_toolbox discover; do not claim unavailable tools were executed.",

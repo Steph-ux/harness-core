@@ -172,7 +172,8 @@ module.exports = async ({ assert, jiti }) => {
     });
     await fixture.hooks.get("context")(secondPrompt);
     assert.ok(secondPrompt.system.some((entry) =>
-      String(entry.text).includes(live.file)), "same session sees the newest executable path");
+      String(entry.text).includes("fixture-validator v3")),
+      "same session sees the newest activated version");
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
