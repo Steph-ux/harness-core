@@ -3,6 +3,17 @@
 One entry per decision that is expensive to reverse. Each states what was
 decided, why, and what it costs. New entries go at the top.
 
+## 2026-11-09 — A target is a tree, and its coverage is a file
+
+**Decision.** Tasks nest to a bounded depth, `cyber_tasks assets` seeds one branch
+per known host, domain or URL, and `export` writes `couverture.md` into the
+declared engagement.
+**Why.** A flat list lets a fifty-host target look covered after five steps. A
+tree makes every branch visible, and the exported map is what a person reads to
+see what was done, blocked, or never started.
+**Cost.** More tasks to keep current, and a file that must be regenerated when
+the list changes. The depth bound and the task capacity limit still apply.
+
 ## 2026-11-09 — A fact is a typed entity, and a pivot is a path
 
 **Decision.** `cyber_entity` records typed nodes (`domain`, `host`, `ip`, `url`,

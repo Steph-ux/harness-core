@@ -85,6 +85,16 @@ duplicating. `relate` links two entities (`owns`, `resolves-to`, `member-of`,
 the pivot a report cites as an attack path. The graph is scope-local: another
 project sees nothing.
 
+## The task tree and the coverage map
+
+Tasks nest: `cyber_tasks add` takes a `parent`, to a bounded depth. `tree`
+returns the hierarchy, `markdown` renders it as an indented checklist, and
+`export` writes `couverture.md` into the declared engagement — the map a
+person, or an outliner such as CherryTree, can read: the target, its branches,
+what is closed with its observations, and what is blocked with its reason.
+`assets` seeds one branch per known host, domain or URL, so a target list
+becomes a checklist instead of a paragraph.
+
 ## Platforms and portability
 
 - Linux is required for command supervision and for X11 captures. The core
