@@ -97,6 +97,52 @@ module.exports = async ({ assert, jiti }) => {
     assert.equal(second.version, 2);
     assert.equal(registry.list(scope)[0].version, 1,
       "unvalidated changes never replace a working script");
+    const sourced = registry.propose(scope, {
+      name: "fixture-adapted",
+      description: "Adapted from a public script",
+      language: "py",
+      source: "print('adapted')\n",
+      provenance: {
+        url: "https://github.com/example/tool",
+        commit: "abc1234",
+        license: "MIT",
+      },
+    });
+    assert.equal(sourced.provenance.url, "https://github.com/example/tool");
+    assert.ok(
+      registry
+        .list(scope, true)
+        .some(
+          (item) =>
+            item.name === "fixture-adapted" &&
+            item.provenance?.license === "MIT",
+        ),
+      "the provenance is kept with the revision",
+    );
+    assert.throws(
+      () =>
+        registry.propose(scope, {
+          name: "fixture-insecure",
+          description: "Insecure source",
+          language: "py",
+          source: "print('x')\n",
+          provenance: { url: "http://example.com/tool" },
+        }),
+      /https/,
+      "an insecure provenance URL is refused",
+    );
+    assert.throws(
+      () =>
+        registry.propose(scope, {
+          name: "fixture-secret",
+          description: "Credential in the URL",
+          language: "py",
+          source: "print('x')\n",
+          provenance: { url: "https://user:pass@example.com/tool" },
+        }),
+      /credentials/,
+      "a provenance URL with credentials is refused",
+    );
     fs.appendFileSync(second.file, "// tampered\n");
     assert.throws(() => registry.validate(scope, second.id, tests, () => proofs),
       /changed since proposal/);

@@ -1553,6 +1553,16 @@ export default {
             source: { type: "string" },
             candidateId: { type: "string" },
             version: { type: "integer", minimum: 1 },
+            provenance: {
+              type: "object",
+              properties: {
+                url: { type: "string" },
+                commit: { type: "string" },
+                license: { type: "string" },
+              },
+              required: ["url"],
+              additionalProperties: false,
+            },
             days: { type: "integer", minimum: 0, maximum: 3650 },
             candidateIds: { type: "array", items: { type: "string" }, maxItems: 100 },
             tests: {

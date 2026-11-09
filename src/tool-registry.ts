@@ -12,6 +12,12 @@ import { assertPlainPath, atomicWrite, hash, redactText } from "./util";
 
 export type ToolLanguage = "mjs" | "py" | "sh";
 export type ToolStatus = "candidate" | "validated" | "active" | "retired";
+/** Where a managed script came from: the repository it was taken from or adapted from. */
+export interface ToolProvenance {
+  url: string;
+  commit?: string;
+  license?: string;
+}
 export interface ToolTest {
   observationId: string;
   contains: string;
@@ -29,6 +35,7 @@ export interface ToolRevision {
   status: ToolStatus;
   createdAt: string;
   tests: ToolTest[];
+  provenance?: ToolProvenance;
 }
 interface RegistryState {
   schema: 1;
@@ -43,6 +50,7 @@ export interface ToolCapability {
   command?: string;
   scope?: string;
   version?: number;
+  provenance?: ToolProvenance;
 }
 const VALID_SCOPE = /^(?:global|project-[a-f0-9]{24})$/;
 const VALID_NAME = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
@@ -97,8 +105,41 @@ function safeSource(source: string): void {
       source.includes("\0") || redactText(source) !== source)
     throw new Error("Invalid script source or possible credential");
 }
-function globallyReusable(source: string): void {
-  if (/(?:https?:\/\/|\b(?:\d{1,3}\.){3}\d{1,3}\b|\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b|\/home\/[^/\s]+\/|\/Users\/[^/\s]+\/)/i.test(source))
+function checkProvenance(value: unknown): ToolProvenance | undefined {
+  if (value === undefined) return undefined;
+  const input = value as Record<string, unknown>;
+  if (!input || typeof input !== "object" || Array.isArray(input))
+    throw new Error("Invalid tool provenance");
+  let url: URL;
+  try {
+    url = new URL(String(input.url));
+  } catch {
+    throw new Error("Invalid tool provenance URL");
+  }
+  if (url.protocol !== "https:")
+    throw new Error("Tool provenance must be an https URL");
+  if (url.username || url.password)
+    throw new Error("Tool provenance URL must not carry credentials");
+  const field = (key: string, max: number) => {
+    const text = input[key];
+    if (text === undefined) return undefined;
+    if (
+      typeof text !== "string" ||
+      !text.trim() ||
+      text.length > max ||
+      redactText(text) !== text
+    )
+      throw new Error("Invalid tool provenance field");
+    return text.trim();
+  };
+  return {
+    url: url.toString(),
+    commit: field("commit", 64),
+    license: field("license", 80),
+  };
+}
+
+function globallyReusable(source: string): void {  if (/(?:https?:\/\/|\b(?:\d{1,3}\.){3}\d{1,3}\b|\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b|\/home\/[^/\s]+\/|\/Users\/[^/\s]+\/)/i.test(source))
     throw new Error("Global scripts must not contain target/customer identifiers or user-specific paths");
 }
 
@@ -181,7 +222,7 @@ export class ToolRegistry {
     if (!includeCandidates) return this.available(scope);
     return this.read().revisions.filter((item) => item.scope === scope || item.scope === "global");
   }
-  propose(scope: string, input: { name: string; description: string; language: ToolLanguage; source: string }): ToolRevision {
+  propose(scope: string, input: { name: string; description: string; language: ToolLanguage; source: string; provenance?: unknown }): ToolRevision {
     checkScope(scope);
     if (scope === "global") throw new Error("A global tool requires validated promotion");
     checkName(input.name);
@@ -190,6 +231,7 @@ export class ToolRegistry {
         redactText(input.description) !== input.description)
       throw new Error("Invalid tool description");
     safeSource(input.source);
+    const provenance = checkProvenance(input.provenance);
     // Candidates abandoned for 30 days are cleaned before new proposals.
     this.prune(scope);
     return this.mutate((state) => {
@@ -219,6 +261,7 @@ export class ToolRegistry {
         id, scope, name: input.name, version, description: input.description,
         language: input.language, file, sha256: hash(source),
         status: "candidate", createdAt: new Date().toISOString(), tests: [],
+        ...(provenance ? { provenance } : {}),
       };
       state.revisions.push(entry);
       return { ...entry };
@@ -419,6 +462,7 @@ export class ToolRegistry {
     const managed: ToolCapability[] = this.available(scope).map((item) => ({
       name: item.name, origin: "managed", description: item.description,
       command: commandFor(item), scope: item.scope, version: item.version,
+      ...(item.provenance ? { provenance: item.provenance } : {}),
     }));
     const hosted: ToolCapability[] = host.filter((item) =>
       typeof item?.name === "string" && item.name.trim()).map((item) => ({
