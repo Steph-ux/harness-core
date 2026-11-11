@@ -13,8 +13,6 @@ const { makeContext, loadPlugin, unloadPlugins } = require("./opencode-fixture.c
 const CORE = path.resolve(__dirname, "..");
 
 module.exports = async ({ assert, jiti, skip }) => {
-  if (process.platform !== "linux")
-    skip("traced command supervision is Linux-only");
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "harness-scenario-"));
   const state = path.join(workspace, "state");
   const engagement = path.join(workspace, "engagement");
@@ -65,6 +63,11 @@ module.exports = async ({ assert, jiti, skip }) => {
       "the mission starts unapproved",
     );
 
+    // The supervisor owns a process group and reads a durable terminal
+    // result: it runs on Linux only. The engagement above it is checked
+    // everywhere.
+    if (process.platform !== "linux")
+      skip("traced command supervision is Linux-only");
     const ran = await call(
       "cyber_process",
       {

@@ -6,8 +6,6 @@ const { makeContext, loadPlugin, unloadPlugins } = require("./opencode-fixture.c
 const CORE = path.resolve(__dirname, "..");
 
 module.exports = async ({ assert, jiti, modules, skip }) => {
-  if (process.platform !== "linux")
-    skip("traced command supervision is Linux-only");
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "harness-process-"));
   const state = path.join(workspace, "state");
   process.env.HARNESS_STATE_ROOT = state;
@@ -80,6 +78,11 @@ module.exports = async ({ assert, jiti, modules, skip }) => {
     const moved = path.join(workspace, "moved");
     fs.mkdirSync(moved);
     fixture.sessions.set("ses_process", moved);
+    // The supervisor owns a process group and reads a durable terminal
+    // result: it runs on Linux only. Everything above it is checked
+    // everywhere.
+    if (process.platform !== "linux")
+      skip("traced command supervision is Linux-only");
     const record = await call({
       action: "run",
       argv: [process.execPath, "-e", "console.log(process.cwd()); console.log('api_key=not-a-real-secret'); setTimeout(()=>{}, 10000)"],

@@ -5,8 +5,6 @@ const fs = require("node:fs"),
   { createHash } = require("node:crypto");
 const { makeContext, loadPlugin, unloadPlugins } = require("./opencode-fixture.cjs");
 module.exports = async ({ assert, jiti, skip }) => {
-  if (process.platform !== "linux")
-    skip("traced command supervision is Linux-only");
   const root = path.resolve(__dirname, ".."),
     work = fs.mkdtempSync(path.join(os.tmpdir(), "harness-workflow-")),
     state = path.join(work, "state");
@@ -495,6 +493,11 @@ module.exports = async ({ assert, jiti, skip }) => {
     assert.equal(fs.existsSync(target), true);
     fault.exec("DROP TRIGGER fail_cleanup_event");
     fault.close();
+    // The cleanup runs the command through the supervisor, which owns a
+    // process group and reads a durable terminal result: it runs on Linux
+    // only. The workflow above it is checked everywhere.
+    if (process.platform !== "linux")
+      skip("traced command supervision is Linux-only");
     const run = JSON.parse(
       (await call("cyber_cleanup", { action: "run", id: cleanup.id })).content,
     );

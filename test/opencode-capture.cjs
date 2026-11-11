@@ -15,8 +15,6 @@ const CORE = path.resolve(__dirname, "..");
 const PLUGIN = path.join(CORE, "opencode", "plugin.ts");
 
 module.exports = async ({ assert, jiti, skip }) => {
-  if (process.platform !== "linux")
-    skip("traced command supervision is Linux-only");
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "harness-capture-"));
   const state = path.join(workspace, "state");
   fs.mkdirSync(state, { recursive: true });
@@ -184,6 +182,11 @@ module.exports = async ({ assert, jiti, skip }) => {
     path.join(CORE, "src", "process.ts"),
   );
   const registry = new ProcessRegistry(state);
+  // The supervisor owns a process group and reads a durable terminal
+  // result: it runs on Linux only. The capture rules above it are checked
+  // everywhere.
+  if (process.platform !== "linux")
+    skip("traced command supervision is Linux-only");
   const ran = JSON.parse(
     (
       await command({

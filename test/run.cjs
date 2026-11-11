@@ -80,6 +80,7 @@ const skip = (reason) => {
 (async () => {
   let count = 0;
   let skipped = 0;
+  let skippedChecks = 0;
   for (const suite of suites) {
     const counted = countingAssert();
     try {
@@ -93,7 +94,14 @@ const skip = (reason) => {
       });
     } catch (error) {
       if (error instanceof SkipSuite) {
-        console.log(`SKIP ${suite}: ${error.message}`);
+        // The suite ran until it reached the part it cannot run here: what
+        // it checked before that still counts.
+        const done = counted.read();
+        count += done;
+        skippedChecks += done;
+        console.log(
+          `SKIP ${suite}: ${error.message} (${done} checks passed before)`,
+        );
         skipped++;
         continue;
       }
@@ -104,7 +112,8 @@ const skip = (reason) => {
     count += checks;
   }
   console.log(
-    `ALL PASS: ${count} checks; ${suites.length - skipped} suites, ${skipped} skipped`,
+    `ALL PASS: ${count} checks; ${suites.length - skipped} suites, ${skipped} skipped ` +
+      `(${skippedChecks} checks ran before a skip)`,
   );
 })().catch((error) => {
   console.error(error.stack || error.message);
