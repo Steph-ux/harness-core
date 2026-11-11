@@ -215,6 +215,29 @@ module.exports = async ({ assert, jiti }) => {
     /lacks observed evidence/,
     "a check that the output does not carry is refused",
   );
+  // A negative control proves the procedure does not fire on a benign
+  // input. If it cites the reproduction's own observation, it proves
+  // nothing: the same output would be both the claim and its refutation.
+  await assert.rejects(
+    () =>
+      finding({
+        ...proposal,
+        checks: [
+          {
+            observationId: reproduction.id,
+            contains: "XSS confirmed",
+            purpose: "reproduction",
+          },
+          {
+            observationId: reproduction.id,
+            contains: "XSS confirmed",
+            purpose: "negative-control",
+          },
+        ],
+      }),
+    /must be distinct/,
+    "a negative control cannot reuse the reproduction's observation",
+  );
   // A request that routes to a method must load it before a finding is
   // recorded: the harness does not take the model's memory for a procedure.
   const routed = fixture.contextEvent({

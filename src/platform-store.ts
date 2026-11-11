@@ -1059,6 +1059,25 @@ export class PlatformStore {
       )
         throw new Error("Finding check lacks observed evidence");
     }
+    // A negative control proves the procedure does not fire on a benign
+    // input. If it cites the reproduction's own observation, it proves
+    // nothing: the same output would have to be both the claim and its
+    // refutation. The control must observe something else.
+    const reproductions = new Set(
+      p.checks
+        .filter((c) => c.purpose === "reproduction")
+        .map((c) => c.observationId),
+    );
+    if (
+      p.checks.some(
+        (c) =>
+          c.purpose === "negative-control" &&
+          reproductions.has(c.observationId),
+      )
+    )
+      throw new Error(
+        "Reproduction and negative-control observations must be distinct",
+      );
     const id = `F-${newId().slice(0, 18)}`,
       confidence = Math.min(
         0.75,
@@ -1358,7 +1377,7 @@ export class PlatformStore {
     if (
       f.checks
         .filter((c) => c.purpose === "reproduction")
-        .every((c) =>
+        .some((c) =>
           f.checks.some(
             (control) =>
               control.purpose === "negative-control" &&
