@@ -224,11 +224,14 @@ abandoned lock needs an inspection, not an automatic removal.
 npm ci --ignore-scripts --no-audit --no-fund
 npm run check             # TypeScript, host neutrality and procedure resources
 npm test                  # standalone suites, no external model
-python3 test/report-pipeline.py
 npm run test:report       # render dependencies required
 npm run verify            # the three checks above, in one command
 OPENCODE_BINARY=/path/opencode2 node scripts/native-smoke.cjs
 ```
+
+`npm run verify` finds the Python interpreter the machine has, so it runs on
+every platform. To run the report contract on its own, use the same launcher:
+`node scripts/run-python.cjs test/report-pipeline.py`.
 
 `npm test` reports how many suites it skipped. The command supervision owns a
 process group and reads a durable terminal result, so it runs on Linux only:
@@ -272,7 +275,12 @@ The `.github/workflows/verify.yml` workflow runs three checks on pull requests:
 kernel contracts, a real Word/PDF render and the native OpenCode 2.0.26 load.
 The rendered pages are kept as a CI artifact for the human visual review.
 There is one copy of it: the hosted workflow may be unavailable, and the
-local gate below covers the same checks without it.
+local gate covers the first check without it.
+
+The local gate covers the kernel contracts and the report contract. The
+Word/PDF render needs LibreOffice and Poppler, and the native load needs the
+2.0.26 binary; both are run by the hosted workflow only, and both are
+reported by it.
 
 Decisions are in `DECISIONS.md`, the module map in `src/ARCHITECTURE.md`.
 

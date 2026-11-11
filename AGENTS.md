@@ -62,9 +62,9 @@ answered (`lessons.extracted.model`).
   host or target; `scripts/check-neutrality.cjs` fails the build otherwise.
 - **A path is compared by the object it denotes, not by its spelling.** A short
   name for a directory is an alias, not a redirection; a symlink, a junction or
-  a hard link is refused.
-- **A negative control observes something else.** It cannot cite the
-  reproduction's observation, or the same output would be both the claim and
+  a hard link is refused, and so is a volume that is not the one it is named as.
+- **A negative control observes a different output.** It cannot observe what
+  the reproduction observed, or the same output would be both the claim and
   its refutation.
 - **Never edit `src/` or `opencode/plugin.ts` while an A/B bench is running:**
   each run reloads the module, so the arms would mix.
@@ -97,7 +97,8 @@ fresh reproduction and negative controls from another session. Never invent a
 human approval from technical verification. Cleanup of mission resources is
 permitted only after recorded restitution of the reviewed report.
 
-For reporting changes, run `python3 test/report-pipeline.py`. For layout changes,
+For reporting changes, run `node scripts/run-python.cjs test/report-pipeline.py`
+(the launcher finds the interpreter the machine has). For layout changes,
 run `npm run test:report` with the optional rendering dependencies and inspect
 every page. Temporary synthetic unit fixtures are not client mission resources.
 Never claim visual review from the technical QA manifest alone. Use the native
