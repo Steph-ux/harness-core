@@ -8,7 +8,7 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { makeContext } = require("./opencode-fixture.cjs");
+const { makeContext, loadPlugin, unloadPlugins } = require("./opencode-fixture.cjs");
 
 const CORE = path.resolve(__dirname, "..");
 const PLUGIN = path.join(CORE, "opencode", "plugin.ts");
@@ -56,7 +56,7 @@ module.exports = async ({ assert, jiti }) => {
   let verification;
 
   const fixture = makeContext(workspace);
-  await plugin.setup(fixture.ctx);
+  await loadPlugin(plugin, fixture.ctx);
   assert.ok(fixture.tools.has("cyber_mission"), "the engagement is driven by a tool");
   assert.ok(fixture.tools.has("cyber_finding"), "the ledger is a tool");
 
@@ -464,5 +464,7 @@ module.exports = async ({ assert, jiti }) => {
   );
 
   knowledge.close();
+  platform.close();
+  await unloadPlugins();
   fs.rmSync(workspace, { recursive: true, force: true });
 };
