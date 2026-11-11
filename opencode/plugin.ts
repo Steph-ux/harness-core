@@ -3449,7 +3449,10 @@ export default {
     });
 
     debug(`plugin ready scope=${scopeFor(instanceCwd)} cwd=${instanceCwd}`);
+    let unloaded = false;
     return () => {
+      if (unloaded) return;
+      unloaded = true;
       lifecycleController.abort();
       // The stores hold open handles on the SQLite files. A plugin that is
       // unloaded leaves them behind: the state directory cannot be removed
