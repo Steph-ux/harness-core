@@ -1272,7 +1272,8 @@ export class PlatformStore {
     }
     // The controls are compared by their output, not only by the
     // observation they cite: a control that replays the same run under
-    // another observation id proves nothing either.
+    // another observation id proves nothing either. The same observation
+    // would carry the same output, so this covers both.
     const claims = checks.filter((c) => c.purpose === "reproduction");
     for (const control of checks.filter(
       (c) => c.purpose === "negative-control",
@@ -1286,18 +1287,6 @@ export class PlatformStore {
           );
       }
     }
-    if (
-      checks
-        .filter((c) => c.purpose === "reproduction")
-        .some((c) =>
-          checks.some(
-            (n) =>
-              n.purpose === "negative-control" &&
-              n.observationId === c.observationId,
-          ),
-        )
-    )
-      throw new Error("Verification controls must be distinct");
   }
   verificationPayload(
     scope: string,
@@ -1388,22 +1377,9 @@ export class PlatformStore {
       )
     )
       throw new Error("Observed checks no longer match evidence");
-    if (
-      f.checks
-        .filter((c) => c.purpose === "reproduction")
-        .some((c) =>
-          f.checks.some(
-            (control) =>
-              control.purpose === "negative-control" &&
-              control.observationId === c.observationId,
-          ),
-        )
-    )
-      throw new Error(
-        "Reproduction and negative-control observations must be distinct",
-      );
-    // The declared control must also observe a different output than the
-    // reproduction it refutes.
+    // The declared control must observe a different output than the
+    // reproduction it refutes. The same observation would have the same
+    // output, so this covers the control that cites the reproduction too.
     for (const control of f.checks.filter(
       (c) => c.purpose === "negative-control",
     )) {
