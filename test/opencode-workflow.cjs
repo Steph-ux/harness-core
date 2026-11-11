@@ -3,8 +3,10 @@ const fs = require("node:fs"),
   path = require("node:path"),
   os = require("node:os"),
   { createHash } = require("node:crypto");
-const { makeContext } = require("./opencode-fixture.cjs");
-module.exports = async ({ assert, jiti }) => {
+const { makeContext, loadPlugin, unloadPlugins } = require("./opencode-fixture.cjs");
+module.exports = async ({ assert, jiti, skip }) => {
+  if (process.platform !== "linux")
+    skip("traced command supervision is Linux-only");
   const root = path.resolve(__dirname, ".."),
     work = fs.mkdtempSync(path.join(os.tmpdir(), "harness-workflow-")),
     state = path.join(work, "state");
@@ -753,6 +755,7 @@ module.exports = async ({ assert, jiti }) => {
     workflow.close();
     platform.close();
     store.close();
+    await unloadPlugins();
     fs.rmSync(work, { recursive: true, force: true });
   }
 };

@@ -66,22 +66,46 @@ const suites = fs
   .map((name) => name.replace(/\.cjs$/, ""))
   .sort();
 
+/**
+ * A suite that needs a platform the machine does not have is skipped, not
+ * failed. The command supervision of a traced process is Linux-only, so the
+ * suites that exercise it cannot run elsewhere; they are the coverage of
+ * that guarantee, and the guarantee is checked on Linux.
+ */
+class SkipSuite extends Error {}
+const skip = (reason) => {
+  throw new SkipSuite(reason);
+};
+
 (async () => {
   let count = 0;
+  let skipped = 0;
   for (const suite of suites) {
     const counted = countingAssert();
-    await require(path.join(__dirname, `${suite}.cjs`))({
-      assert: counted.proxy,
-      jiti,
-      modules,
-      root,
-      harness: root,
-    });
+    try {
+      await require(path.join(__dirname, `${suite}.cjs`))({
+        assert: counted.proxy,
+        jiti,
+        modules,
+        root,
+        harness: root,
+        skip,
+      });
+    } catch (error) {
+      if (error instanceof SkipSuite) {
+        console.log(`SKIP ${suite}: ${error.message}`);
+        skipped++;
+        continue;
+      }
+      throw error;
+    }
     const checks = counted.read();
     console.log(`PASS ${suite}: ${checks} checks`);
     count += checks;
   }
-  console.log(`ALL PASS: ${count} checks; ${suites.length} suites`);
+  console.log(
+    `ALL PASS: ${count} checks; ${suites.length - skipped} suites, ${skipped} skipped`,
+  );
 })().catch((error) => {
   console.error(error.stack || error.message);
   process.exitCode = 1;

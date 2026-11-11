@@ -9,12 +9,14 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const { makeContext } = require("./opencode-fixture.cjs");
+const { makeContext, loadPlugin, unloadPlugins } = require("./opencode-fixture.cjs");
 
 const CORE = path.resolve(__dirname, "..");
 const PLUGIN = path.join(CORE, "opencode", "plugin.ts");
 
-module.exports = async ({ assert, jiti }) => {
+module.exports = async ({ assert, jiti, skip }) => {
+  if (process.platform !== "linux")
+    skip("traced command supervision is Linux-only");
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "harness-capture-"));
   const state = path.join(workspace, "state");
   fs.mkdirSync(state, { recursive: true });
@@ -129,7 +131,7 @@ module.exports = async ({ assert, jiti }) => {
 
   // The tool, on a real display when there is one.
   const fixture = makeContext(workspace);
-  const unload = await plugin.setup(fixture.ctx);
+  const unload = await loadPlugin(plugin, fixture.ctx);
   const { observationId } = jiti(path.join(CORE, "src", "observation-id.ts"));
   const captureObservation = observationId("ses_cap", "call-capture-source");
   await fixture.hooks.get("execute.after")({
@@ -343,5 +345,6 @@ module.exports = async ({ assert, jiti }) => {
 
   // The plugin goes away; the rendered images stay on disk.
   if (typeof unload === "function") unload();
+  await unloadPlugins();
   fs.rmSync(workspace, { recursive: true, force: true });
 };

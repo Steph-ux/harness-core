@@ -3,8 +3,10 @@ const fs = require("node:fs"),
   os = require("node:os"),
   path = require("node:path"),
   { spawn } = require("node:child_process");
-const { makeContext } = require("./opencode-fixture.cjs");
-module.exports = async ({ assert, jiti, modules }) => {
+const { makeContext, loadPlugin, unloadPlugins } = require("./opencode-fixture.cjs");
+module.exports = async ({ assert, jiti, modules, skip }) => {
+  if (process.platform !== "linux")
+    skip("traced command supervision is Linux-only");
   const root = path.resolve(__dirname, ".."),
     work = fs.mkdtempSync(path.join(os.tmpdir(), "harness-regressions-")),
     state = path.join(work, "state");
@@ -259,6 +261,7 @@ module.exports = async ({ assert, jiti, modules }) => {
   } finally {
     unload();
     store.close();
+    await unloadPlugins();
     fs.rmSync(work, { recursive: true, force: true });
   }
 };
