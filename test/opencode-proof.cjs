@@ -11,7 +11,7 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { makeContext } = require("./opencode-fixture.cjs");
+const { makeContext, loadPlugin, unloadPlugins } = require("./opencode-fixture.cjs");
 
 const CORE = path.resolve(__dirname, "..");
 const PLUGIN = path.join(CORE, "opencode", "plugin.ts");
@@ -54,7 +54,7 @@ module.exports = async ({ assert, jiti }) => {
   const { scopeFor, hash } = jiti(path.join(CORE, "src", "util.ts"));
 
   const { ctx, hooks, tools } = makeContext(workspace);
-  await plugin.setup(ctx);
+  await loadPlugin(plugin, ctx);
 
   // The proof surface exists on this host.
   assert.ok(hooks.has("execute.after"), "the plugin hooks tool execution");
@@ -242,14 +242,26 @@ module.exports = async ({ assert, jiti }) => {
     1,
     "a second handle on the same file sees the observation",
   );
+  second.close();
 
   // Synthetic migration mapping; the test needs no personal machine configuration.
+  // The mapping carries a historical Windows scope into a Linux workspace, so
+  // it is the behaviour of a Linux host. A Windows host keeps its own scope
+  // and the alias file is not read.
   const historicalCwd="C:\\synthetic\\engagement",historicalScope=`project-${hash(historicalCwd.toLowerCase()).slice(0,24)}`;
   const aliased=path.join(workspace,"aliased");fs.mkdirSync(aliased);const previousAliases=process.env.HARNESS_SCOPE_ALIASES;
   process.env.HARNESS_SCOPE_ALIASES=path.join(workspace,"aliases.json");fs.writeFileSync(process.env.HARNESS_SCOPE_ALIASES,JSON.stringify({version:1,entries:[{linuxCwd:aliased,historicalCwd,historicalScope}]}));
-  assert.equal(scopeFor(aliased),historicalScope,"the explicit mapping keeps historical scope");
+  if (process.platform === "win32") {
+    assert.notEqual(
+      scopeFor(aliased),
+      historicalScope,
+      "a Windows host does not read the migration mapping",
+    );
+  } else {
+    assert.equal(scopeFor(aliased),historicalScope,"the explicit mapping keeps historical scope");
+  }
   const shared = makeContext(aliased, aliased);
-  await plugin.setup(shared.ctx);
+  await loadPlugin(plugin, shared.ctx);
   await shared.hooks.get("execute.after")(
     toolEvent({ sessionID: "ses_test_scope", id: "call-scope" }),
   );
@@ -264,5 +276,6 @@ module.exports = async ({ assert, jiti }) => {
 
   if(previousAliases===undefined)delete process.env.HARNESS_SCOPE_ALIASES;else process.env.HARNESS_SCOPE_ALIASES=previousAliases;
   store.close();
+  await unloadPlugins();
   fs.rmSync(workspace, { recursive: true, force: true });
 };
