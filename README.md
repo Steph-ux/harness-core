@@ -264,7 +264,8 @@ optional with `npm run test:gate` or `HARNESS_PI_GATE`.
 The `.github/workflows/verify.yml` workflow runs three checks on pull requests:
 kernel contracts, a real Word/PDF render and the native OpenCode 2.0.26 load.
 The rendered pages are kept as a CI artifact for the human visual review.
-`ci/verify.yml` keeps a copy; only the `.github/workflows/` path is active.
+There is one copy of it: the hosted workflow may be unavailable, and the
+local gate below covers the same checks without it.
 
 Decisions are in `DECISIONS.md`, the module map in `src/ARCHITECTURE.md`.
 

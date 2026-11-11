@@ -89,5 +89,6 @@ run `npm run test:report` with the optional rendering dependencies and inspect
 every page. Temporary synthetic unit fixtures are not client mission resources.
 Never claim visual review from the technical QA manifest alone. Use the native
 SDK smoke test with the documented binary version before claiming native loading.
-The active CI entry point is `.github/workflows/verify.yml`; keep its copy in
-`ci/verify.yml` synchronized. CI rendering does not replace human page review.
+The CI entry point is `.github/workflows/verify.yml`; it has no second copy, so
+there is nothing to keep synchronized. CI rendering does not replace human page
+review.
