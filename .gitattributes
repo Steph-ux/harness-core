@@ -1,0 +1,10 @@
+# The harness reads its own text: the procedure front matter is parsed with
+# LF, and a checkout that rewrites the endings would change what the gate
+# sees. The endings are fixed here so every clone reads the same bytes.
+* text=auto eol=lf
+
+*.sqlite binary
+*.png binary
+*.jpg binary
+*.pdf binary
+*.docx binary

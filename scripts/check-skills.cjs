@@ -3,7 +3,9 @@ const fs = require("node:fs"),
   assert = require("node:assert/strict");
 for (const name of ["capitaliser-cyber", "rapports-cyber"]) {
   const dir = path.resolve(__dirname, "../.opencode/skills", name),
-    body = fs.readFileSync(path.join(dir, "SKILL.md"), "utf8");
+    body = fs
+      .readFileSync(path.join(dir, "SKILL.md"), "utf8")
+      .replace(/\r\n/g, "\n");
   assert.match(
     body,
     new RegExp(`^---\\nname: ${name}\\ndescription: .+\\n---\\n`),
