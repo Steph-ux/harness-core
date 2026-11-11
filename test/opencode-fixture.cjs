@@ -7,6 +7,28 @@
 const path = require("node:path");
 
 /**
+ * The teardowns a suite opened.
+ *
+ * The plugin holds open handles on the SQLite files of the state directory.
+ * The host unloads a plugin and the store is closed with it; a suite that
+ * removes its workspace has to unload the plugin first, exactly as the host
+ * does, or the directory cannot be removed.
+ */
+const teardowns = new Set();
+
+/** Unload every plugin a suite opened. */
+async function unloadPlugins() {
+  for (const teardown of teardowns) {
+    try {
+      await teardown();
+    } catch {
+      /* the plugin was already unloaded */
+    }
+  }
+  teardowns.clear();
+}
+
+/**
  * @param {string} directory the instance directory
  * @param {string} sessionDirectory the directory the sessions live in
  */
@@ -153,4 +175,14 @@ function makeContext(directory, sessionDirectory) {
   };
 }
 
-module.exports = { makeContext };
+/**
+ * Load the plugin and remember its teardown, so unloadPlugins() releases
+ * the handles it holds on the state directory.
+ */
+async function loadPlugin(plugin, ctx) {
+  const teardown = await plugin.setup(ctx);
+  if (typeof teardown === "function") teardowns.add(teardown);
+  return teardown;
+}
+
+module.exports = { makeContext, loadPlugin, unloadPlugins };

@@ -3451,6 +3451,24 @@ export default {
     debug(`plugin ready scope=${scopeFor(instanceCwd)} cwd=${instanceCwd}`);
     return () => {
       lifecycleController.abort();
+      // The stores hold open handles on the SQLite files. A plugin that is
+      // unloaded leaves them behind: the state directory cannot be removed
+      // and the next load opens a second handle on the same file.
+      try {
+        workflow.close();
+      } catch {
+        /* already closed */
+      }
+      try {
+        platform.close();
+      } catch {
+        /* already closed */
+      }
+      try {
+        knowledge.close();
+      } catch {
+        /* already closed */
+      }
       debug("plugin unloaded");
     };
   },
