@@ -990,12 +990,16 @@ export class SkillUpdater {
       );
     if (stat.isFile() && stat.nlink > 1)
       throw new Error("Hard-linked learned skill files are not allowed");
+    // The path is compared by the object it denotes, not by its spelling:
+    // Windows keeps a short name for the same directory, and that is an
+    // alias rather than a redirection. A redirection is a component that
+    // denotes another object than the directory holding it.
     const canonical = fs.realpathSync.native(file);
-    const compare = (value: string) =>
-      process.platform === "win32"
-        ? path.normalize(value).toLowerCase()
-        : path.normalize(value);
-    if (compare(canonical) !== compare(path.resolve(file)))
+    const parent = fs.realpathSync.native(path.dirname(file));
+    const expected = path.join(parent, path.basename(file));
+    const held = fs.statSync(expected, { throwIfNoEntry: false });
+    const resolved = fs.statSync(canonical, { throwIfNoEntry: false });
+    if (held && resolved && (held.dev !== resolved.dev || held.ino !== resolved.ino))
       throw new Error("Reparse or redirected skill path is not allowed");
     return stat;
   }
