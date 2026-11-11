@@ -94,6 +94,15 @@ module.exports = async ({ assert, jiti }) => {
       );
     }
   }
+  // The declaration and the routes agree both ways: a method that no route
+  // names is a leftover, and a route that names an undeclared method is a
+  // route whose finding could never be gated.
+  const routed = new Set(ROUTES.flatMap((route) => route.skills));
+  for (const method of known)
+    assert.ok(
+      routed.has(method),
+      `the declared method ${method} is named by a route`,
+    );
   // An enforced row gates a finding on its method: the method has to be
   // one the host can load, or the finding could never be recorded.
   for (const route of ROUTES.filter((entry) => entry.enforce))
