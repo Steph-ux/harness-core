@@ -12,6 +12,62 @@
 
 export const ROUTER_MARKER = "Harness routing.";
 
+/**
+ * The methods the router names that this repository does not ship.
+ *
+ * The two authored procedures (rapports-cyber, capitaliser-cyber) travel
+ * with the core. The methods below are the host's: the harness routes to
+ * them and refuses a finding whose method was not loaded, but it does not
+ * carry them. They are declared here so the catalogue is a contract that
+ * can be checked, not a list that depends on what one machine happens to
+ * have installed.
+ */
+export const EXTERNAL_METHODS = [
+  "harness-access-control",
+  "harness-api-testing",
+  "harness-attack-surface",
+  "harness-breach-osint",
+  "harness-business-logic",
+  "harness-cloud-enum",
+  "harness-ct-logs",
+  "harness-dns-enum",
+  "harness-email-osint",
+  "harness-ghidra",
+  "harness-graphql",
+  "harness-idor",
+  "harness-jwt",
+  "harness-logic-cve",
+  "harness-maigret",
+  "harness-mobile-pentest",
+  "harness-oauth2",
+  "harness-phone-osint",
+  "harness-secret-scan",
+  "harness-shadow-api",
+  "harness-source-deep",
+  "harness-subdomain-enum",
+  "harness-vuln-triage",
+  "harness-web-deep",
+] as const;
+
+/**
+ * The skills the router names that the host itself provides.
+ *
+ * They are the methods of the host, not of the harness: the routing table
+ * points at them, and the host decides whether they are installed.
+ */
+export const HOST_METHODS = [
+  "code-review",
+  "diagnosing-bugs",
+  "opencode",
+  "tdd",
+] as const;
+
+/** The skills that travel with this repository. */
+export const SHIPPED_METHODS = [
+  "capitaliser-cyber",
+  "rapports-cyber",
+] as const;
+
 export interface Route {
   /** Stable id, also used in the audit record. */
   id: string;

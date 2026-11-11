@@ -7,7 +7,7 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { makeContext } = require("./opencode-fixture.cjs");
+const { makeContext, loadPlugin, unloadPlugins } = require("./opencode-fixture.cjs");
 
 const CORE = path.resolve(__dirname, "..");
 const PLUGIN = path.join(CORE, "opencode", "plugin.ts");
@@ -66,34 +66,42 @@ module.exports = async ({ assert, jiti }) => {
   );
   assert.match(pasted.block, /^Harness routing\./, "the map is still there");
 
-  // Every skill named by a route must exist. The two authored procedures ship
-  // with this repository, so they are always checked here; the method skills
-  // are provisioned by the host and can only be checked where it has them.
-  const BUILTIN_SKILLS = new Set(["opencode"]);
-  const SHIPPED_SKILLS = new Set(["rapports-cyber", "capitaliser-cyber"]);
+  // Every skill named by a route must be accounted for. The two authored
+  // procedures ship with this repository; the methods below belong to the
+  // host and are declared, so the contract is checked here rather than
+  // against what one machine happens to have installed.
+  const {
+    EXTERNAL_METHODS,
+    HOST_METHODS,
+    SHIPPED_METHODS,
+  } = jiti(path.join(CORE, "src", "routing.ts"));
   const repoSkills = path.join(CORE, ".opencode", "skills");
-  const hostSkills = path.join(os.homedir(), ".config", "opencode", "skills");
-  const hasHost = fs.existsSync(hostSkills);
-  const entries = new Set(
-    [repoSkills, hostSkills]
-      .filter((dir) => fs.existsSync(dir))
-      .flatMap((dir) => fs.readdirSync(dir)),
-  );
-  for (const skill of SHIPPED_SKILLS)
+  for (const skill of SHIPPED_METHODS)
     assert.ok(
       fs.existsSync(path.join(repoSkills, skill)),
       `${skill} ships with the repository`,
     );
+  const known = new Set([
+    ...SHIPPED_METHODS,
+    ...HOST_METHODS,
+    ...EXTERNAL_METHODS,
+  ]);
   for (const route of ROUTES) {
     for (const skill of route.skills) {
-      if (BUILTIN_SKILLS.has(skill)) continue;
-      if (!SHIPPED_SKILLS.has(skill) && !hasHost) continue;
       assert.ok(
-        entries.has(skill) || entries.has(`${skill}.md`),
+        known.has(skill),
         `route ${route.id} names a skill that exists: ${skill}`,
       );
     }
   }
+  // An enforced row gates a finding on its method: the method has to be
+  // one the host can load, or the finding could never be recorded.
+  for (const route of ROUTES.filter((entry) => entry.enforce))
+    for (const skill of route.skills)
+      assert.ok(
+        known.has(skill),
+        `enforced route ${route.id} names a loadable method: ${skill}`,
+      );
 
   // The host shapes the request text can arrive in.
   assert.equal(
@@ -108,7 +116,7 @@ module.exports = async ({ assert, jiti }) => {
   // The plugin injects the route for the turn.
   const plugin = jiti(PLUGIN).default;
   const { ctx, hooks } = makeContext(workspace);
-  await plugin.setup(ctx);
+  await loadPlugin(plugin, ctx);
   const onContext = hooks.get("context");
   assert.ok(hooks.has("context"), "the plugin still hooks the model request");
 
