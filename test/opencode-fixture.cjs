@@ -13,19 +13,23 @@ const path = require("node:path");
  * The host unloads a plugin and the store is closed with it; a suite that
  * removes its workspace has to unload the plugin first, exactly as the host
  * does, or the directory cannot be removed.
+ *
+ * The registry is emptied by every unload, so a suite only ever releases
+ * the plugins it opened.
  */
 const teardowns = new Set();
 
 /** Unload every plugin a suite opened. */
 async function unloadPlugins() {
-  for (const teardown of teardowns) {
+  const opened = [...teardowns];
+  teardowns.clear();
+  for (const teardown of opened) {
     try {
       await teardown();
     } catch {
       /* the plugin was already unloaded */
     }
   }
-  teardowns.clear();
 }
 
 /**
