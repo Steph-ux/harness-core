@@ -992,20 +992,37 @@ export class SkillUpdater {
       throw new Error("Hard-linked learned skill files are not allowed");
     // The path is compared by the object it denotes, not by its spelling:
     // Windows keeps a short name for the same directory, and that is an
-    // alias rather than a redirection. A redirection is a component that
-    // denotes another object than the directory holding it.
+    // alias rather than a redirection. lstat does not follow the last link,
+    // so the two differ exactly when the component points elsewhere.
     const canonical = fs.realpathSync.native(file);
     const parent = fs.realpathSync.native(path.dirname(file));
     const expected = path.join(parent, path.basename(file));
-    const held = fs.statSync(expected, { throwIfNoEntry: false });
-    const resolved = fs.statSync(canonical, { throwIfNoEntry: false });
-    if (held && resolved && (held.dev !== resolved.dev || held.ino !== resolved.ino))
-      throw new Error("Reparse or redirected skill path is not allowed");
+    const held = fs.lstatSync(expected, { throwIfNoEntry: false });
+    const resolved = fs.lstatSync(canonical, { throwIfNoEntry: false });
+    if (held && resolved) {
+      if (held.isSymbolicLink() !== resolved.isSymbolicLink())
+        throw new Error("Reparse or redirected skill path is not allowed");
+      if (
+        !held.isSymbolicLink() &&
+        (held.dev !== resolved.dev || held.ino !== resolved.ino)
+      )
+        throw new Error("Reparse or redirected skill path is not allowed");
+    }
     return stat;
   }
   private ancestors(file: string): void {
     const absolute = path.resolve(file);
     const root = path.parse(absolute).root;
+    // The volume must be the one it is named as: a SUBST drive points at
+    // another directory and can be remapped between two runs.
+    const realRoot = fs.realpathSync.native(root);
+    const sameVolume =
+      process.platform === "win32"
+        ? path.normalize(realRoot).toLowerCase() ===
+          path.normalize(root).toLowerCase()
+        : path.normalize(realRoot) === path.normalize(root);
+    if (!sameVolume)
+      throw new Error("Reparse or redirected skill path is not allowed");
     let current = root;
     this.nodeStat(root);
     for (const segment of path

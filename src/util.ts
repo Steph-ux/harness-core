@@ -158,6 +158,22 @@ export function assertLearningText(value: string): void {
 export function assertPlainPath(file: string): void {
   const absolute = path.resolve(file),
     root = path.parse(absolute).root;
+  // The volume must be the one it is named as. A SUBST drive (X:) points at
+  // another directory and can be remapped between two runs, so the state
+  // would move without the path ever changing.
+  let realRoot: string;
+  try {
+    realRoot = fs.realpathSync.native(root);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    realRoot = root;
+  }
+  const normalize = (s: string) =>
+    process.platform === "win32"
+      ? path.normalize(s).toLowerCase()
+      : path.normalize(s);
+  if (normalize(realRoot) !== normalize(root))
+    throw new Error("Redirected harness paths are not allowed");
   let current = root;
   for (const segment of [
     "",
@@ -166,17 +182,19 @@ export function assertPlainPath(file: string): void {
     if (segment) current = path.join(current, segment);
     const stat = fs.lstatSync(current, { throwIfNoEntry: false });
     if (!stat) continue;
+    // A component that is a link points somewhere else: it is refused
+    // whether it names a file or a directory, and whether the link is a
+    // symbolic link or a Windows junction.
     if (
       stat.isSymbolicLink() ||
       (!stat.isFile() && !stat.isDirectory()) ||
       (stat.isFile() && stat.nlink > 1)
     )
       throw new Error("Linked or special harness paths are not allowed");
-    // The component is compared by the object it denotes, not by its
-    // spelling: Windows keeps a short name for the same directory
-    // (C:\Users\STEPHA~1 is C:\Users\stephanea) and macOS links /var to
-    // /private/var. Those are aliases, not redirections. A redirection is a
-    // component that denotes another object than the directory holding it.
+    // A short name is an alias, not a redirection: Windows keeps
+    // C:\Users\STEPHA~1 for C:\Users\stephanea, and macOS links /var to
+    // /private/var. The component is compared by the object it denotes, so
+    // an alias is accepted and only a link is refused.
     let real: string, parent: string;
     try {
       real = fs.realpathSync.native(current);
@@ -188,10 +206,18 @@ export function assertPlainPath(file: string): void {
       throw error;
     }
     const expected = path.join(parent, path.basename(current));
-    const held = fs.statSync(expected, { throwIfNoEntry: false });
-    const resolved = fs.statSync(real, { throwIfNoEntry: false });
+    const held = fs.lstatSync(expected, { throwIfNoEntry: false });
+    const resolved = fs.lstatSync(real, { throwIfNoEntry: false });
     if (!held || !resolved) continue;
-    if (held.dev !== resolved.dev || held.ino !== resolved.ino)
+    // lstat does not follow the last link, so the two differ exactly when
+    // the component points elsewhere. The comparison is made on the object
+    // the component denotes, not on the way it is spelled.
+    if (held.isSymbolicLink() !== resolved.isSymbolicLink())
+      throw new Error("Redirected harness paths are not allowed");
+    if (
+      !held.isSymbolicLink() &&
+      (held.dev !== resolved.dev || held.ino !== resolved.ino)
+    )
       throw new Error("Redirected harness paths are not allowed");
   }
 }
