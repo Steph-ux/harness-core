@@ -36,9 +36,10 @@ plugin before reading its catalogue. Then check `harness-core.proof` in
 `plugin.list` and the two procedures in `skill.list`.
 
 `capitaliser-cyber` and `rapports-cyber` are served from `.opencode/skills/`.
-The other `harness-*` methods of the router belong to an external catalogue.
-Their absence must be resolved before an operation that requires them. A failed
-load never satisfies that requirement.
+The other `harness-*` methods of the router belong to an external catalogue,
+declared in `src/routing.ts` so the contract can be checked anywhere. Their
+absence must be resolved before an operation that requires them. A failed load
+never satisfies that requirement.
 
 ## Guarantees and limits
 
@@ -228,6 +229,12 @@ npm run test:report       # render dependencies required
 npm run verify            # the three checks above, in one command
 OPENCODE_BINARY=/path/opencode2 node scripts/native-smoke.cjs
 ```
+
+`npm test` reports how many suites it skipped. The command supervision owns a
+process group and reads a durable terminal result, so it runs on Linux only:
+the suites that cover it are skipped elsewhere, with their reason, and they are
+checked on Linux. A skipped suite is never a suite that passed. `npm run verify`
+uses the Python interpreter the machine has, so it runs on every platform.
 
 The hosted workflow may be unavailable (Actions billing). The repository then
 provides an equivalent local check, run before every push:
