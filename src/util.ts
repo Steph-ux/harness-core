@@ -172,20 +172,26 @@ export function assertPlainPath(file: string): void {
       (stat.isFile() && stat.nlink > 1)
     )
       throw new Error("Linked or special harness paths are not allowed");
-    const normalize = (s: string) =>
-      process.platform === "win32"
-        ? path.normalize(s).toLowerCase()
-        : path.normalize(s);
-    // A file can disappear between lstat and realpath: another owner removed
-    // it. An absent path is not a redirected one.
-    let real: string;
+    // The component is compared by the object it denotes, not by its
+    // spelling: Windows keeps a short name for the same directory
+    // (C:\Users\STEPHA~1 is C:\Users\stephanea) and macOS links /var to
+    // /private/var. Those are aliases, not redirections. A redirection is a
+    // component that denotes another object than the directory holding it.
+    let real: string, parent: string;
     try {
       real = fs.realpathSync.native(current);
+      parent = fs.realpathSync.native(path.dirname(current));
     } catch (error) {
+      // A file can disappear between lstat and realpath: another owner
+      // removed it. An absent path is not a redirected one.
       if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
       throw error;
     }
-    if (normalize(real) !== normalize(path.resolve(current)))
+    const expected = path.join(parent, path.basename(current));
+    const held = fs.statSync(expected, { throwIfNoEntry: false });
+    const resolved = fs.statSync(real, { throwIfNoEntry: false });
+    if (!held || !resolved) continue;
+    if (held.dev !== resolved.dev || held.ino !== resolved.ino)
       throw new Error("Redirected harness paths are not allowed");
   }
 }
