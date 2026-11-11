@@ -22,8 +22,12 @@ const candidates =
     : ["python3", "python"];
 
 for (const candidate of candidates) {
+  // A candidate is an interpreter only if it answers. The Microsoft Store
+  // alias launches and exits with 9009, which is not an answer: it has to be
+  // passed over, or the gate reports the store's message instead of the
+  // interpreter it never found.
   const probe = spawnSync(candidate, ["--version"], { stdio: "ignore" });
-  if (probe.status !== 0 && probe.error) continue;
+  if (probe.error || probe.status !== 0) continue;
   const result = spawnSync(candidate, args, { stdio: "inherit" });
   process.exit(result.status === null ? 1 : result.status);
 }
