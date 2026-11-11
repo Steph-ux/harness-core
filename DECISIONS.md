@@ -3,6 +3,54 @@
 One entry per decision that is expensive to reverse. Each states what was
 decided, why, and what it costs. New entries go at the top.
 
+## 2026-11-11 — A negative control observes something else
+
+**Decision.** A finding cannot declare a negative control on the observation its
+reproduction cites, and the verification gate refuses the same collision.
+**Why.** The control exists to show the procedure does not fire on a benign
+input. If it cites the reproduction's observation, the same output has to be
+both the claim and its refutation, and the finding proves nothing while
+carrying the proof of the ledger.
+**Cost.** A finding that wants a control on the same output has to observe a
+second, separate case. The creation gate refuses it earlier than before, so a
+model that reused an observation is corrected at the point of the mistake.
+
+## 2026-11-11 — A path is compared by the object it denotes
+
+**Decision.** The path guards (`assertPlainPath`, the learned skill tree)
+compare the component with the object it denotes, not the way it is spelled.
+**Why.** Windows keeps a short name for the same directory, and macOS links
+`/var` to `/private/var`: those are aliases, and a guard that refuses them
+refuses the harness on the operator's own machine. A redirection is a component
+that denotes another object than the directory holding it.
+**Cost.** The comparison is by device and inode rather than by name, so it
+depends on the filesystem reporting them. A symlink, a junction and a hard
+link are still refused, and the guards keep their own checks for them.
+
+## 2026-11-11 — The method catalogue is declared, not discovered
+
+**Decision.** The methods the router names that the harness does not ship are
+declared in `src/routing.ts` (`EXTERNAL_METHODS`, `HOST_METHODS`,
+`SHIPPED_METHODS`).
+**Why.** The route check looked for them in the skills directory of the
+operator's home, so it passed on a machine that had them and failed on one
+that had not: the test depended on the machine rather than on the code. A
+declared catalogue is a contract that can be checked anywhere.
+**Cost.** The declaration has to be kept in step with the routes, and the
+enforced rows still gate a finding on a method the host must be able to load.
+
+## 2026-11-11 — A suite that cannot run here is skipped, not failed
+
+**Decision.** A suite that needs a platform the machine does not have is
+skipped with its reason, and the runner reports the count of skipped suites.
+**Why.** The command supervision owns a process group and reads a durable
+terminal result; it runs on Linux only. Failing on every other platform made
+the whole run red on a machine that cannot run those suites, which hides the
+guarantees the other suites do cover.
+**Cost.** A skipped suite is not a suite that passed. The run reports how many
+were skipped, and the guarantee the skipped suites cover is checked on Linux.
+
+
 ## 2026-11-09 — A branch is a role, and it closes after its sub-steps
 
 **Decision.** `cyber_tasks assets` seeds one branch per known entity, with the
