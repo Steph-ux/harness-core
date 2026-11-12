@@ -3,6 +3,17 @@
 One entry per decision that is expensive to reverse. Each states what was
 decided, why, and what it costs. New entries go at the top.
 
+## 2026-11-09 — A dump becomes a graph, not a paragraph
+
+**Decision.** `cyber_entity import` reads a collected host/URL/httpx/JSON dump and
+records its entities and relations in one call, bound to the observation that
+produced it. A dump outside the declared engagement is refused.
+**Why.** Re-typing forty hosts as forty upserts is where discipline collapses and
+hosts get lost. The dump already exists as evidence; it should become graph
+facts, not a summary.
+**Cost.** One more parser to keep, and the graph inherits whatever the dump
+contains: a wrong line becomes a wrong entity, tied to the wrong evidence.
+
 ## 2026-11-09 — A branch is a role, and it closes after its sub-steps
 
 **Decision.** `cyber_tasks assets` seeds one branch per known entity, with the

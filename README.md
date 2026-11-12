@@ -82,8 +82,11 @@ them: `domain`, `host`, `ip`, `url`, `org`, `person`, `account`, `repo`,
 observations it was read from, and the same `type`/`key` merges instead of
 duplicating. `relate` links two entities (`owns`, `resolves-to`, `member-of`,
 `uses`, `leaks`, `chains-with`), and `path` returns the shortest chain between two of them —
-the pivot a report cites as an attack path. The graph is scope-local: another
-project sees nothing.
+the pivot a report cites as an attack path. `import` reads a collected dump
+(`lines` hosts/URLs, `httpx` JSON lines, `json` typed facts) and records the
+entities and relations in one call, bound to the observation of the command
+that produced it; a dump outside the declared engagement is refused. The graph
+is scope-local: another project sees nothing.
 
 ## Vulnerability lookup
 
