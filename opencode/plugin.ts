@@ -634,6 +634,9 @@ export default {
     const { assetSteps } = await import(
       path.join(coreRoot(), "src", "coverage-roles.ts")
     );
+    const { planIngest } = await import(
+      path.join(coreRoot(), "src", "osint-ingest.ts")
+    );
     const {
       assertNotRoot,
       captureDestination,
@@ -2600,7 +2603,7 @@ export default {
           properties: {
             action: {
               type: "string",
-              enum: ["upsert", "relate", "get", "query", "path"],
+              enum: ["upsert", "relate", "get", "query", "path", "import"],
               description:
                 "Record an entity, link two entities, read one with its relations, list or search, or compute a path.",
             },
@@ -2631,6 +2634,16 @@ export default {
               description: "The relation kind, for relate (owns, resolves-to, member-of, uses, leaks).",
             },
             id: { type: "string", description: "The entity id, for get." },
+            path: {
+              type: "string",
+              description: "A collected dump to ingest, for import.",
+            },
+            format: {
+              type: "string",
+              enum: ["lines", "httpx", "json"],
+              description:
+                "lines: one host or URL per line; httpx: JSON lines from httpx; json: an array of {type,key} facts.",
+            },
             query: { type: "string", description: "A substring of the key or label, for query." },
             limit: { type: "integer", minimum: 1, maximum: 500 },
             maxDepth: { type: "integer", minimum: 1, maximum: 6 },
@@ -2641,6 +2654,73 @@ export default {
         execute: async (input: any, context: any) => {
           const scope = await scopeOf(context.sessionID);
           ensureSession(context.sessionID, scope);
+          if (input.action === "import") {
+            if (!input.path) throw new Error("import requires a dump path");
+            const format = String(input.format ?? "lines");
+            if (!["lines", "httpx", "json"].includes(format))
+              throw new Error("Invalid dump format");
+            if (!Array.isArray(input.observationIds) || !input.observationIds.length)
+              throw new Error(
+                "An import needs the observation that produced the dump",
+              );
+            const file = path.resolve(String(input.path));
+            let stat;
+            try {
+              stat = fs.statSync(file);
+            } catch {
+              throw new Error("The dump is missing");
+            }
+            if (!stat.isFile() || stat.size < 1 || stat.size > 5000000)
+              throw new Error("Invalid dump size");
+            const mission = platform.active(scope),
+              root = mission
+                ? platform.missionRoot(scope, mission.id)
+                : undefined;
+            if (root) {
+              const allowed = fs.realpathSync(root);
+              if (!fs.realpathSync(file).startsWith(allowed + path.sep))
+                throw new Error("The dump must stay inside the engagement");
+            }
+            const plan = planIngest(
+              format as any,
+              fs.readFileSync(file, "utf8"),
+            );
+            const ids = new Map<string, string>();
+            for (const entity of plan.entities)
+              ids.set(
+                `${entity.type}:${entity.key}`,
+                platform.upsertEntity(scope, {
+                  ...entity,
+                  observationIds: input.observationIds,
+                }).id,
+              );
+            const done = new Set<string>();
+            let relations = 0;
+            for (const relation of plan.relations) {
+              const from = ids.get(
+                  `${relation.source.type}:${relation.source.key}`,
+                ),
+                to = ids.get(`${relation.target.type}:${relation.target.key}`);
+              if (!from || !to) continue;
+              const key = `${from}|${to}|${relation.kind}`;
+              if (done.has(key)) continue;
+              done.add(key);
+              platform.relate(scope, {
+                from,
+                to,
+                kind: relation.kind,
+                observationIds: input.observationIds,
+              });
+              relations += 1;
+            }
+            return {
+              content: JSON.stringify({
+                entities: plan.entities.length,
+                relations,
+                skipped: plan.skipped,
+              }),
+            };
+          }
           if (input.action === "upsert")
             return { content: JSON.stringify(platform.upsertEntity(scope, input)) };
           if (input.action === "relate")
