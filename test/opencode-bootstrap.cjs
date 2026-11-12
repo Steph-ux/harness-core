@@ -8,7 +8,7 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { makeContext } = require("./opencode-fixture.cjs");
+const { makeContext, loadPlugin, unloadPlugins } = require("./opencode-fixture.cjs");
 
 const CORE = path.resolve(__dirname, "..");
 const PLUGIN = path.join(CORE, "opencode", "plugin.ts");
@@ -21,7 +21,7 @@ module.exports = async ({ assert, jiti }) => {
   try {
     const plugin = jiti(PLUGIN).default;
     const fixture = makeContext(workspace);
-    await plugin.setup(fixture.ctx);
+    await loadPlugin(plugin, fixture.ctx);
     assert.ok(
       fixture.tools.has("cyber_tasks"),
       "the plugin loads when HARNESS_CORE is absent",
@@ -33,6 +33,7 @@ module.exports = async ({ assert, jiti }) => {
   } finally {
     if (saved === undefined) delete process.env.HARNESS_CORE;
     else process.env.HARNESS_CORE = saved;
+    await unloadPlugins();
     fs.rmSync(workspace, { recursive: true, force: true });
   }
 };

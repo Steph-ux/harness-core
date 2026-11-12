@@ -7,7 +7,7 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { makeContext } = require("./opencode-fixture.cjs");
+const { makeContext, loadPlugin, unloadPlugins } = require("./opencode-fixture.cjs");
 
 const CORE = path.resolve(__dirname, "..");
 
@@ -99,6 +99,7 @@ module.exports = async ({ assert, jiti }) => {
       if (typeof unload === "function") unload();
     }
   } finally {
+    await unloadPlugins();
     fs.rmSync(workspace, { recursive: true, force: true });
   }
 };

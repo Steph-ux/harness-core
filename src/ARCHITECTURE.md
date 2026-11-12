@@ -27,16 +27,16 @@ database, so a test can hand it a stub and a host can hand it the real store.
 | Module | Enforces |
 |---|---|
 | `store.ts` | An observation is written once and never edited; a finding cites only evidence from its own scope; operator rules override inferred knowledge |
-| `platform-store.ts` | A mission takes its stages in order; a scope is approved before work is dispatched; a finding is verified by an observation that is not its own evidence; entities and relations form the scope-local pivot graph |
+| `platform-store.ts` | A mission takes its stages in order; a scope is approved before work is dispatched; a finding is verified by an observation that is not its own evidence, and its negative control observes something else; entities and relations form the scope-local pivot graph |
 | `tasks.ts` | Mutations are locked; `complete` takes evidence ids resolved by the host; `block` requires a reason; the tree nests to a bounded depth, a branch closes only after its sub-steps, and the tree exports a coverage map |
 | `capsule.ts` | The returning session gets the exact state: open steps, blocked steps with reasons, the mission stage, pending approvals, commands the harness still owns. `closingGate` answers "are we done?" from that state alone |
 | `skills.ts` | A method becomes active only with support from two sessions and confidence ≥ 0.75; a global method is promotion-only, evidence-free, identifier-free, and visible from every project (project shadows global) |
-| `routing.ts` | One route per request, weighted triggers, an anti-noise guard (a single hit on a long text is not a route) |
+| `routing.ts` | One route per request, weighted triggers, an anti-noise guard (a single hit on a long text is not a route), and the declared method catalogue |
 | `lessons.ts` | The extractor proposes; the ordinary gates dispose. A proposal without a successful observation is refused |
 | `process.ts` | A long command is owned: full output to a named file, detached lifetime, stop by id |
 | `capture.ts` | A visual attestation is one window, framed, never the desktop; a recorded trace is captured in the operator's terminal when a display exists, or printed otherwise |
 | `memory-ranking.ts` | Operator rules keep a reserved budget (`operatorModelChars`) and learned facts never crowd them out |
-| `util.ts` | The scope slug (`project-<24 hex>`), hashing, and the text redaction used before anything reaches an audit row |
+| `util.ts` | The scope slug (`project-<24 hex>`), hashing, the text redaction used before anything reaches an audit row, and the path guard that compares a component by the object it denotes |
 
 ## Where the host plugs in
 

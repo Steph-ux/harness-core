@@ -1,7 +1,7 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { makeContext } = require("./opencode-fixture.cjs");
+const { makeContext, loadPlugin, unloadPlugins } = require("./opencode-fixture.cjs");
 const CORE = path.resolve(__dirname, "..");
 module.exports = async ({ assert, jiti }) => {
   const { ToolRegistry } = jiti(path.join(CORE, "src", "tool-registry.ts"));
@@ -12,6 +12,13 @@ module.exports = async ({ assert, jiti }) => {
   const scope = scopeFor(base);
   process.env.HARNESS_STATE_ROOT = state;
   process.env.HARNESS_CORE = CORE;
+  // The scan reads the PATH of the machine. A suite that depends on the
+  // tools the operator happens to have installed is not a test, so the
+  // PATH is held to a directory of the fixture.
+  const originalPath = process.env.PATH;
+  const pathFixture = path.join(base, "path");
+  fs.mkdirSync(pathFixture, { recursive: true });
+  process.env.PATH = pathFixture;
   try {
     const registry = new ToolRegistry(state);
     assert.equal(registry.discover(scope, "definitelynotinstalled-92347").total, 0);
@@ -225,7 +232,7 @@ module.exports = async ({ assert, jiti }) => {
 
     const plugin = jiti(path.join(CORE, "opencode", "plugin.ts")).default;
     const fixture = makeContext(base);
-    await plugin.setup(fixture.ctx);
+    await loadPlugin(plugin, fixture.ctx);
     assert.ok(fixture.tools.has("cyber_toolbox"));
     const toolbox = fixture.tools.get("cyber_toolbox");
     const context = {
@@ -284,6 +291,9 @@ module.exports = async ({ assert, jiti }) => {
       String(entry.text).includes("fixture-validator v3")),
       "same session sees the newest activated version");
   } finally {
+    await unloadPlugins();
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
     fs.rmSync(base, { recursive: true, force: true });
   }
 };

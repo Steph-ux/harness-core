@@ -8,7 +8,7 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { makeContext } = require("./opencode-fixture.cjs");
+const { makeContext, loadPlugin, unloadPlugins } = require("./opencode-fixture.cjs");
 
 const CORE = path.resolve(__dirname, "..");
 const PLUGIN = path.join(CORE, "opencode", "plugin.ts");
@@ -52,11 +52,13 @@ module.exports = async ({ assert, jiti }) => {
     });
   const recon = observation("obs-recon", "recon done\n");
   const reproduction = observation("obs-repro", "XSS confirmed in /profile\n");
-  const control = observation("obs-control", "XSS confirmed in /profile\n");
+  // The control observes a benign input: a different output, or it would
+  // prove nothing. It carries the same marker so the finding can cite it.
+  const control = observation("obs-control", "XSS confirmed marker\n");
   let verification;
 
   const fixture = makeContext(workspace);
-  await plugin.setup(fixture.ctx);
+  await loadPlugin(plugin, fixture.ctx);
   assert.ok(fixture.tools.has("cyber_mission"), "the engagement is driven by a tool");
   assert.ok(fixture.tools.has("cyber_finding"), "the ledger is a tool");
 
@@ -215,6 +217,53 @@ module.exports = async ({ assert, jiti }) => {
     /lacks observed evidence/,
     "a check that the output does not carry is refused",
   );
+  // A negative control proves the procedure does not fire on a benign
+  // input. It must observe a different output than the reproduction: the
+  // same output would be both the claim and its refutation.
+  await assert.rejects(
+    () =>
+      finding({
+        ...proposal,
+        checks: [
+          {
+            observationId: reproduction.id,
+            contains: "XSS confirmed",
+            purpose: "reproduction",
+          },
+          {
+            observationId: reproduction.id,
+            contains: "XSS confirmed",
+            purpose: "negative-control",
+          },
+        ],
+      }),
+    /must observe a different output/,
+    "a negative control cannot reuse the reproduction's observation",
+  );
+  // The twin: another observation, the same output. The control proves
+  // nothing either, so it is refused.
+  const twin = observation("obs-twin", "XSS confirmed in /profile\n");
+  await assert.rejects(
+    () =>
+      finding({
+        ...proposal,
+        evidence: [reproduction.id, twin.id],
+        checks: [
+          {
+            observationId: reproduction.id,
+            contains: "XSS confirmed",
+            purpose: "reproduction",
+          },
+          {
+            observationId: twin.id,
+            contains: "XSS confirmed",
+            purpose: "negative-control",
+          },
+        ],
+      }),
+    /must observe a different output/,
+    "a negative control cannot replay the same output under another observation",
+  );
   // A request that routes to a method must load it before a finding is
   // recorded: the harness does not take the model's memory for a procedure.
   const routed = fixture.contextEvent({
@@ -300,15 +349,102 @@ module.exports = async ({ assert, jiti }) => {
     });
   }
   knowledge.upsertSession({id:"ses_independent",scope,cwd:workspace,status:"active",updatedAt:new Date().toISOString()});
-  const checks=proposal.checks.map((check,index)=>{const id=`obs-independent-${index}`;knowledge.recordObservation({id,sessionId:"ses_independent",scope,tool:"shell",input:{},output:check.contains,success:true,timestamp:new Date().toISOString()});return {...check,observationId:id};});
+  // Each verification control observes its own output: the control has to
+  // differ from the reproduction it refutes, as the finding's own control
+  // does. The marker each one carries is the one the finding declared.
+  const checks=proposal.checks.map((check,index)=>{const id=`obs-independent-${index}`;knowledge.recordObservation({id,sessionId:"ses_independent",scope,tool:"shell",input:{},output:check.purpose==="negative-control"?`${check.contains} (control)`:check.contains,success:true,timestamp:new Date().toISOString()});return {...check,observationId:id};});
   verification=JSON.parse((await fixture.tools.get("cyber_verification").execute({action:"attest",findingId:createdFinding.id,checks},{sessionID:"ses_independent",agent:"build",messageID:"msg_verify",id:"call_verify"})).content);
+  // The verification gate refuses a finding whose declared control cites the
+  // reproduction's observation. The creation gate refuses such a finding, so
+  // this is the row that predates it: the gate has to hold for it too. The
+  // row is written the way it was before the creation gate, and the
+  // verification gate is the one that has to refuse it.
+  const { DatabaseSync } = require("node:sqlite");
+  const writer = new DatabaseSync(path.join(state, "platform.sqlite"));
+  const legacyId = "F-legacy-collision";
+  writer
+    .prepare(
+      "INSERT INTO findings(id,scope,mission_id,title,severity,description,limitations,status,confidence,checks,created) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+    )
+    .run(
+      legacyId,
+      scope,
+      id,
+      "Legacy collision",
+      "low",
+      "A control that cites the reproduction.",
+      "Synthetic legacy row.",
+      "unverified",
+      0.5,
+      JSON.stringify([
+        {
+          observationId: reproduction.id,
+          contains: "XSS confirmed",
+          purpose: "reproduction",
+        },
+        {
+          observationId: reproduction.id,
+          contains: "XSS confirmed",
+          purpose: "negative-control",
+        },
+      ]),
+      new Date().toISOString(),
+    );
+  // The row carries the evidence and the citation a real finding carries, so
+  // the gate that has to refuse it is the one about the control.
+  writer
+    .prepare("INSERT INTO finding_evidence VALUES(?,?,?,?)")
+    .run(
+      legacyId,
+      scope,
+      reproduction.id,
+      knowledge.evidence(scope, [reproduction.id])[0].hash,
+    );
+  writer
+    .prepare("INSERT INTO finding_citations VALUES(?,?,?)")
+    .run(legacyId, scope, chunks[0].id);
+  writer.close();
+  // The row now carries what a real finding carries.
+  assert.equal(
+    platform.finding(scope, legacyId).checks.length,
+    2,
+    "the legacy row carries the colliding controls",
+  );
+  // Its own attestation, so the gate that has to refuse it is the one about
+  // the control and not the one about a stale hash.
+  const legacyChecks = [
+    {
+      observationId: "obs-legacy-repro",
+      contains: "XSS confirmed",
+      purpose: "reproduction",
+    },
+    {
+      observationId: "obs-legacy-control",
+      contains: "XSS confirmed",
+      purpose: "negative-control",
+    },
+  ];
+  knowledge.recordObservation({ id: "obs-legacy-repro", sessionId: "ses_independent", scope, tool: "shell", input: {}, output: "XSS confirmed", success: true, timestamp: new Date().toISOString() });
+  knowledge.recordObservation({ id: "obs-legacy-control", sessionId: "ses_independent", scope, tool: "shell", input: {}, output: "XSS confirmed (benign run)", success: true, timestamp: new Date().toISOString() });
+  const legacyVerification = JSON.parse(
+    (
+      await fixture.tools.get("cyber_verification").execute(
+        {
+          action: "attest",
+          findingId: legacyId,
+          checks: legacyChecks,
+        },
+        { sessionID: "ses_independent", agent: "build", messageID: "msg_verify_legacy", id: "call_verify_legacy" },
+      )
+    ).content,
+  );
   const validationLease = JSON.parse(
     (
       await mission({
         action: "claim",
         node: "validation",
         owner: "verification-agent",
-        findingIds: [createdFinding.id],
+        findingIds: [createdFinding.id, legacyId],
       })
     ).content,
   );
@@ -324,7 +460,7 @@ module.exports = async ({ assert, jiti }) => {
         role: "verification-agent",
         status: "completed",
         summary: "Verification independante",
-        observationIds: [verification.id],
+        observationIds: [verification.id, legacyVerification.id],
       },
     ],
   });
@@ -335,7 +471,26 @@ module.exports = async ({ assert, jiti }) => {
     Array.isArray(stage.result) && stage.result[0].evidence.includes(verification.id),
     "the stage keeps the observation ids as evidence",
   );
-
+  // The legacy row is refused by the verification gate.
+  let legacyError = null;
+  try {
+    await finding({
+      action: "verify",
+      id: legacyId,
+      verificationId: legacyVerification.id,
+    });
+  } catch (error) {
+    legacyError = error;
+  }
+  assert.ok(
+    legacyError !== null,
+    "the verification gate refuses a control that cites the reproduction",
+  );
+  assert.match(
+    String(legacyError?.message ?? ""),
+    /must observe a different output/,
+    "the verification gate refuses a control that cites the reproduction",
+  );
   // The verification needs an observation that is not the finding's own.
   await assert.rejects(
     () => finding({ action: "verify", id: createdFinding.id }),
@@ -441,5 +596,7 @@ module.exports = async ({ assert, jiti }) => {
   );
 
   knowledge.close();
+  platform.close();
+  await unloadPlugins();
   fs.rmSync(workspace, { recursive: true, force: true });
 };

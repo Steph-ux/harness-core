@@ -566,7 +566,11 @@ export class KnowledgeStore implements StorePort {
       throw new Error("Invalid knowledge query");
     return this.db
       .prepare(
-        "SELECT * FROM knowledge WHERE scope=? AND status='active' AND (?='' OR instr(lower(content),lower(?))>0 OR instr(lower(key),lower(?))>0) ORDER BY created_at DESC LIMIT ?",
+        // The rowid breaks the tie, exactly as operatorModel does: two
+        // statements made in the same millisecond keep a stable order
+        // instead of an arbitrary one. Without it, the two readers of the
+        // same rows disagree on their order.
+        "SELECT * FROM knowledge WHERE scope=? AND status='active' AND (?='' OR instr(lower(content),lower(?))>0 OR instr(lower(key),lower(?))>0) ORDER BY created_at DESC, rowid DESC LIMIT ?",
       )
       .all(scope, query ?? "", query ?? "", query ?? "", limit)
       .map((row) => this.knowledge(row));

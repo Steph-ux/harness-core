@@ -1059,6 +1059,23 @@ export class PlatformStore {
       )
         throw new Error("Finding check lacks observed evidence");
     }
+    // A negative control proves the procedure does not fire on a benign
+    // input. It must therefore observe a different output than the
+    // reproduction: the same output would have to be both the claim and its
+    // refutation. The comparison is made on the output, so a control that
+    // replays the same run under another observation id is refused too.
+    const reproduction = p.checks.filter((c) => c.purpose === "reproduction");
+    const controls = p.checks.filter((c) => c.purpose === "negative-control");
+    for (const control of controls) {
+      for (const claim of reproduction) {
+        const claimed = observations.find((o) => o.id === claim.observationId);
+        const observed = observations.find((o) => o.id === control.observationId);
+        if (claimed && observed && claimed.output === observed.output)
+          throw new Error(
+            "A negative control must observe a different output than the reproduction",
+          );
+      }
+    }
     const id = `F-${newId().slice(0, 18)}`,
       confidence = Math.min(
         0.75,
@@ -1253,18 +1270,23 @@ export class PlatformStore {
           "Verification does not test the finding's declared criterion",
         );
     }
-    if (
-      checks
-        .filter((c) => c.purpose === "reproduction")
-        .some((c) =>
-          checks.some(
-            (n) =>
-              n.purpose === "negative-control" &&
-              n.observationId === c.observationId,
-          ),
-        )
-    )
-      throw new Error("Verification controls must be distinct");
+    // The controls are compared by their output, not only by the
+    // observation they cite: a control that replays the same run under
+    // another observation id proves nothing either. The same observation
+    // would carry the same output, so this covers both.
+    const claims = checks.filter((c) => c.purpose === "reproduction");
+    for (const control of checks.filter(
+      (c) => c.purpose === "negative-control",
+    )) {
+      for (const claim of claims) {
+        const claimed = proofs.find((o) => o.id === claim.observationId);
+        const observed = proofs.find((o) => o.id === control.observationId);
+        if (claimed && observed && claimed.output === observed.output)
+          throw new Error(
+            "A negative control must observe a different output than the reproduction",
+          );
+      }
+    }
   }
   verificationPayload(
     scope: string,
@@ -1355,20 +1377,25 @@ export class PlatformStore {
       )
     )
       throw new Error("Observed checks no longer match evidence");
-    if (
-      f.checks
-        .filter((c) => c.purpose === "reproduction")
-        .every((c) =>
-          f.checks.some(
-            (control) =>
-              control.purpose === "negative-control" &&
-              control.observationId === c.observationId,
-          ),
-        )
-    )
-      throw new Error(
-        "Reproduction and negative-control observations must be distinct",
-      );
+    // The declared control must observe a different output than the
+    // reproduction it refutes. The same observation would have the same
+    // output, so this covers the control that cites the reproduction too.
+    for (const control of f.checks.filter(
+      (c) => c.purpose === "negative-control",
+    )) {
+      for (const claim of f.checks.filter(
+        (c) => c.purpose === "reproduction",
+      )) {
+        const claimed = observations.find((o) => o.id === claim.observationId);
+        const observed = observations.find(
+          (o) => o.id === control.observationId,
+        );
+        if (claimed && observed && claimed.output === observed.output)
+          throw new Error(
+            "A negative control must observe a different output than the reproduction",
+          );
+      }
+    }
     this.db
       .prepare(
         "INSERT INTO finding_verifications(finding_id,scope,observation_id,hash,attempt,timestamp,detail) VALUES(?,?,?,?,?,?,?) ON CONFLICT(finding_id)DO UPDATE SET observation_id=excluded.observation_id,hash=excluded.hash,attempt=excluded.attempt,timestamp=excluded.timestamp,detail=excluded.detail",

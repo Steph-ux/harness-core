@@ -59,7 +59,27 @@ const LANG: Record<ToolLanguage, string> = {
   mjs: "node", py: "python3", sh: "bash",
 };
 const MAX_SCAN = 20000;
-const MAX_DIRECTORY_COUNT = 40;
+/**
+ * Whether a file can be run.
+ *
+ * POSIX carries the permission in the mode, so the mode decides. Windows
+ * does not have that bit: every regular file looks non-executable there,
+ * and a scan would find no tool at all. On Windows the extension decides,
+ * and a file without one is taken as a script the interpreter runs.
+ */
+function isExecutable(name: string, stat: fs.Stats): boolean {
+  if (process.platform !== "win32") return Boolean(stat.mode & 0o111);
+  return /\.(?:exe|com|bat|cmd|ps1)$/i.test(name) || !/\.[A-Za-z0-9]+$/.test(name);
+}
+/**
+ * The directories a scan may read.
+ *
+ * The work of a scan is bounded by MAX_SCAN, which counts the executables
+ * it keeps; the count of directories only bounds the readdir calls. A
+ * machine with a long PATH (Windows carries many entries, one per tool)
+ * has to be scannable, so the limit is generous and configurable.
+ */
+const MAX_DIRECTORY_COUNT = 256;
 const MAX_REVISIONS = 2000;
 const MAX_SCOPE_REVISIONS = 250;
 const MAX_SCOPE_CANDIDATES = 25;
@@ -452,7 +472,11 @@ export class ToolRegistry {
           } catch {
             continue;
           }
-          if (!stat.isFile() || !(stat.mode & 0o111) || found.has(entry.name))
+          if (
+            !stat.isFile() ||
+            !isExecutable(entry.name, stat) ||
+            found.has(entry.name)
+          )
             continue;
           found.set(entry.name, {
             name: entry.name, origin: "path",

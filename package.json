@@ -27,11 +27,11 @@
     "test": "node test/run.cjs",
     "test:gate": "node scripts/pi-gate.cjs",
     "check": "tsc --noEmit && node scripts/check-neutrality.cjs && node scripts/check-skills.cjs",
-    "test:report": "python3 test/report-pipeline.py --render",
-    "verify": "npm run check && npm test && python3 test/report-pipeline.py",
+    "test:report": "node scripts/run-python.cjs test/report-pipeline.py --render",
+    "verify": "npm run check && npm test && node scripts/run-python.cjs test/report-pipeline.py",
     "prune": "node scripts/prune.cjs"
   },
-  "license": "UNLICENSED",
+  "license": "MIT",
   "devDependencies": {
     "@types/node": "^24.19.2",
     "jiti": "^2.7.0",

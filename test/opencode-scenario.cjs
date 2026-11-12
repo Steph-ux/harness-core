@@ -8,11 +8,11 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { makeContext } = require("./opencode-fixture.cjs");
+const { makeContext, loadPlugin, unloadPlugins } = require("./opencode-fixture.cjs");
 
 const CORE = path.resolve(__dirname, "..");
 
-module.exports = async ({ assert, jiti }) => {
+module.exports = async ({ assert, jiti, skip }) => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "harness-scenario-"));
   const state = path.join(workspace, "state");
   const engagement = path.join(workspace, "engagement");
@@ -63,6 +63,11 @@ module.exports = async ({ assert, jiti }) => {
       "the mission starts unapproved",
     );
 
+    // The supervisor owns a process group and reads a durable terminal
+    // result: it runs on Linux only. The engagement above it is checked
+    // everywhere.
+    if (process.platform !== "linux")
+      skip("traced command supervision is Linux-only");
     const ran = await call(
       "cyber_process",
       {
@@ -150,6 +155,7 @@ module.exports = async ({ assert, jiti }) => {
     assert.match(gate, /engagement .* is [A-Z_]+/, "an open mission blocks");
   } finally {
     if (typeof unload === "function") unload();
+    await unloadPlugins();
     fs.rmSync(workspace, { recursive: true, force: true });
   }
 };

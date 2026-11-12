@@ -3,6 +3,63 @@
 One entry per decision that is expensive to reverse. Each states what was
 decided, why, and what it costs. New entries go at the top.
 
+
+## 2026-11-11 - A negative control observes a different output
+
+**Decision.** A finding cannot declare a negative control that observes the same
+output as its reproduction, and the verification gate refuses the same.
+**Why.** The control exists to show the procedure does not fire on a benign
+input. If it observes the same output, the same output has to be both the claim
+and its refutation, and the finding proves nothing while carrying the ledger's
+proof. The comparison is made on the output and not on the observation it
+cites: a control that replays the same run under another observation id is the
+same defect.
+**Cost.** A finding that wants a control on the same output has to observe a
+second, separate case. The creation gate refuses it earlier than before, so a
+model that reused an output is corrected at the point of the mistake.
+
+## 2026-11-11 - A path is compared by the object it denotes
+
+**Decision.** The path guards (`assertPlainPath`, the learned skill tree)
+refuse a component that is a link, and they refuse a volume that is not the
+one it is named as. The comparison of the component is made by the object it
+denotes, not by the way it is spelled.
+**Why.** Windows keeps a short name for the same directory
+(`C:\Users\STEPHA~1` is `C:\Users\stephanea`): that is an alias, and a guard
+that refuses it refuses the harness on the operator's own machine. A SUBST
+drive points at another directory and can be remapped between two runs, so
+the state would move without the path ever changing. A redirection is a
+component that is a link, and a remapping is a volume that is not the one it
+is named as.
+**Cost.** The comparison of the component is made with lstat, which does not
+follow the last link, and it needs two calls; a file that changes between
+them is compared on its own state at each call. The symlink, junction and
+hard link checks are unchanged and remain the ones that refuse a link.
+
+## 2026-11-11 — The method catalogue is declared, not discovered
+
+**Decision.** The methods the router names that the harness does not ship are
+declared in `src/routing.ts` (`EXTERNAL_METHODS`, `HOST_METHODS`,
+`SHIPPED_METHODS`).
+**Why.** The route check looked for them in the skills directory of the
+operator's home, so it passed on a machine that had them and failed on one
+that had not: the test depended on the machine rather than on the code. A
+declared catalogue is a contract that can be checked anywhere.
+**Cost.** The declaration has to be kept in step with the routes, and the
+enforced rows still gate a finding on a method the host must be able to load.
+
+## 2026-11-11 — A suite that cannot run here is skipped, not failed
+
+**Decision.** A suite that needs a platform the machine does not have is
+skipped with its reason, and the runner reports the count of skipped suites.
+**Why.** The command supervision owns a process group and reads a durable
+terminal result; it runs on Linux only. Failing on every other platform made
+the whole run red on a machine that cannot run those suites, which hides the
+guarantees the other suites do cover.
+**Cost.** A skipped suite is not a suite that passed. The run reports how many
+were skipped, and the guarantee the skipped suites cover is checked on Linux.
+
+
 ## 2026-11-09 — A dump becomes a graph, not a paragraph
 
 **Decision.** `cyber_entity import` reads a collected host/URL/httpx/JSON dump and
@@ -13,6 +70,7 @@ hosts get lost. The dump already exists as evidence; it should become graph
 facts, not a summary.
 **Cost.** One more parser to keep, and the graph inherits whatever the dump
 contains: a wrong line becomes a wrong entity, tied to the wrong evidence.
+
 
 ## 2026-11-09 — A branch is a role, and it closes after its sub-steps
 

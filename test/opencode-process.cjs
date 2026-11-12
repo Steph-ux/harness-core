@@ -2,10 +2,10 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const { makeContext } = require("./opencode-fixture.cjs");
+const { makeContext, loadPlugin, unloadPlugins } = require("./opencode-fixture.cjs");
 const CORE = path.resolve(__dirname, "..");
 
-module.exports = async ({ assert, jiti, modules }) => {
+module.exports = async ({ assert, jiti, modules, skip }) => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "harness-process-"));
   const state = path.join(workspace, "state");
   process.env.HARNESS_STATE_ROOT = state;
@@ -16,7 +16,7 @@ module.exports = async ({ assert, jiti, modules }) => {
   const { observationId } = jiti(path.join(CORE, "src/observation-id.ts"));
   const fixture = makeContext(workspace);
   const { default: plugin, assertOperatorDecision, assertProcessPermission } = jiti(path.join(CORE, "opencode/plugin.ts"));
-  await plugin.setup(fixture.ctx);
+  await loadPlugin(plugin, fixture.ctx);
   const context = { sessionID: "ses_process", agent: "build", messageID: "msg_process", id: "call_process", signal: new AbortController().signal };
   const call = async (input, sessionID = context.sessionID) => JSON.parse((await fixture.tools.get("cyber_process").execute(input, { ...context, sessionID })).content);
   const until = async (predicate) => {
@@ -78,6 +78,11 @@ module.exports = async ({ assert, jiti, modules }) => {
     const moved = path.join(workspace, "moved");
     fs.mkdirSync(moved);
     fixture.sessions.set("ses_process", moved);
+    // The supervisor owns a process group and reads a durable terminal
+    // result: it runs on Linux only. Everything above it is checked
+    // everywhere.
+    if (process.platform !== "linux")
+      skip("traced command supervision is Linux-only");
     const record = await call({
       action: "run",
       argv: [process.execPath, "-e", "console.log(process.cwd()); console.log('api_key=not-a-real-secret'); setTimeout(()=>{}, 10000)"],
@@ -229,6 +234,7 @@ module.exports = async ({ assert, jiti, modules }) => {
     for (const record of fs.existsSync(file) ? JSON.parse(fs.readFileSync(file)) : []) {
       try{registry.stop(record.scope,record.id)}catch{}
     }
+    await unloadPlugins();
     fs.rmSync(workspace, { recursive: true, force: true });
   }
 };

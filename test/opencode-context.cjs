@@ -8,7 +8,7 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { makeContext } = require("./opencode-fixture.cjs");
+const { makeContext, loadPlugin, unloadPlugins } = require("./opencode-fixture.cjs");
 
 const CORE = path.resolve(__dirname, "..");
 const PLUGIN = path.join(CORE, "opencode", "plugin.ts");
@@ -75,7 +75,7 @@ module.exports = async ({ assert, jiti }) => {
   );
 
   const { ctx, hooks } = makeContext(workspace);
-  await plugin.setup(ctx);
+  await loadPlugin(plugin, ctx);
   assert.ok(hooks.has("context"), "the plugin hooks the model request");
   const onContext = hooks.get("context");
 
@@ -223,5 +223,6 @@ module.exports = async ({ assert, jiti }) => {
   );
 
   store.close();
+  await unloadPlugins();
   fs.rmSync(workspace, { recursive: true, force: true });
 };
