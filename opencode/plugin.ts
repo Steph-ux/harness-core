@@ -637,6 +637,9 @@ export default {
     const { planIngest } = await import(
       path.join(coreRoot(), "src", "osint-ingest.ts")
     );
+    const { COVERAGE_PROFILES, coverageProfile } = await import(
+      path.join(coreRoot(), "src", "coverage-profiles.ts")
+    );
     const {
       assertNotRoot,
       captureDestination,
@@ -1857,9 +1860,15 @@ export default {
                 "markdown",
                 "export",
                 "assets",
+                "coverage",
               ],
               description:
-                "What to do with the task list. tree reads the hierarchy, markdown renders it, export writes couverture.md into the engagement, assets creates one branch per known host/domain/url.",
+                "What to do with the task list. tree reads the hierarchy, markdown renders it, export writes couverture.md into the engagement, assets creates one branch per known entity, coverage creates a bounded deep profile.",
+            },
+            profile: {
+              type: "string",
+              enum: Object.keys(COVERAGE_PROFILES),
+              description: "Deep coverage profile: mobile, cloud or harness.",
             },
             title: { type: "string", description: "Task title, for add." },
             id: {
@@ -1959,6 +1968,27 @@ export default {
             }
             return {
               content: JSON.stringify({ assets: assets.length, created }),
+            };
+          }
+          if (action === "coverage") {
+            const profileName = String(input.profile ?? "");
+            const profile = coverageProfile(profileName);
+            const root = taskStore.add(scope, { title: profile.title });
+            const created = [root.id];
+            for (const step of profile.steps)
+              created.push(
+                taskStore.add(scope, {
+                  title: step,
+                  parent: root.id,
+                }).id,
+              );
+            return {
+              content: JSON.stringify({
+                profile: profileName,
+                title: profile.title,
+                created,
+                steps: profile.steps.length,
+              }),
             };
           }
           if (action === "review") {

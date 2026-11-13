@@ -179,6 +179,24 @@ module.exports = async ({ assert, jiti }) => {
         ["osint", "repos", "secrets", "validation"],
         "an account is OSINT, repositories, secrets, then validation",
       );
+      const mobileCoverage = JSON.parse(
+        (await tool.execute({ action: "coverage", profile: "mobile" }, context))
+          .content,
+      );
+      assert.equal(mobileCoverage.steps, 14, "mobile coverage is deep and bounded");
+      assert.equal(
+        tasks
+          .tree(scope)
+          .find((node) => node.title === "Mobile application deep coverage")
+          .children.length,
+        14,
+        "mobile coverage creates one task per control",
+      );
+      await assert.rejects(
+        () => tool.execute({ action: "coverage", profile: "unknown" }, context),
+        /Unknown coverage profile/,
+        "unknown coverage cannot silently degrade",
+      );
       const exported = JSON.parse(
         (await tool.execute({ action: "export" }, context)).content,
       );

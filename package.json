@@ -21,7 +21,8 @@
     "./skill-trace": "./src/skill-trace.ts",
     "./engagement-workflow": "./src/engagement-workflow.ts",
     "./tool-registry": "./src/tool-registry.ts",
-    "./tool-gap": "./src/tool-gap.ts"
+    "./tool-gap": "./src/tool-gap.ts",
+    "./coverage-profiles": "./src/coverage-profiles.ts"
   },
   "scripts": {
     "test": "node test/run.cjs",
