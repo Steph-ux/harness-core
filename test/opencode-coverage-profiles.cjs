@@ -3,10 +3,15 @@ const path = require("node:path");
 const CORE = path.resolve(__dirname, "..");
 
 module.exports = async ({ assert, jiti }) => {
-  const { COVERAGE_PROFILES, coverageProfile } = jiti(
+  const { COVERAGE_CONTRACTS, COVERAGE_PROFILES, coverageContract, coverageProfile } = jiti(
     path.join(CORE, "src", "coverage-profiles.ts"),
   );
   assert.deepEqual(Object.keys(COVERAGE_PROFILES), ["mobile", "cloud", "harness"]);
+  assert.deepEqual(
+    Object.keys(COVERAGE_CONTRACTS),
+    Object.keys(COVERAGE_PROFILES),
+    "every profile has a proof contract",
+  );
   assert.ok(
     coverageProfile("MOBILE").steps.includes("WebView, JavaScript bridges and file access"),
     "mobile coverage includes WebView and bridge review",
@@ -18,6 +23,11 @@ module.exports = async ({ assert, jiti }) => {
   assert.ok(
     coverageProfile("harness").steps.includes("finding reproduction and negative controls"),
     "harness coverage includes proof controls",
+  );
+  assert.equal(
+    coverageContract("CLOUD").missingTool,
+    "evidence-only-and-not-tested",
+    "cloud gaps never become implied coverage",
   );
   assert.throws(() => coverageProfile("unknown"), /Unknown coverage profile/);
 };
