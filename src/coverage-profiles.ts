@@ -61,8 +61,63 @@ export const COVERAGE_PROFILES = {
 
 export type CoverageProfile = keyof typeof COVERAGE_PROFILES;
 
+/**
+ * The checklist is intentionally small, while this contract carries the
+ * decision support around it: what closes a surface, which method owns the
+ * proof, and what to do when a provider/tool is unavailable.
+ */
+export const COVERAGE_CONTRACTS = {
+  mobile: {
+    proof: "observation-per-surface-plus-negative-control",
+    methods: [
+      "harness-mobile-pentest",
+      "harness-source-deep",
+      "harness-secret-scan",
+      "harness-api-testing",
+      "harness-access-control",
+      "harness-idor",
+      "harness-jwt",
+      "harness-ghidra",
+    ],
+    toolFamilies: ["apktool/jadx", "adb/frida", "REA/Ghidra", "cyber_process"],
+    missingTool: "not-tested-with-reason",
+  },
+  cloud: {
+    proof: "evidence-plus-live-read-plus-negative-control",
+    methods: [
+      "harness-cloud-enum",
+      "harness-secret-scan",
+      "harness-api-testing",
+      "harness-access-control",
+      "harness-vuln-triage",
+    ],
+    toolFamilies: [
+      "AWS CLI",
+      "gcloud",
+      "Azure CLI",
+      "kubectl",
+      "trivy",
+      "cyber_process",
+    ],
+    missingTool: "evidence-only-and-not-tested",
+  },
+  harness: {
+    proof: "successful-observation-and-negative-control",
+    methods: ["harness-cyber-playbooks", "harness-vuln-triage", "rapports-cyber"],
+    toolFamilies: ["cyber_process", "cyber_source", "cyber_finding", "cyber_report"],
+    missingTool: "record-gap-never-guess",
+  },
+} as const;
+
 export function coverageProfile(name: string): (typeof COVERAGE_PROFILES)[CoverageProfile] {
   const profile = COVERAGE_PROFILES[String(name).toLowerCase() as CoverageProfile];
   if (!profile) throw new Error("Unknown coverage profile");
   return profile;
+}
+
+export function coverageContract(name: string): (typeof COVERAGE_CONTRACTS)[CoverageProfile] {
+  const key = String(name).toLowerCase() as CoverageProfile;
+  const contract = COVERAGE_CONTRACTS[key];
+  if (!contract) throw new Error("Unknown coverage profile");
+  return contract;
 }

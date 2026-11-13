@@ -637,7 +637,7 @@ export default {
     const { planIngest } = await import(
       path.join(coreRoot(), "src", "osint-ingest.ts")
     );
-    const { COVERAGE_PROFILES, coverageProfile } = await import(
+    const { COVERAGE_PROFILES, coverageContract, coverageProfile } = await import(
       path.join(coreRoot(), "src", "coverage-profiles.ts")
     );
     const {
@@ -1973,6 +1973,7 @@ export default {
           if (action === "coverage") {
             const profileName = String(input.profile ?? "");
             const profile = coverageProfile(profileName);
+            const contract = coverageContract(profileName);
             const root = taskStore.add(scope, { title: profile.title });
             const created = [root.id];
             for (const step of profile.steps)
@@ -1988,6 +1989,7 @@ export default {
                 title: profile.title,
                 created,
                 steps: profile.steps.length,
+                contract,
               }),
             };
           }

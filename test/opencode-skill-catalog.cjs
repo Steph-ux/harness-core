@@ -72,6 +72,8 @@ module.exports = async ({ assert, jiti, skip }) => {
     assert.match(body, /^## Done\b/m, `${name} states its done condition`);
     assert.ok(body.includes("cyber_process"), `${name} goes through cyber_process`);
     assert.ok(/\bargv\b/.test(body), `${name} passes an argv, not a shell string`);
+    assert.match(body, /negative(?:[- ]|\s+)control/i, `${name} states a negative control`);
+    assert.match(body, /cyber_finding/i, `${name} states its finding contract`);
   }
 
   // The two broad profiles seed a task branch; the skill and the profile are
