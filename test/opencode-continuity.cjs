@@ -157,6 +157,28 @@ module.exports = async ({ assert, jiti }) => {
     },
   });
   assert.match(missionGate, /recon \(PENDING\)/, "an open stage is a blocker");
+  const closedGate = closingGate({
+    ...value,
+    tasks: [],
+    open: 0,
+    blocked: 0,
+    mission: {
+      id: "mission-2",
+      title: "Engagement arrete",
+      boundaries: "local",
+      state: "CLOSED",
+      closed: { reason: "le client a annule", timestamp: "2026-11-15T00:00:00.000Z" },
+      stages: [
+        { id: "scope-validation", state: "COMPLETED" },
+        { id: "recon", state: "PENDING" },
+      ],
+    },
+  });
+  assert.equal(
+    closedGate,
+    "",
+    "a closed engagement is over by decision, not an open stage",
+  );
   assert.ok(
     !missionGate.includes("scope-validation"),
     "a closed stage is not a blocker",

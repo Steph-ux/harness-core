@@ -186,6 +186,72 @@ module.exports = async ({ assert, jiti, modules, skip }) => {
       undefined,
       "a running result with no live process is not verified",
     );
+    // A row whose process is gone can never be stopped or read: pruning moves
+    // it to the archive and keeps the trace, and never touches a live command.
+    const live = registry.prepare(
+      "prune-scope",
+      "ses_prune",
+      "sleep 20",
+      workspace,
+      30000,
+    );
+    const liveStarted = spawnTraced(live.command, {
+      cwd: live.cwd,
+      logPath: live.logPath,
+      deadlineMs: live.deadlineMs,
+    });
+    const liveRow = registry.add({ ...live, ...liveStarted });
+    const gone = registry.prepare("prune-scope", "ses_prune", "true", workspace, 5000);
+    const goneRow = registry.add({ ...gone, pid: 2147483647 });
+    fs.mkdirSync(path.dirname(gone.logPath), { recursive: true });
+    fs.writeFileSync(gone.logPath, "trace\n");
+    const pruned = registry.prune("prune-scope");
+    assert.deepEqual(
+      pruned.archived,
+      [goneRow.id],
+      "only the row whose process is gone is archived",
+    );
+    assert.deepEqual(
+      pruned.kept,
+      [liveRow.id],
+      "a running command stays owned",
+    );
+    assert.deepEqual(
+      registry.list("prune-scope").map((row) => row.id),
+      [liveRow.id],
+      "the pruned row leaves the live ledger",
+    );
+    const archive = JSON.parse(
+      fs.readFileSync(path.join(state, "processes-archive.json"), "utf8"),
+    );
+    assert.equal(archive.at(-1).id, goneRow.id, "the archived row keeps its id");
+    assert.equal(
+      archive.at(-1).status,
+      "unknown",
+      "the archive records the last known status, never a fabricated result",
+    );
+    assert.ok(
+      !("runKey" in archive.at(-1)),
+      "the archive carries no run key",
+    );
+    assert.ok(
+      fs.existsSync(gone.logPath),
+      "pruning the row does not delete its trace",
+    );
+    assert.deepEqual(
+      registry.prune("prune-scope"),
+      { archived: [], kept: [liveRow.id] },
+      "a second pass has nothing left to archive",
+    );
+    registry.stop("prune-scope", liveRow.id);
+    await until(
+      () => processStatus(registry.get("prune-scope", liveRow.id)) !== "running",
+    );
+    assert.deepEqual(
+      registry.prune("prune-scope").archived,
+      [liveRow.id],
+      "a stopped row is archived on the next pass",
+    );
     assert.throws(() => registry.tracePath("../../escape"), /Invalid process id/);
     const large = path.join(workspace, "large.log");
     fs.writeFileSync(large, "x".repeat(500000) + "\nlast-line\n");
@@ -227,6 +293,31 @@ module.exports = async ({ assert, jiti, modules, skip }) => {
       String(absentRead.diagnosis),
       /missing/,
       "the read names the missing executable",
+    );
+
+    // The tool path: one call archives every launch of this scope whose
+    // process is gone, and a finished command cannot stay "owned" forever.
+    const pruneCall = await call({ action: "prune" });
+    assert.ok(pruneCall.archived.includes(absent.id), "the finished launch is archived");
+    const remaining = await call({ action: "list" });
+    assert.ok(
+      !remaining.some((row) => row.id === absent.id),
+      "an archived launch leaves the owned list",
+    );
+    const emptyPrune = await call({ action: "prune" });
+    assert.deepEqual(emptyPrune.archived, [], "a second prune has nothing to archive");
+    await assert.rejects(() => call({ action: "prune-all" }), /Invalid process action/);
+    // The archived row is still readable as evidence, with no run key.
+    const archivedRows = JSON.parse(
+      fs.readFileSync(path.join(state, "processes-archive.json"), "utf8"),
+    );
+    assert.ok(
+      archivedRows.some((row) => row.id === absent.id && row.status === "failed"),
+      "the archive keeps the last known status of the archived launch",
+    );
+    assert.ok(
+      archivedRows.every((row) => !("runKey" in row)),
+      "no archived row exposes a run key",
     );
 
   } finally {

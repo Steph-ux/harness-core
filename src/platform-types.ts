@@ -15,6 +15,8 @@ export type NodeState =
   | "COMPLETED"
   | "FAILED"
   | "SKIPPED";
+/** A mission is completed when its stages ran, closed when the operator ended it. */
+export type MissionState = NodeState | "CLOSED";
 export interface GraphNode {
   id: string;
   dependsOn: string[];
@@ -24,7 +26,9 @@ export interface Mission {
   scope: string;
   title: string;
   boundaries: string;
-  state: NodeState;
+  state: MissionState;
+  /** Present when the engagement was closed before its stages ran. */
+  closed?: { reason: string; timestamp: string };
   nodes: {
     id: string;
     state: NodeState;

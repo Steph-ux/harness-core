@@ -1206,6 +1206,7 @@ export default {
                 title: mission.title,
                 boundaries: mission.boundaries,
                 state: mission.state,
+                ...(mission.closed ? { closed: mission.closed } : {}),
                 stages: mission.nodes.map(({ id, state }: any) => ({
                   id,
                   state,
@@ -2073,6 +2074,7 @@ export default {
                 "checkpoints",
                 "resume",
                 "reopen-validation",
+                "close",
               ],
               description: "What to do with the engagement.",
             },
@@ -2220,6 +2222,17 @@ export default {
                   `operator:${context.sessionID}`,
                 ),
               ),
+            };
+          }
+          if (input.action === "close") {
+            // Ending an engagement is an operator decision, and it is a
+            // closure, not a completion: the stages that never ran stay
+            // visible as they are.
+            if (!input.reason?.trim())
+              throw new Error("Closing an engagement needs a written reason");
+            await assertOperatorDecision(ctx, context, `close:${id}`);
+            return {
+              content: JSON.stringify(platform.closeMission(scope, id, input.reason)),
             };
           }
           if (input.action === "checkpoints")
@@ -2796,9 +2809,9 @@ export default {
           properties: {
             action: {
               type: "string",
-              enum: ["run", "list", "read", "stop"],
+              enum: ["run", "list", "read", "stop", "prune"],
               description:
-                "Run a command, list them, read a trace, or stop one.",
+                "Run a command, list them, read a trace, stop one, or archive the rows whose process is gone.",
             },
             argv: {
               type: "array",
@@ -2826,7 +2839,7 @@ export default {
         },
         execute: async (input: any, context: any) => {
           const scope = await scopeOf(context.sessionID);
-          if (!["run", "list", "read", "stop"].includes(input.action))
+          if (!["run", "list", "read", "stop", "prune"].includes(input.action))
             throw new Error("Invalid process action");
           if (input.action === "list")
             return {
@@ -2876,6 +2889,16 @@ export default {
                 ...publicProcess(stored),
                 trace: record.logPath,
                 note: "Launch is not proof of success. Read after termination to obtain the exit code and verified trace.",
+              }),
+              metadata: { evidenceSuccess: false },
+            };
+          }
+          if (input.action === "prune") {
+            const pruned = processes.prune(scope);
+            return {
+              content: JSON.stringify({
+                ...pruned,
+                note: "Each archived row keeps its last known status; the trace files stay on disk. A running command is never archived.",
               }),
               metadata: { evidenceSuccess: false },
             };

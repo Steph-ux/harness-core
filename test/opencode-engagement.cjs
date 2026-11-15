@@ -595,6 +595,60 @@ module.exports = async ({ assert, jiti }) => {
     "the engagement is in the shared ledger",
   );
 
+  // An engagement the operator ends before its stages run is closed, not
+  // completed: the closure carries its reason and the unrun stages stay visible.
+  const ended = JSON.parse(
+    (
+      await mission({
+        action: "create",
+        title: "Engagement arrete",
+        boundaries: "Cible: 10.0.0.2. Le client a annule la seance.",
+      })
+    ).content,
+  );
+  await mission({ action: "approve-scope", id: ended.id });
+  await assert.rejects(
+    () => mission({ action: "close", id: ended.id, reason: "court" }),
+    /written reason/,
+    "a closure without a written reason is refused",
+  );
+  const closed = JSON.parse(
+    (
+      await mission({
+        action: "close",
+        id: ended.id,
+        reason: "Le client a annule la seance apres la reunion de cadrage.",
+      })
+    ).content,
+  );
+  assert.equal(closed.state, "CLOSED", "a closure is not a completion");
+  assert.match(closed.closed.reason, /annule la seance/, "the closure keeps its reason");
+  assert.equal(
+    closed.nodes.filter((node) => node.state === "PENDING").length,
+    closed.nodes.length - 1,
+    "the stages that never ran are still visible as never run",
+  );
+  await assert.rejects(
+    () =>
+      mission({
+        action: "close",
+        id: ended.id,
+        reason: "Encore une fois, pour verifier le refus.",
+      }),
+    /already closed/,
+    "an engagement cannot be closed twice",
+  );
+  await assert.rejects(
+    () => mission({ action: "claim", id: ended.id, node: "recon", owner: "recon-agent" }),
+    /Mission is closed/,
+    "a closed engagement cannot be worked",
+  );
+  assert.equal(
+    platform.mission(scope, ended.id).state,
+    "CLOSED",
+    "the closure is in the shared ledger",
+  );
+
   knowledge.close();
   platform.close();
   await unloadPlugins();

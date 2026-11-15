@@ -12,6 +12,7 @@ import {
   type FindingProposal,
   type GraphNode,
   type Mission,
+  type NodeState,
   type Relation,
   type SearchResult,
   type SourceChunk,
@@ -80,9 +81,9 @@ export class PlatformStore {
     const version = Number(
       this.db.prepare("PRAGMA user_version").get()!.user_version,
     );
-    if (version > 6)
+    if (version > 7)
       throw new Error("Platform database version is newer than this harness");
-    if (version === 6) return;
+    if (version === 7) return;
     if (version === 0)
       this.db.exec(`BEGIN IMMEDIATE;
    CREATE TABLE missions(id TEXT PRIMARY KEY,scope TEXT NOT NULL,title TEXT NOT NULL,boundaries TEXT NOT NULL,created TEXT NOT NULL,UNIQUE(id,scope));
@@ -149,6 +150,10 @@ export class PlatformStore {
       CREATE INDEX IF NOT EXISTS relations_source ON relations(scope,source);
       CREATE INDEX IF NOT EXISTS relations_target ON relations(scope,target);
       PRAGMA user_version=6;COMMIT;`);
+    if (version < 7)
+      this.db.exec(`BEGIN IMMEDIATE;
+      CREATE TABLE IF NOT EXISTS mission_closures(mission_id TEXT NOT NULL,scope TEXT NOT NULL,reason TEXT NOT NULL,timestamp TEXT NOT NULL,PRIMARY KEY(mission_id,scope),FOREIGN KEY(mission_id,scope) REFERENCES missions(id,scope));
+      PRAGMA user_version=7;COMMIT;`);
   }
   private open(scope: string) {
     if (this.closed) throw new Error("Platform store is closed");
@@ -328,7 +333,7 @@ export class PlatformStore {
       .all(id, scope)
       .map((n) => ({
         id: String(n.id),
-        state: n.state as Mission["state"],
+        state: n.state as NodeState,
         result: parse(n.result),
         attempt: Number(n.attempt),
         dependsOn: this.db
@@ -347,14 +352,48 @@ export class PlatformStore {
           : nodes.every((n) => n.state === "COMPLETED" || n.state === "SKIPPED")
             ? "COMPLETED"
             : "PENDING";
+    const closure = this.db
+      .prepare(
+        "SELECT reason,timestamp FROM mission_closures WHERE mission_id=? AND scope=?",
+      )
+      .get(id, scope) as { reason: string; timestamp: string } | undefined;
     return {
       id,
       scope,
       title: String(row.title),
       boundaries: String(row.boundaries),
-      state,
+      // A closure is not a completion: the operator ended the engagement
+      // before its stages ran, so the state says so and carries the reason.
+      state: closure ? "CLOSED" : state,
+      ...(closure
+        ? { closed: { reason: String(closure.reason), timestamp: String(closure.timestamp) } }
+        : {}),
       nodes,
     };
+  }
+
+  /**
+   * End an engagement without pretending it was performed. The stage states
+   * stay as they are, so a reader sees what was never done; the closure is a
+   * separate record with its reason, and it is what the closing gate reads.
+   */
+  closeMission(scope: string, id: string, reason: string) {
+    const mission = this.mission(scope, id);
+    if (mission.state === "CLOSED") throw new Error("Mission is already closed");
+    if (mission.nodes.some((n) => ["RUNNING", "WAITING_APPROVAL"].includes(n.state)))
+      throw new Error("A stage is still open; stop it before closing");
+    if (typeof reason !== "string" || reason.trim().length < 10)
+      throw new Error("A closure needs a written reason");
+    this.tx(() => {
+      this.db
+        .prepare(
+          "INSERT INTO mission_closures(mission_id,scope,reason,timestamp)VALUES(?,?,?,?)",
+        )
+        .run(id, scope, text(reason), now());
+    });
+    const closed = this.mission(scope, id);
+    this.index(scope, id, "mission", closed.title, json(closed), `cyber://mission/${id}`, id);
+    return closed;
   }
   /** The report gate lives with the engagement workflow; a host registers it once. */
   setReportGuard(guard: (scope: string, missionId: string) => void) {
@@ -520,7 +559,8 @@ export class PlatformStore {
     owner: string,
     findingIds: string[] = [],
   ): string {
-    this.mission(scope, id);
+    if (this.mission(scope, id).state === "CLOSED")
+      throw new Error("Mission is closed");
     identifier(owner);
     return this.tx(() => {
       const m = this.mission(scope, id),

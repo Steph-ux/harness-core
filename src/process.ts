@@ -262,6 +262,63 @@ export class ProcessRegistry {
     if (!row) throw new Error("Unknown process");
     return row;
   }
+  private archiveFile() {
+    return path.join(this.stateRoot, "processes-archive.json");
+  }
+  /**
+   * A launch whose process is gone stays in the ledger as `unknown`: the
+   * harness cannot verify what it did, so it must not claim a result. Those
+   * rows are also the ones that can never be stopped or read, and a scope that
+   * keeps them reports owned commands forever. Pruning moves them to the
+   * archive with their last known status; the trace files are left untouched.
+   */
+  prune(scope: string) {
+    fs.mkdirSync(this.stateRoot, { recursive: true, mode: 0o700 });
+    const lock = `${this.file()}.lock`;
+    assertPlainPath(lock);
+    const fd = fs.openSync(lock, "wx", 0o600);
+    try {
+      const all = this.readAll(),
+        archived: string[] = [],
+        kept: string[] = [];
+      const remaining = all.filter((row) => {
+        if (row.scope !== scope) return true;
+        if (processStatus(row) === "running") {
+          kept.push(row.id);
+          return true;
+        }
+        archived.push(row.id);
+        return false;
+      });
+      if (!archived.length) return { archived, kept };
+      const previous = (() => {
+        try {
+          const rows = JSON.parse(
+            fs.readFileSync(this.archiveFile(), "utf8"),
+          );
+          return Array.isArray(rows) ? rows : [];
+        } catch {
+          return [];
+        }
+      })();
+      const entry = all
+        .filter((row) => archived.includes(row.id))
+        .map((row) => ({
+          ...publicProcess(row),
+          status: processStatus(row),
+          archivedAt: now(),
+        }));
+      atomicWrite(
+        this.archiveFile(),
+        JSON.stringify([...previous, ...entry].slice(-500), null, 1),
+      );
+      atomicWrite(this.file(), JSON.stringify(remaining, null, 1));
+      return { archived, kept };
+    } finally {
+      fs.closeSync(fd);
+      fs.unlinkSync(lock);
+    }
+  }
   add(record: ProcessRecord) {
     fs.mkdirSync(this.stateRoot, { recursive: true, mode: 0o700 });
     const lock = `${this.file()}.lock`;

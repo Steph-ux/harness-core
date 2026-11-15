@@ -50,6 +50,8 @@ export interface Capsule {
     title: string;
     boundaries: string;
     state: string;
+    /** Present when the operator closed the engagement before its stages ran. */
+    closed?: { reason: string; timestamp: string };
     stages: { id: string; state: string }[];
   };
   workflow?: {
@@ -282,7 +284,9 @@ export const GATE_MARKER = "Closing gate.";
 export function closingGate(value: Capsule): string {
   const blockers: string[] = [];
   const mission = value.mission;
-  if (mission) {
+  // A closed engagement is over by decision, with its reason in the capsule:
+  // its unrun stages are a fact about the past, not work still to do.
+  if (mission && mission.state !== "CLOSED") {
     const pending = mission.stages
       .filter((stage) => stage.state !== "COMPLETED")
       .map((stage) => `${stage.id} (${stage.state})`);
