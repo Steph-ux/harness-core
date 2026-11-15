@@ -42,6 +42,60 @@ module.exports = async ({ assert, jiti }) => {
       .tools.some((entry) => entry.name === "fixture-cli"));
     if (originalCustom === undefined) delete process.env.HARNESS_TOOL_HOME;
     else process.env.HARNESS_TOOL_HOME = originalCustom;
+    // A collection is categories, not a bin directory. One configured level down
+    // is the collection; PATH stays flat, and a library directory is not a tool.
+    const collection = path.join(base, "collection");
+    fs.mkdirSync(path.join(collection, "01-enumeration"), { recursive: true });
+    fs.mkdirSync(path.join(collection, "_lib"));
+    fs.writeFileSync(
+      path.join(collection, "01-enumeration", "ct-union.py"),
+      '#!/usr/bin/env python3\n"""Union of certificate transparency sources for subdomain enumeration."""\nprint("ok")\n',
+      { mode: 0o755 },
+    );
+    fs.writeFileSync(
+      path.join(collection, "_lib", "helper.py"),
+      '"""helper for subdomain enumeration internals"""\n',
+      { mode: 0o755 },
+    );
+    fs.mkdirSync(path.join(pathFixture, "not-a-collection"));
+    fs.writeFileSync(
+      path.join(pathFixture, "not-a-collection", "path-hidden.py"),
+      '"""subdomain enumeration hidden in PATH"""\n',
+      { mode: 0o755 },
+    );
+    process.env.HARNESS_TOOL_HOME = collection;
+    try {
+      const nested = registry.scan(true);
+      const union = nested.find((item) => item.name === "ct-union.py");
+      assert.ok(union, "a script one category down is a tool");
+      assert.match(
+        union.description,
+        /subdomain enumeration/,
+        "the script header is the description, not a generic label",
+      );
+      assert.equal(
+        union.command,
+        path.join(collection, "01-enumeration", "ct-union.py"),
+        "the command is the script, not the category",
+      );
+      assert.ok(
+        !nested.some((item) => item.name === "helper.py"),
+        "a library directory is not scanned",
+      );
+      assert.ok(
+        !nested.some((item) => item.name === "path-hidden.py"),
+        "PATH is not descended",
+      );
+      assert.ok(
+        registry
+          .discover(scope, "subdomain enumeration", [], 0, 15, true)
+          .tools.some((item) => item.name === "ct-union.py"),
+        "a query matches the script header",
+      );
+    } finally {
+      if (originalCustom === undefined) delete process.env.HARNESS_TOOL_HOME;
+      else process.env.HARNESS_TOOL_HOME = originalCustom;
+    }
     assert.throws(() => registry.propose("other", {
       name: "example", description: "Example script", language: "mjs", source: "console.log('ok')",
     }), /scope/);

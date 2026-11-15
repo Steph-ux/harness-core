@@ -20,6 +20,59 @@ const text = (value: unknown, max = 16000): string => {
     throw new Error("A bounded nonempty text is required");
   return redactText(value);
 };
+/**
+ * Copy one validated pass into the toolbox journal the operator already keeps.
+ *
+ * The path comes from configuration, never from the repository: a host that
+ * does not set it simply has no journal. The block is keyed by the snapshot
+ * hash, so a repeated pass rewrites the same lines instead of growing a
+ * second copy. Only the redacted reason is copied — no artifact path.
+ */
+function publishCapitalizationJournal(record: {
+  id: string;
+  snapshotHash: string;
+  outcome: string;
+  reason: string;
+  recordedAt: string;
+}): void {
+  if (record.outcome !== "validated") return;
+  const root = process.env.HARNESS_TOOL_HOME?.trim();
+  if (!root) return;
+  const resolved = path.resolve(root);
+  assertPlainPath(resolved);
+  if (!fs.statSync(resolved).isDirectory())
+    throw new Error("Configured tool journal is unavailable");
+  const lessons = ["LEÇONS.md", "LECONS.md", "LESSONS.md"]
+    .map((name) => path.join(resolved, name))
+    .find((file) => fs.existsSync(file)) ?? path.join(resolved, "LESSONS.md");
+  const line =
+    `- ${record.recordedAt.slice(0, 10)} — ${record.id} (validated): ` +
+    record.reason.replace(/\s+/g, " ").slice(0, 500);
+  for (const file of [path.join(resolved, "CHANGELOG.md"), lessons])
+    upsertJournalBlock(file, record.snapshotHash, line);
+}
+function upsertJournalBlock(file: string, snapshotHash: string, line: string): void {
+  const begin = `<!-- harness-capitalization ${snapshotHash} -->`;
+  const end = `<!-- /harness-capitalization ${snapshotHash} -->`;
+  const section = `${begin}\n${line}\n${end}\n`;
+  let current = "";
+  try {
+    current = fs.readFileSync(file, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  const start = current.indexOf(begin);
+  let next: string;
+  if (start >= 0) {
+    const stop = current.indexOf(end, start);
+    if (stop < 0) throw new Error("Broken capitalization marker");
+    // The stored block already ends with a newline; do not keep the old one.
+    const tail = current.slice(stop + end.length).replace(/^\n/, "");
+    next = current.slice(0, start) + section + tail;
+  } else
+    next = (current && !current.endsWith("\n") ? current + "\n" : current) + section;
+  if (next !== current) atomicWrite(file, next);
+}
 const kinds = [
   "evidence",
   "poc",
@@ -799,7 +852,7 @@ export class EngagementWorkflow {
       }[];
     },
   ) {
-    return this.tx(() => {
+    const recorded = this.tx(() => {
       this.platform.mission(scope, missionId);
       if (
         !Array.isArray(input.artifactIds) ||
@@ -862,6 +915,10 @@ export class EngagementWorkflow {
       this.event(scope, "capitalization.recorded", value);
       return value;
     });
+    // After the commit: a journal failure must not roll back the record,
+    // and a retry of the same pass rewrites the same block.
+    publishCapitalizationJournal(recorded);
+    return recorded;
   }
   status(scope: string, missionId: string) {
     this.platform.mission(scope, missionId);

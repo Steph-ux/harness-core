@@ -71,6 +71,65 @@ function isExecutable(name: string, stat: fs.Stats): boolean {
   if (process.platform !== "win32") return Boolean(stat.mode & 0o111);
   return /\.(?:exe|com|bat|cmd|ps1)$/i.test(name) || !/\.[A-Za-z0-9]+$/.test(name);
 }
+/** A file whose header can describe it. Binaries are not read. */
+const SCRIPT_HEADER = /\.(?:py|sh|bash|js|mjs|cjs|ts|rb|pl|ps1)$/i;
+const MAX_DESCRIPTION_BYTES = 4096;
+const MAX_TOOL_SUBDIRECTORIES = 64;
+/**
+ * The purpose of a script, read from its own header.
+ *
+ * A collection documents each script at the top: a module docstring in Python,
+ * a comment block in shell or JavaScript. That header — not the file name — is
+ * what lets a semantic query find the script, and it is the only description
+ * the registry can obtain without running it. Nothing is executed: the first
+ * kilobytes are read and the first paragraph is kept.
+ */
+function scriptDescription(file: string): string | undefined {
+  if (!SCRIPT_HEADER.test(file)) return undefined;
+  let head: string;
+  try {
+    const fd = fs.openSync(file, "r");
+    try {
+      const buffer = Buffer.alloc(MAX_DESCRIPTION_BYTES);
+      head = buffer
+        .subarray(0, fs.readSync(fd, buffer, 0, buffer.length, 0))
+        .toString("utf8");
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return undefined;
+  }
+  // A shebang and a coding declaration precede the header they belong to.
+  const kept = head
+    .replace(/^\uFEFF/, "")
+    .split("\n")
+    .filter(
+      (line, index) =>
+        !(index === 0 && line.startsWith("#!")) &&
+        !(index < 3 && /^#.*coding[:=]/.test(line)),
+    );
+  const body = kept.join("\n").trimStart();
+  const collected: string[] = [];
+  const quote = body.startsWith('"""')
+    ? '"""'
+    : body.startsWith("'''")
+      ? "'''"
+      : "";
+  if (quote) {
+    const end = body.indexOf(quote, quote.length);
+    if (end > quote.length) collected.push(body.slice(quote.length, end));
+  }
+  if (!collected.length)
+    for (const line of kept) {
+      const comment = line.match(/^\s*#\s?(.*)$/);
+      if (comment) collected.push(comment[1]);
+      else if (line.trim()) break;
+      else if (collected.length) break;
+    }
+  const description = collected.join(" ").replace(/\s+/g, " ").trim();
+  return description ? description.slice(0, 300) : undefined;
+}
 /**
  * The directories a scan may read.
  *
@@ -447,6 +506,28 @@ export class ToolRegistry {
       throw new Error("Too many tool directories; restrict PATH or HARNESS_TOOL_PATHS");
     const explicit = new Set(configured.map((entry) => path.resolve(entry)));
     const found = new Map<string, ToolCapability>();
+    const indexFile = (directory: string, name: string, category?: string) => {
+      if (found.size >= MAX_SCAN) return;
+      if (!/^[A-Za-z0-9][A-Za-z0-9_.+-]{0,100}$/.test(name)) return;
+      const file = path.join(directory, name);
+      let stat;
+      try {
+        stat = fs.statSync(file);
+      } catch {
+        return;
+      }
+      if (!stat.isFile() || !isExecutable(name, stat) || found.has(name)) return;
+      const header = scriptDescription(file) ?? toolNote(name);
+      found.set(name, {
+        name, origin: "path",
+        // The category is part of the description: a query for the kind of
+        // work matches the folder even when the file name does not.
+        description: header
+          ? (category ? `${category}: ${header}` : header)
+          : "Executable from PATH or explicitly configured directory",
+        command: file,
+      });
+    };
     for (const directory of dirs) {
       try {
         // A PATH entry may itself be a symlink (`/bin` -> `/usr/bin` on
@@ -454,37 +535,51 @@ export class ToolRegistry {
         const real = fs.realpathSync(directory);
         assertPlainPath(real);
         if (!fs.statSync(real).isDirectory()) throw new Error("Not a directory");
+        const descend = explicit.has(directory);
         const entries = fs.readdirSync(real, { withFileTypes: true });
+        let subdirs = 0;
         for (const entry of entries) {
           if (found.size >= MAX_SCAN) break;
+          // A configured toolbox is categories (`01-enumeration/*.py`), not a
+          // flat bin. Descend one level there only. PATH stays flat: /usr/bin
+          // has subdirectories that are not the operator's tools, and a name
+          // starting with "_" is a library, not a tool.
+          if (descend && (entry.isDirectory() || entry.isSymbolicLink())) {
+            if (
+              entry.name.startsWith(".") ||
+              entry.name.startsWith("_") ||
+              !/^[A-Za-z0-9][A-Za-z0-9_.+-]{0,100}$/.test(entry.name) ||
+              subdirs >= MAX_TOOL_SUBDIRECTORIES
+            ) {
+              if (!entry.isSymbolicLink()) continue;
+            } else {
+              const child = path.join(directory, entry.name);
+              let childReal = "";
+              try {
+                childReal = fs.realpathSync(child);
+                assertPlainPath(childReal);
+                if (
+                  childReal.startsWith(real + path.sep) &&
+                  fs.statSync(childReal).isDirectory()
+                ) {
+                  subdirs++;
+                  for (const nested of fs.readdirSync(childReal, { withFileTypes: true })) {
+                    if (!nested.isFile() && !nested.isSymbolicLink()) continue;
+                    indexFile(child, nested.name, entry.name);
+                  }
+                  continue;
+                }
+              } catch {
+                if (entry.isDirectory()) continue;
+              }
+              if (entry.isDirectory()) continue;
+            }
+          }
           // Kali ships many tools as symlinks (msfconsole, msfvenom). Follow a
           // link to a regular executable, and ignore directories and dangling
           // links.
-          if (
-            (!entry.isFile() && !entry.isSymbolicLink()) ||
-            !/^[A-Za-z0-9][A-Za-z0-9_.+-]{0,100}$/.test(entry.name)
-          )
-            continue;
-          const file = path.join(directory, entry.name);
-          let stat;
-          try {
-            stat = fs.statSync(file);
-          } catch {
-            continue;
-          }
-          if (
-            !stat.isFile() ||
-            !isExecutable(entry.name, stat) ||
-            found.has(entry.name)
-          )
-            continue;
-          found.set(entry.name, {
-            name: entry.name, origin: "path",
-            description:
-              toolNote(entry.name) ??
-              "Executable from PATH or explicitly configured directory",
-            command: file,
-          });
+          if (!entry.isFile() && !entry.isSymbolicLink()) continue;
+          indexFile(directory, entry.name);
         }
       } catch (error) {
         if (explicit.has(directory))

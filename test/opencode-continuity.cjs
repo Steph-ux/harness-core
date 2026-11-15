@@ -179,6 +179,49 @@ module.exports = async ({ assert, jiti }) => {
     "",
     "a closed engagement is over by decision, not an open stage",
   );
+  const finished = {
+    scope,
+    sessionID: "ses_ctx",
+    tasks: [],
+    open: 0,
+    blocked: 0,
+    observations: [],
+    mission: {
+      id: "mission-3",
+      title: "Engagement termine",
+      boundaries: "local",
+      state: "COMPLETED",
+      stages: [{ id: "report", state: "COMPLETED" }],
+    },
+    workflow: {
+      reports: [{ id: "report-3", reviewed: 1 }],
+      restitutions: [{ reportId: "report-3" }],
+      capitalizations: [],
+      cleanup: [],
+      cleanupPolicy: "after-restitution-only",
+    },
+  };
+  assert.match(
+    closingGate(finished),
+    /no recorded capitalization/,
+    "a finished engagement with no lesson is not done",
+  );
+  assert.equal(
+    closingGate({
+      ...finished,
+      workflow: { ...finished.workflow, capitalizations: [{ id: "c1" }] },
+    }),
+    "",
+    "one recorded capitalization, including an explicit none, clears the gate",
+  );
+  assert.equal(
+    closingGate({
+      ...finished,
+      mission: { ...finished.mission, state: "CLOSED" },
+    }),
+    "",
+    "a closed engagement does not owe a capitalization",
+  );
   assert.ok(
     !missionGate.includes("scope-validation"),
     "a closed stage is not a blocker",

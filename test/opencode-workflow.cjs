@@ -73,6 +73,8 @@ module.exports = async ({ assert, jiti, skip }) => {
       await new Promise((r) => setTimeout(r, 30));
     assert.ok(fn(), "process finished");
   };
+  const savedToolHome = process.env.HARNESS_TOOL_HOME;
+  delete process.env.HARNESS_TOOL_HOME;
   try {
     for (const name of ["capitaliser-cyber", "rapports-cyber"])
       assert.ok(fixture.skills.has(name));
@@ -572,6 +574,62 @@ module.exports = async ({ assert, jiti, skip }) => {
       "a repeated pass keeps the identity it was recorded under",
     );
     assert.equal(workflow.status(scope, m.id).capitalizations.length, 1);
+    // A validated pass is copied into the configured toolbox journal. The
+    // copy is keyed by the snapshot hash, so a repeat rewrites one block.
+    const journal = path.join(work, "journal");
+    fs.mkdirSync(journal);
+    fs.writeFileSync(path.join(journal, "CHANGELOG.md"), "# Journal\n");
+    fs.writeFileSync(path.join(journal, "LEÇONS.md"), "# Lecons\n");
+    process.env.HARNESS_TOOL_HOME = journal;
+    const lesson = {
+      outcome: "validated",
+      reason: "Parser rejouable, api_key=supersecretvalue",
+      artifactIds: [reusable.id],
+      tests: [
+        {
+          observationId: va.id,
+          contains: "POSITIF résultat",
+          kind: "positive",
+        },
+        { observationId: vb.id, contains: "NEGATIF témoin", kind: "negative" },
+      ],
+    };
+    workflow.capitalization(scope, m.id, lesson);
+    const changelog = () =>
+      fs.readFileSync(path.join(journal, "CHANGELOG.md"), "utf8");
+    const lessons = () =>
+      fs.readFileSync(path.join(journal, "LEÇONS.md"), "utf8");
+    assert.equal(
+      (changelog().match(/<!-- harness-capitalization /g) || []).length,
+      1,
+      "the changelog gains one block",
+    );
+    assert.equal(
+      (lessons().match(/<!-- harness-capitalization /g) || []).length,
+      1,
+      "the lessons file gains the same block",
+    );
+    assert.ok(changelog().startsWith("# Journal\n"), "the existing journal is kept");
+    assert.ok(
+      !changelog().includes("supersecretvalue"),
+      "a secret in the reason is not copied",
+    );
+    assert.match(changelog(), /<REDACTED>/, "the redaction is what gets copied");
+    const once = changelog();
+    workflow.capitalization(scope, m.id, lesson);
+    assert.equal(changelog(), once, "the same pass is not appended twice");
+    workflow.capitalization(scope, m.id, {
+      ...lesson,
+      reason: "Second lesson kept once",
+    });
+    assert.equal(
+      (changelog().match(/<!-- harness-capitalization /g) || []).length,
+      1,
+      "a rewritten pass replaces its block",
+    );
+    assert.match(changelog(), /Second lesson kept once/);
+    assert.ok(!changelog().includes("Parser rejouable"));
+    delete process.env.HARNESS_TOOL_HOME;
     fixture.ctx.permission.explicit = async () => "reject";
     await assert.rejects(
       () =>
@@ -754,6 +812,8 @@ module.exports = async ({ assert, jiti, skip }) => {
       "a test file filed under preuves/fixtures is accepted",
     );
   } finally {
+    if (savedToolHome === undefined) delete process.env.HARNESS_TOOL_HOME;
+    else process.env.HARNESS_TOOL_HOME = savedToolHome;
     unload();
     workflow.close();
     platform.close();

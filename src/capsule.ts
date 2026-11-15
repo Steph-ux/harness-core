@@ -321,6 +321,19 @@ export function closingGate(value: Capsule): string {
     !value.workflow?.restitutions.some((r) => r.reportId === report.id)
   )
     blockers.push(`approved report ${report.id} is not restituted`);
+  // A lesson that was never recorded is the same kind of gap as a missing
+  // restitution: the next mission starts from zero. A closure is a decision
+  // not to finish, so it does not owe one. An explicit "none" still counts:
+  // the pass happened, there was nothing to keep.
+  if (
+    mission &&
+    mission.state !== "CLOSED" &&
+    value.workflow &&
+    !value.workflow.capitalizations?.length
+  )
+    blockers.push(
+      `engagement ${mission.id} has no recorded capitalization`,
+    );
   if (!blockers.length) return "";
   return [
     `${GATE_MARKER} The work is not finished:`,
