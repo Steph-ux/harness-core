@@ -72,7 +72,7 @@ module.exports = async ({ assert, jiti }) => {
   assert.throws(() => techniqueCards("nope"), /Unknown technique phase/);
   assert.deepEqual(
     techniqueGaps().map((card) => card.id).sort(),
-    ["T-C2", "T-DOS", "T-EVASION", "T-EXFIL", "T-PERSIST", "T-SOCIAL"],
+    ["T-DOS"],
     "the registry names its gaps instead of silently omitting them",
   );
   assert.equal(techniqueTable().split("\n").length, TECHNIQUES.length);

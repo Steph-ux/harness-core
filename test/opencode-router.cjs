@@ -42,6 +42,21 @@ module.exports = async ({ assert, jiti }) => {
   const ssrf = routeFor("blind SSRF on the image proxy, how do I see the callback?");
   assert.ok(ssrf.ids.includes("web-deep"), "ssrf routes to the deep web method");
 
+  // A red-team stage selects the emulation method, and the row is enforced:
+  // a callback, a survival or a click without its control stays a candidate.
+  const c2 = routeFor("set up a C2 beacon and test exfiltration on the named host");
+  assert.ok(c2.ids.includes("redteam"), "a C2 request routes to the red-team method");
+  assert.ok(
+    c2.required.includes("harness-red-team"),
+    "a red-team finding needs its method loaded",
+  );
+  const social = routeFor("phishing simulation on the approved recipient list");
+  assert.ok(social.ids.includes("redteam"), "a pretext simulation routes to its method");
+  assert.ok(
+    social.required.includes("harness-social-engineering"),
+    "a social-engineering finding needs its method loaded",
+  );
+
   const recon = routeFor("map the attack surface of the domain, subdomain first");
   assert.ok(recon.ids.includes("recon"), "recon routes to the surface method");
 
@@ -50,6 +65,11 @@ module.exports = async ({ assert, jiti }) => {
   assert.deepEqual(none.ids, [], "a request with no signal matches no row");
   assert.match(none.block, /^Harness routing\./, "the table is the fallback");
   assert.ok(routingTable().length <= 2000, "the table is bounded");
+  assert.match(
+    routingTable(),
+    /a 200 is not a finding\.$/,
+    "the closing guidance survives the cap: a new row must be paid for, not truncate the rule",
+  );
 
   // A short keyword must not fire inside a longer word.
   const capital = routeFor("the capital of the country is unknown");

@@ -53,8 +53,10 @@ export const EXTERNAL_METHODS = [
   "harness-network-pivot",
   "harness-oauth2",
   "harness-phone-osint",
+  "harness-red-team",
   "harness-secret-scan",
   "harness-shadow-api",
+  "harness-social-engineering",
   "harness-source-deep",
   "harness-subdomain-enum",
   "harness-supply-chain",
@@ -224,7 +226,7 @@ export const ROUTES: readonly Route[] = [
       "paiement",
     ],
     hint: "Mutate one business field and show the server persisted the illegal state.",
-    label: "price/state/workflow",
+    label: "business logic",
   },
   {
     id: "graphql",
@@ -253,7 +255,7 @@ export const ROUTES: readonly Route[] = [
       "fichier js",
     ],
     hint: "Taint from a request field to a dangerous sink, in the shipped bytes.",
-    label: "js/sourcemap audit",
+    label: "js audit",
   },
   {
     id: "recon",
@@ -563,6 +565,31 @@ export const ROUTES: readonly Route[] = [
     hint: "Hash collected firmware. No radio disruption, no live exploit.",
     label: "iot device",
   },
+  {
+    id: "redteam",
+    enforce: true,
+    skills: ["harness-red-team", "harness-social-engineering"],
+    tools: ["cyber_process"],
+    triggers: [
+      "red team",
+      "red-team",
+      "c2",
+      "command and control",
+      "c2 beacon",
+      "adversary emulation",
+      "emulation adversaire",
+      "post-exploitation",
+      "post exploitation",
+      "exfiltration",
+      "defense evasion",
+      "evasion de defense",
+      "phishing simulation",
+      "social engineering",
+      "ingenierie sociale",
+    ],
+    hint: "Named hosts, written authorization, one artifact at a time, teardown proven. Social engineering stays canary-only.",
+    label: "red team",
+  },
 ];
 
 /** Words that carry no routing signal and would match too much. */
@@ -724,15 +751,22 @@ export function routeFor(text: string, limit = 1): Routing {
 /**
  * The always-available map. It is what stops a request from falling through to
  * the model's habits when the host hands over no request text at all.
+ *
+ * The table is capped, so the closing guidance is written last and kept whole:
+ * a row that would push it past the cap fails `opencode-router` instead of
+ * silently cutting the rule that says what to do when nothing matches.
  */
+export const ROUTING_TABLE_BUDGET = 2000;
+
+export const routingTableHeader = `${ROUTER_MARKER} The method is mandatory. If a row matches the request, call that skill id before answering or running a command: it carries the procedure and the evidence format this ledger accepts. A question about a method is still a request for the method.`;
+
+export const routingTableFooter =
+  "No row matched: ignore this map for ordinary development or conversation; for security work with no row, say the map has no row instead of inventing one. Browser: chrome-devtools.list_pages, rea.inspect_web_page. Evidence: cyber_finding needs observation ids; a 200 is not a finding.";
+
 export function routingTable(): string {
   const rows = ROUTES.map(
     (route) => `${route.label} -> ${route.skills.join(", ")}`,
   );
-  const block = [
-    `${ROUTER_MARKER} The method is mandatory, not advice. If a row matches the request, call the skill tool with that id before you answer or run a command: the skill carries the procedure and the evidence format this ledger accepts. A question about a security method is still a request for the method; an answer built from memory is not the harness.`,
-    ...rows,
-    "No row matched: for ordinary development or conversation, ignore this map; for security work with no row, say the map has no row instead of inventing a method. Browser work: chrome-devtools.list_pages, rea.inspect_web_page. Evidence: cyber_finding needs observation ids; a 200 is not a finding.",
-  ].join("\n");
-  return block.slice(0, 2000);
+  const block = [routingTableHeader, ...rows, routingTableFooter].join("\n");
+  return block.slice(0, ROUTING_TABLE_BUDGET);
 }
