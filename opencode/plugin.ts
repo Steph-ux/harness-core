@@ -640,6 +640,9 @@ export default {
     const { COVERAGE_PROFILES, coverageContract, coverageProfile } = await import(
       path.join(coreRoot(), "src", "coverage-profiles.ts")
     );
+    const { techniqueCard, techniqueCards, techniqueGaps } = await import(
+      path.join(coreRoot(), "src", "techniques.ts")
+    );
     const {
       assertNotRoot,
       captureDestination,
@@ -3157,9 +3160,23 @@ export default {
           properties: {
             action: {
               type: "string",
-              enum: ["propose", "list", "load", "promote"],
+              enum: ["propose", "list", "load", "promote", "technique", "gaps"],
               description:
-                "Propose a method, list them, read one, or share one with every project.",
+                "Propose a method, list them, read one, share one with every project, read a technique card, or list the technique gaps.",
+            },
+            phase: {
+              type: "string",
+              enum: [
+                "recon",
+                "access",
+                "identity",
+                "execution",
+                "lateral",
+                "collection",
+                "impact",
+              ],
+              description:
+                "Restrict technique cards to one phase, for action technique without a name.",
             },
             name: {
               type: "string",
@@ -3221,6 +3238,17 @@ export default {
         },
         execute: async (input: any, context: any) => {
           const scope = await scopeOf(context.sessionID);
+          if (input.action === "gaps")
+            return { content: JSON.stringify(techniqueGaps()) };
+          if (input.action === "technique") {
+            if (!input.name)
+              return {
+                content: JSON.stringify(
+                  techniqueCards(input.phase ?? undefined),
+                ),
+              };
+            return { content: JSON.stringify(techniqueCard(input.name)) };
+          }
           if (input.action === "list")
             return { content: JSON.stringify(skills.list(scope)) };
           if (input.action === "load") {
