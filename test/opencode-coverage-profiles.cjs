@@ -6,7 +6,7 @@ module.exports = async ({ assert, jiti }) => {
   const { COVERAGE_CONTRACTS, COVERAGE_PROFILES, coverageContract, coverageProfile } = jiti(
     path.join(CORE, "src", "coverage-profiles.ts"),
   );
-  assert.deepEqual(Object.keys(COVERAGE_PROFILES), ["mobile", "cloud", "harness"]);
+  assert.deepEqual(Object.keys(COVERAGE_PROFILES), ["mobile", "cloud", "harness", "gaps"]);
   assert.deepEqual(
     Object.keys(COVERAGE_CONTRACTS),
     Object.keys(COVERAGE_PROFILES),
@@ -28,6 +28,10 @@ module.exports = async ({ assert, jiti }) => {
     coverageContract("CLOUD").missingTool,
     "evidence-only-and-not-tested",
     "cloud gaps never become implied coverage",
+  );
+  assert.ok(
+    coverageProfile("gaps").steps.includes("approved LLM application boundary"),
+    "gap coverage includes the LLM boundary",
   );
   assert.throws(() => coverageProfile("unknown"), /Unknown coverage profile/);
 };

@@ -57,6 +57,19 @@ export const COVERAGE_PROFILES = {
       "report, restitution and cleanup gates",
     ],
   },
+  gaps: {
+    title: "Missing surface coverage",
+    steps: [
+      "container image and workload identity",
+      "SSO, RBAC and PAM boundary",
+      "collected forensic artifact",
+      "detection rule and clean control",
+      "approved LLM application boundary",
+      "compliance control map",
+      "lockfile, SBOM and dependency lookup",
+      "approved IoT firmware and interface",
+    ],
+  },
 } as const;
 
 export type CoverageProfile = keyof typeof COVERAGE_PROFILES;
@@ -106,6 +119,21 @@ export const COVERAGE_CONTRACTS = {
     methods: ["harness-cyber-playbooks", "harness-vuln-triage", "rapports-cyber"],
     toolFamilies: ["cyber_process", "cyber_source", "cyber_finding", "cyber_report"],
     missingTool: "record-gap-never-guess",
+  },
+  gaps: {
+    proof: "observation-per-surface-plus-negative-control",
+    methods: [
+      "harness-container",
+      "harness-iam",
+      "harness-forensics",
+      "harness-detection",
+      "harness-llm-security",
+      "harness-compliance",
+      "harness-supply-chain",
+      "harness-iot",
+    ],
+    toolFamilies: ["trivy", "kubectl", "tshark", "cyber_cve", "cyber_process"],
+    missingTool: "not-tested-with-reason",
   },
 } as const;
 

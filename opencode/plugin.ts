@@ -1868,7 +1868,7 @@ export default {
             profile: {
               type: "string",
               enum: Object.keys(COVERAGE_PROFILES),
-              description: "Deep coverage profile: mobile, cloud or harness.",
+              description: "Deep coverage profile: mobile, cloud, harness or gaps.",
             },
             title: { type: "string", description: "Task title, for add." },
             id: {
