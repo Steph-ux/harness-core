@@ -101,6 +101,8 @@ export interface Route {
    * request that matched it needs the skill actually loaded in the session.
    */
   enforce?: boolean;
+  /** Route ids to suggest as follow-up when this route's work completes. */
+  chain?: string[];
 }
 
 export const ROUTES: readonly Route[] = [
@@ -145,6 +147,7 @@ export const ROUTES: readonly Route[] = [
     ],
     hint: "One field per mutation, out-of-band control for blind classes.",
     label: "ssrf/ssti/xxe/race",
+    chain: ["triage"],
   },
   {
     id: "api",
@@ -161,6 +164,7 @@ export const ROUTES: readonly Route[] = [
     ],
     hint: "Inventory, auth, authorization, input — each with a negative control.",
     label: "api inventory/authz",
+    chain: ["authz", "web-deep", "triage"],
   },
   {
     id: "authz",
@@ -264,6 +268,7 @@ export const ROUTES: readonly Route[] = [
     ],
     hint: "Taint from request to sink in shipped bytes. Use js-endpoint-extract.py for regex pass, REA for AST-level analysis.",
     label: "js audit",
+    chain: ["web-deep", "api"],
   },
   {
     id: "recon",
@@ -300,11 +305,18 @@ export const ROUTES: readonly Route[] = [
     ],
     hint: "Full pipeline: collect → merge → DNS → HTTP → Shodan/ipinfo intel → JS extraction. Each step has its own trace.",
     label: "recon/asset map",
+    chain: ["source", "api"],
   },
   {
     id: "cloud",
     skills: ["harness-cloud-enum"],
-    tools: ["cloudflare.cf_security"],
+    tools: [
+      "cloudflare.cf_security",
+      "cloudflare.cf_radar",
+      "cloudflare.cf_dns",
+      "cloudflare.cf_compute",
+      "cloudflare.cf_storage",
+    ],
     triggers: [
       "aws",
       "azure",
@@ -315,14 +327,27 @@ export const ROUTES: readonly Route[] = [
       "iam",
       "cloudflare",
       "worker",
+      "r2",
+      "d1",
+      "waf",
+      "tunnel",
+      "zero trust",
+      "trivy",
+      "container scan",
     ],
-    hint: "Read-only enumeration against the live account or collected evidence.",
+    hint: "Read-only enumeration. Cloudflare MCP for CF assets/WAF/DNS/Workers/R2. trivy for container/image scanning.",
     label: "cloud enum",
+    chain: ["container"],
   },
   {
     id: "binary",
     skills: ["harness-ghidra"],
-    tools: ["rea.open_binary", "ghidra.decompile_function"],
+    tools: [
+      "rea.open_binary",
+      "ghidra.decompile_function",
+      "craft-anything.core_target_open",
+      "craft-anything.core_investigation_show",
+    ],
     triggers: [
       "ghidra",
       "binary",
@@ -332,8 +357,11 @@ export const ROUTES: readonly Route[] = [
       "elf",
       "pe file",
       "reverse",
+      "electron",
+      "asar",
+      "node sea",
     ],
-    hint: "Report only functions, strings and xrefs the tool output shows.",
+    hint: "Report only functions, strings and xrefs the tool output shows. Use craft-anything for Electron/ASAR targets.",
     label: "binary/ghidra",
   },
   {
@@ -746,7 +774,13 @@ export function routeFor(text: string, limit = 1): Routing {
     const tools = route.tools.length
       ? ` Tools: ${route.tools.join(", ")}.`
       : "";
-    return `- ${route.label}: load ${skills}. ${route.hint}${tools}`;
+    const chainRoutes = (route.chain ?? [])
+      .map((id) => ROUTES.find((r) => r.id === id))
+      .filter(Boolean) as Route[];
+    const chain = chainRoutes.length
+      ? ` Next: ${chainRoutes.map((r) => r.label).join(" → ")}.`
+      : "";
+    return `- ${route.label}: load ${skills}. ${route.hint}${tools}${chain}`;
   });
   const block = [
     `${ROUTER_MARKER} One method covers this request. Call the skill tool with its id before you answer or run a command: the skill carries the procedure and the evidence format this ledger accepts.`,

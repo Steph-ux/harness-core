@@ -809,6 +809,21 @@ export default {
       } catch {
         // Journal write failure must not block lesson recording.
       }
+      for (const item of outcome.analysis.toolImprovements ?? []) {
+        try {
+          const slug = "tool-improve-" + item.lesson
+            .toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 60)
+            .replace(/-+$/, "");
+          knowledge.proposeKnowledge(scope, {
+            key: slug,
+            kind: "workflow",
+            content: item.lesson.slice(0, 2000),
+            evidence: item.evidence,
+          });
+        } catch {
+          // A rejected improvement is still in LEÇONS.md.
+        }
+      }
       if (outcome.skills && typeof ctx.skill?.reload === "function")
         await ctx.skill.reload();
       knowledge.recordReview({
