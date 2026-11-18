@@ -178,7 +178,7 @@ module.exports = async ({ assert, jiti }) => {
   const proposal = {
     action: "create",
     missionId: id,
-    title: "XSS reflected",
+    title: "Input anomaly in profile field",
     severity: "high",
     description: "Le parametre revient dans la reponse.",
     limitations: "Non teste sur les autres pages.",
