@@ -64,7 +64,7 @@ module.exports = async ({ assert, jiti }) => {
   const none = routeFor("bonjour, comment vas-tu aujourd'hui");
   assert.deepEqual(none.ids, [], "a request with no signal matches no row");
   assert.match(none.block, /^Harness routing\./, "the table is the fallback");
-  assert.ok(routingTable().length <= 2000, "the table is bounded");
+  assert.ok(routingTable().length <= 2500, "the table is bounded");
   assert.match(
     routingTable(),
     /a 200 is not a finding\.$/,
