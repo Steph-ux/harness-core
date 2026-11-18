@@ -1577,15 +1577,16 @@ export default {
     await ctx.tool.transform((editor: any) => {
       editor.add({
         name: "cyber_toolbox",
-        description: "Discover actual host/CLI/managed capabilities; knowledge-search reads the configured reference database without making findings; propose and validate scripts, activate instantly, and roll back. Native shell permissions still apply.",
+        description: "Discover actual host/CLI/managed capabilities; ensure installs missing tools automatically; knowledge-search reads the configured reference database without making findings; propose and validate scripts, activate instantly, and roll back. Native shell permissions still apply.",
         input: {
           type: "object",
           properties: {
-            action: { type: "string", enum: ["discover", "knowledge-search", "plan", "usage", "list", "propose", "validate", "activate", "promote", "rollback", "retire", "prune"] },
+            action: { type: "string", enum: ["discover", "knowledge-search", "plan", "ensure", "usage", "list", "propose", "validate", "activate", "promote", "rollback", "retire", "prune"] },
             query: { type: "string" },
             refresh: { type: "boolean" },
             global: { type: "boolean" },
             objectives: { type: "array", items: { type: "string" }, maxItems: 25 },
+            names: { type: "array", items: { type: "string" }, maxItems: 10 },
             offset: { type: "integer", minimum: 0 },
             limit: { type: "integer", minimum: 1, maximum: 40 },
             name: { type: "string" },
@@ -1642,6 +1643,27 @@ export default {
             const gaps = identifyToolGaps(input.objectives ?? [], inventory);
             // An explicit plan is a read: no extra audit row per query.
             return { content: JSON.stringify(gaps) };
+          }
+          if (action === "ensure") {
+            const { ensureMany } = await import(
+              path.join(coreRoot(), "src", "installable.ts")
+            );
+            const names: string[] = Array.isArray(input.names)
+              ? input.names.slice(0, 10).map(String)
+              : typeof input.name === "string" ? [input.name] : [];
+            if (!names.length) throw new Error("Provide name or names to ensure");
+            const results = ensureMany(names);
+            for (const r of results) {
+              knowledge.audit(scope, "tools.ensure", {
+                sessionID: context.sessionID,
+                name: r.name,
+                wasPresent: r.wasPresent,
+                installed: r.installed,
+                method: r.method,
+                error: r.error,
+              });
+            }
+            return { content: JSON.stringify(results) };
           }
           if (action === "list")
             return { content: JSON.stringify(toolRegistry.list(scope, true)) };
