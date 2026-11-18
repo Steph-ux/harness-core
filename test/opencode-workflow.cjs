@@ -629,6 +629,39 @@ module.exports = async ({ assert, jiti, skip }) => {
     );
     assert.match(changelog(), /Second lesson kept once/);
     assert.ok(!changelog().includes("Parser rejouable"));
+    const toolsDir = path.join(journal, "01-test");
+    fs.mkdirSync(toolsDir);
+    const actualTool = path.join(toolsDir, "fixture-check.cjs");
+    fs.writeFileSync(actualTool,
+      "#!/usr/bin/env node\n// Synthetic differential fixture checker\nconsole.log(process.argv[2] === 'allow' ? 'fixture accepted' : 'fixture rejected');\n",
+      { mode: 0o755 });
+    const discovered = JSON.parse((await call("cyber_toolbox", {
+      action: "discover", query: "fixture checker", refresh: true,
+    })).content);
+    assert.ok(discovered.tools.some((entry) => entry.command === actualTool),
+      "the fixture is discoverable through the public toolbox");
+    const { spawnSync } = require("node:child_process");
+    const positive = spawnSync(process.execPath, [actualTool, "allow"], { encoding: "utf8" });
+    const negative = spawnSync(process.execPath, [actualTool, "deny"], { encoding: "utf8" });
+    assert.equal(positive.status, 0);
+    assert.equal(negative.status, 0);
+    assert.match(positive.stdout, /fixture accepted/);
+    assert.match(negative.stdout, /fixture rejected/);
+    const positiveObs = obs("obs-fixture-accepted", positive.stdout);
+    const negativeObs = obs("obs-fixture-rejected", negative.stdout);
+    const realArtifact = artifact(actualTool, "script");
+    const recordedPass = JSON.parse((await call("cyber_capitalise", {
+      action: "record", missionId: m.id, outcome: "validated",
+      reason: "Synthetic differential checker validated",
+      artifactIds: [realArtifact.id],
+      tests: [
+        { observationId: positiveObs.id, contains: "fixture accepted", kind: "positive" },
+        { observationId: negativeObs.id, contains: "fixture rejected", kind: "negative" },
+      ],
+    })).content);
+    assert.equal(recordedPass.outcome, "validated");
+    assert.match(changelog(), /Synthetic differential checker validated/);
+    assert.match(lessons(), /Synthetic differential checker validated/);
     delete process.env.HARNESS_TOOL_HOME;
     fixture.ctx.permission.explicit = async () => "reject";
     await assert.rejects(

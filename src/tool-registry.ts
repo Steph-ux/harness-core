@@ -158,12 +158,15 @@ function terms(text: string): string[] {
 }
 function relevance(query: string, item: ToolCapability): number {
   if (!query.trim()) return 1;
-  const tokens = terms(query);
+  const normalized = query.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().replace(/\bsous[\s-]+domaines?\b|\bsubdomains?\b/g, "subdomain");
+  const tokens = terms(normalized);
   const title = terms(item.name);
   const description = terms(item.description);
   return tokens.reduce((score, word) => score +
     (title.includes(word) ? 5 : title.some((t) => t.startsWith(word)) ? 3 :
-      description.includes(word) ? 1 : 0), 0);
+      description.includes(word) ? 1 :
+      word === "subdomain" && description.some((t) => t.startsWith("transparen")) ? 1 : 0), 0);
 }
 function commandFor(item: ToolRevision): string {
   return LANG[item.language] + " " + JSON.stringify(item.file);

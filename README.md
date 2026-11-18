@@ -303,6 +303,13 @@ not add a native OpenCode tool per script.
   service and NSE script scanning) from `src/tool-catalog.ts`; an unknown one
   only says it is an executable. This is not proof of execution. Linked paths
   are followed when they resolve to a regular file.
+- `knowledge-search`: searches a SQLite reference index read-only, by exact
+  CVE, CWE, CAPEC or ATT&CK technique identifier, or by full-text terms.
+  Set `HARNESS_KNOWLEDGE_DB` to its file; otherwise it looks for
+  `memory_primary.sqlite` in `HARNESS_TOOL_HOME`. Results are bounded by
+  `limit` (1–40), and include the source path, key and an excerpt. Index
+  freshness and upstream provenance are not established; results are reference
+  material, not findings or proof that a component is affected.
 - `plan`: compares up to 25 objectives with the current inventory. A match only
   indicates a candidate tool, never a genuinely tested coverage.
 - `list`: returns the versions of the scope, with candidates and history.

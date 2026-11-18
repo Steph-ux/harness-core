@@ -92,6 +92,11 @@ module.exports = async ({ assert, jiti }) => {
           .tools.some((item) => item.name === "ct-union.py"),
         "a query matches the script header",
       );
+      assert.ok(
+        registry.discover(scope, "sous-domaines", [], 0, 15, true)
+          .tools.some((item) => item.name === "ct-union.py"),
+        "French plural subdomain queries match English script descriptions",
+      );
     } finally {
       if (originalCustom === undefined) delete process.env.HARNESS_TOOL_HOME;
       else process.env.HARNESS_TOOL_HOME = originalCustom;
@@ -293,6 +298,42 @@ module.exports = async ({ assert, jiti }) => {
       sessionID: "ses_toolbox", agent: "build", messageID: "msg_toolbox",
       id: "call_toolbox", signal: new AbortController().signal, progress: () => {},
     };
+    const savedKnowledge = process.env.HARNESS_KNOWLEDGE_DB;
+    const dbPath = path.join(base, "reference.sqlite");
+    const { DatabaseSync } = require("node:sqlite");
+    const reference = new DatabaseSync(dbPath);
+    reference.exec(`
+      CREATE TABLE docs(id INTEGER PRIMARY KEY, shelf TEXT, kind TEXT, key TEXT, owner TEXT, text TEXT);
+      CREATE VIRTUAL TABLE fts_cve USING fts5(text, content='');
+      CREATE VIRTUAL TABLE fts_catalog USING fts5(text, content='');
+      INSERT INTO docs VALUES(1,'cve','cve','CVE-2024-1234','','Synthetic web parsing flaw');
+      INSERT INTO docs VALUES(2,'catalog','cwe','CWE-79','','Synthetic web scripting weakness');
+      INSERT INTO fts_cve(rowid,text) VALUES(1,'Synthetic web parsing flaw');
+      INSERT INTO fts_catalog(rowid,text) VALUES(2,'Synthetic web scripting weakness');
+    `);
+    reference.close();
+    process.env.HARNESS_KNOWLEDGE_DB = dbPath;
+    try {
+      const exact = JSON.parse((await toolbox.execute({
+        action: "knowledge-search", query: "CVE-2024-1234",
+      }, context)).content);
+      assert.equal(exact.results[0].key, "CVE-2024-1234");
+      assert.match(exact.limitations, /not.*finding/i);
+      const text = JSON.parse((await toolbox.execute({
+        action: "knowledge-search", query: "web scripting",
+      }, context)).content);
+      assert.equal(text.results[0].key, "CWE-79");
+      const absent = JSON.parse((await toolbox.execute({
+        action: "knowledge-search", query: "nonexistentfixture",
+      }, context)).content);
+      assert.deepEqual(absent.results, []);
+      await assert.rejects(() => toolbox.execute({
+        action: "knowledge-search", query: "",
+      }, context), /query/i);
+    } finally {
+      if (savedKnowledge === undefined) delete process.env.HARNESS_KNOWLEDGE_DB;
+      else process.env.HARNESS_KNOWLEDGE_DB = savedKnowledge;
+    }
     const exposed = JSON.parse((await toolbox.execute({
       action: "discover", query: "fixture validator",
     }, context)).content);
