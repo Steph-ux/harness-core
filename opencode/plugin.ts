@@ -596,8 +596,12 @@ export default {
     const { operatorContext } = await import(
       path.join(coreRoot(), "src", "context.ts")
     );
-    const { applyLessonProposal, lessonPrompt, parseLessonProposal } =
-      await import(path.join(coreRoot(), "src", "lessons.ts"));
+    const {
+      applyLessonProposal,
+      lessonPrompt,
+      parseLessonProposal,
+      publishToolImprovements,
+    } = await import(path.join(coreRoot(), "src", "lessons.ts"));
     const { capsule, capsuleText, closingGate, GATE_MARKER } = await import(
       path.join(coreRoot(), "src", "capsule.ts")
     );
@@ -800,6 +804,11 @@ export default {
         scope,
         proposal,
       );
+      try {
+        publishToolImprovements(outcome.analysis, sessionID);
+      } catch {
+        // Journal write failure must not block lesson recording.
+      }
       if (outcome.skills && typeof ctx.skill?.reload === "function")
         await ctx.skill.reload();
       knowledge.recordReview({
@@ -1553,11 +1562,11 @@ export default {
     await ctx.tool.transform((editor: any) => {
       editor.add({
         name: "cyber_toolbox",
-        description: "Discover actual host/CLI/managed capabilities, propose scripts, validate using two observed tests, activate instantly, and roll back. Native shell permissions still apply.",
+        description: "Discover actual host/CLI/managed capabilities; knowledge-search reads the configured reference database without making findings; propose and validate scripts, activate instantly, and roll back. Native shell permissions still apply.",
         input: {
           type: "object",
           properties: {
-            action: { type: "string", enum: ["discover", "plan", "usage", "list", "propose", "validate", "activate", "promote", "rollback", "retire", "prune"] },
+            action: { type: "string", enum: ["discover", "knowledge-search", "plan", "usage", "list", "propose", "validate", "activate", "promote", "rollback", "retire", "prune"] },
             query: { type: "string" },
             refresh: { type: "boolean" },
             global: { type: "boolean" },
@@ -1607,6 +1616,10 @@ export default {
             return { content: JSON.stringify(toolRegistry.discover(
               scope, input.query ?? "", await hostTools(), input.offset, input.limit, input.refresh === true,
             )) };
+          if (action === "knowledge-search") {
+            const { searchReference } = await import(path.join(coreRoot(), "src", "reference-search.ts"));
+            return { content: JSON.stringify(searchReference(input.query, input.limit)) };
+          }
           if (action === "plan") {
             // A bounded top-level inventory can be insufficient: scan the complete
             // CLI list once and combine it with the full managed registry.
@@ -2073,6 +2086,7 @@ export default {
                 "finish",
                 "checkpoints",
                 "resume",
+                "retry",
                 "reopen-validation",
                 "close",
               ],
@@ -2240,6 +2254,10 @@ export default {
           if (input.action === "resume")
             return { content: JSON.stringify(platform.resume(scope, id)) };
           if (!input.node) throw new Error("the stage is required");
+          if (input.action === "retry")
+            return {
+              content: JSON.stringify(platform.retry(scope, id, input.node)),
+            };
           if (input.action === "claim") {
             if (!input.owner)
               throw new Error("the owner of the stage is required");
