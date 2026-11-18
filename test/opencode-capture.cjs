@@ -346,6 +346,83 @@ module.exports = async ({ assert, jiti, skip }) => {
     );
   }
 
+  // Browser capture: register an existing PNG file as evidence.
+  // Create a minimal valid PNG (1×1 white pixel) for testing.
+  const pngHeader = Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, // PNG signature
+    0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, // IHDR chunk
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, // 1×1
+    0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, // 8-bit RGB
+    0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, // IDAT
+    0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
+    0x00, 0x00, 0x02, 0x00, 0x01, 0xe2, 0x21, 0xbc,
+    0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, // IEND
+    0x44, 0xae, 0x42, 0x60, 0x82,
+  ]);
+  const testPng = path.join(workspace, "test-browser-capture.png");
+  fs.writeFileSync(testPng, pngHeader);
+  const browserShot = JSON.parse(
+    (
+      await call({
+        action: "browser",
+        file: testPng,
+        observationId: readObservation,
+        label: "browser-test",
+      })
+    ).content,
+  );
+  assert.equal(browserShot.kind, "browser-capture", "browser capture has the right kind");
+  assert.equal(browserShot.observationId, readObservation, "browser capture links to the observation");
+  assert.ok(browserShot.sha256 && browserShot.sha256.length === 64, "browser capture has a hash");
+  assert.ok(fs.existsSync(browserShot.path), "browser capture file exists on disk");
+  assert.ok(
+    browserShot.path.includes("captures"),
+    "browser capture lands in the captures directory",
+  );
+
+  // Browser capture rejects a non-PNG file.
+  const fakePng = path.join(workspace, "not-a-png.png");
+  fs.writeFileSync(fakePng, "this is not a PNG");
+  await assert.rejects(
+    () =>
+      call({
+        action: "browser",
+        file: fakePng,
+        observationId: readObservation,
+        label: "fake",
+      }),
+    /not a valid PNG/,
+    "browser capture rejects a non-PNG file",
+  );
+
+  // Browser capture requires an observation.
+  await assert.rejects(
+    () => call({ action: "browser", file: testPng }),
+    /observation/,
+    "browser capture requires an observation",
+  );
+
+  // Browser capture rejects a missing file.
+  await assert.rejects(
+    () =>
+      call({
+        action: "browser",
+        file: "/nonexistent/file.png",
+        observationId: readObservation,
+      }),
+    /does not exist/,
+    "browser capture rejects a missing file",
+  );
+
+  // The browser capture is in the audit log.
+  const store2 = new KnowledgeStore(path.join(state, "knowledge.sqlite"));
+  const audits2 = store2.audits(scope, "capture", 10);
+  assert.ok(
+    audits2.some((a) => a.detail.includes("browser-capture")),
+    "the browser capture is in the audit log",
+  );
+  store2.close();
+
   // The plugin goes away; the rendered images stay on disk.
   if (typeof unload === "function") unload();
   await unloadPlugins();

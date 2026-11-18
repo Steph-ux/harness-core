@@ -3107,9 +3107,9 @@ export default {
           properties: {
             action: {
               type: "string",
-              enum: ["windows", "shot", "evidence"],
+              enum: ["windows", "shot", "evidence", "browser"],
               description:
-                "List the windows of the display, capture one of them, or capture the terminal of the harness.",
+                "List the windows of the display, capture one of them, capture the terminal of the harness, or capture a browser page via CDP (no automation banner).",
             },
             processId: {
               type: "string",
@@ -3129,6 +3129,21 @@ export default {
             label: {
               type: "string",
               description: "A short label for the file, for action shot.",
+            },
+            url: {
+              type: "string",
+              description:
+                "URL substring to match the browser tab, for action browser. Without it, the first tab is captured.",
+            },
+            port: {
+              type: "number",
+              description:
+                "Chrome DevTools port, for action browser. Default 9222.",
+            },
+            file: {
+              type: "string",
+              description:
+                "Path to an existing screenshot PNG to register as evidence, for action browser. When set, no CDP call is made.",
             },
           },
           required: ["action"],
@@ -3199,6 +3214,53 @@ export default {
               observationId: input.observationId ?? "",
               path: dest,
               renderer,
+              width: image.readUInt32BE(16),
+              height: image.readUInt32BE(20),
+              bytes: image.length,
+              sha256: createHash("sha256").update(image).digest("hex"),
+              takenAt: new Date().toISOString(),
+            };
+            knowledge.audit(scope, "capture", link);
+            return { content: JSON.stringify(link) };
+          }
+          if (input.action === "browser") {
+            if (!input.observationId)
+              throw new Error("a browser capture needs the observation it attests");
+            knowledge.evidence(scope, [input.observationId]);
+            const name = captureName(
+              input.observationId,
+              `${input.label ?? "browser"}-${randomUUID().slice(0, 8)}`,
+            );
+            const root = captureRoot(scope);
+            const dest = captureDestination(root, name);
+            if (input.file) {
+              // Register an existing screenshot file as evidence.
+              const src = path.resolve(input.file);
+              if (!fs.existsSync(src))
+                throw new Error("the file does not exist: " + src);
+              const header = Buffer.alloc(8);
+              const fd = fs.openSync(src, "r");
+              fs.readSync(fd, header, 0, 8, 0);
+              fs.closeSync(fd);
+              if (header[0] !== 0x89 || header[1] !== 0x50 || header[2] !== 0x4e || header[3] !== 0x47)
+                throw new Error("the file is not a valid PNG");
+              fs.copyFileSync(src, dest);
+            } else {
+              // Take a screenshot via Chrome DevTools Protocol.
+              const cdpPort = String(input.port ?? 9222);
+              const script = path.join(coreRoot(), "scripts", "capture_browser.mjs");
+              const args = [script, dest, "--port", cdpPort];
+              if (input.url) args.push("--url", input.url);
+              runCommand("node", args, 20000);
+            }
+            if (!fs.existsSync(dest) || fs.statSync(dest).size < 32)
+              throw new Error("the browser capture is empty or failed");
+            const image = fs.readFileSync(dest);
+            const link = {
+              kind: "browser-capture",
+              observationId: input.observationId ?? "",
+              path: dest,
+              url: input.url ?? "",
               width: image.readUInt32BE(16),
               height: image.readUInt32BE(20),
               bytes: image.length,

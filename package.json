@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Host-neutral proof and discipline core: immutable observations, evidence-bound tasks, shared types.",
+  "bin": {
+    "harness": "./bin/harness.mjs"
+  },
   "exports": {
     ".": "./src/index.ts",
     "./util": "./src/util.ts",
