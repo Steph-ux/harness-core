@@ -2905,6 +2905,28 @@ export default {
             };
           if (input.action === "run") {
             const argv = commandArguments(input.argv);
+            // Auto-install: if the binary is absent and in the catalog, install it.
+            const binary = argv[0].includes("/") ? undefined : argv[0];
+            if (binary) {
+              const whichResult = spawnSync("which", [binary], {
+                timeout: 3000, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+              });
+              if (whichResult.status !== 0) {
+                const { ensure: ensureTool } = await import(
+                  path.join(coreRoot(), "src", "installable.ts")
+                );
+                const installResult = ensureTool(binary);
+                if (installResult.installed && !installResult.wasPresent) {
+                  knowledge.audit(scope, "tools.auto-installed", {
+                    sessionID: context.sessionID,
+                    name: binary,
+                    method: installResult.method,
+                  });
+                }
+                if (!installResult.installed && installResult.error)
+                  throw new Error(`${binary} is not installed and auto-install failed: ${installResult.error}`);
+              }
+            }
             const command = argv.map(quoteArgument).join(" ");
             const seconds = input.timeout ?? DEFAULT_DEADLINE_MS / 1000;
             if (
