@@ -8,6 +8,8 @@
  * chain risk.
  */
 import { spawnSync } from "node:child_process";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 export type InstallMethod =
   | "apt"
@@ -102,13 +104,45 @@ export function listInstallable(): InstallEntry[] {
   return [...CATALOG];
 }
 
+/**
+ * Whether a program can be found the way the operator's shell would find it.
+ *
+ * Shelling out to `which` is not portable: Windows has no `which`, and its
+ * `where.exe` refuses an absolute path. The lookup is therefore done here —
+ * an absolute path is checked as a file, a bare name is looked up in PATH with
+ * the platform's extensions — so `ensure` answers the same question everywhere.
+ */
+export function isPresent(name: string): boolean {
+  const extensions =
+    process.platform === "win32"
+      ? ["", ...(process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean)]
+      : [""];
+  const candidates = (base: string) =>
+    extensions.map((extension) =>
+      name.toLowerCase().endsWith(extension.toLowerCase())
+        ? base
+        : base + extension,
+    );
+  if (path.isAbsolute(name) || name.includes("/") || name.includes("\\"))
+    return candidates(name).some((candidate) => isFile(candidate));
+  return (process.env.PATH ?? "")
+    .split(path.delimiter)
+    .filter(Boolean)
+    .some((directory) =>
+      candidates(path.join(directory, name)).some((candidate) => isFile(candidate)),
+    );
+}
+
+function isFile(candidate: string): boolean {
+  try {
+    return fs.statSync(candidate).isFile();
+  } catch {
+    return false;
+  }
+}
+
 function which(name: string): boolean {
-  const result = spawnSync("which", [name], {
-    timeout: 5000,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-  });
-  return result.status === 0;
+  return isPresent(name);
 }
 
 function installCommand(entry: InstallEntry): { cmd: string; args: string[] } {

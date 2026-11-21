@@ -3209,13 +3209,12 @@ export default {
             // Auto-install: if the binary is absent and in the catalog, install it.
             const binary = argv[0].includes("/") ? undefined : argv[0];
             if (binary) {
-              const whichResult = spawnSync("which", [binary], {
-                timeout: 3000, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
-              });
-              if (whichResult.status !== 0) {
-                const { ensure: ensureTool } = await import(
-                  path.join(coreRoot(), "src", "installable.ts")
-                );
+              // The lookup is the core's, so it answers the same way on every
+              // platform (`which` does not exist on Windows).
+              const { ensure: ensureTool, isPresent } = await import(
+                path.join(coreRoot(), "src", "installable.ts")
+              );
+              if (!isPresent(binary)) {
                 const installResult = ensureTool(binary);
                 if (installResult.installed && !installResult.wasPresent) {
                   knowledge.audit(scope, "tools.auto-installed", {
