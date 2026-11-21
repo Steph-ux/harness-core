@@ -29,8 +29,12 @@ module.exports = async ({ assert, jiti }) => {
   // just checks `which` and returns wasPresent: true.
   // The tricky part: ensure() calls `which` on the name. We can test
   // with any tool known to be present.
-  const result = ensure("ls");
-  // "ls" is not in the catalog but which finds it, so wasPresent: true.
+  //
+  // "ls" is the POSIX shell builtin; Windows has no such entry on PATH, so
+  // the present tool is the one every Windows installation carries.
+  const presentTool = process.platform === "win32" ? "cmd" : "ls";
+  const result = ensure(presentTool);
+  // It is not in the catalog but which finds it, so wasPresent: true.
   assert.equal(result.wasPresent, true);
   assert.equal(result.installed, true);
 

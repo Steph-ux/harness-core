@@ -59,6 +59,13 @@ module.exports = async ({ assert, jiti, skip }) => {
     return fs.readFileSync(file, "utf8").replace(/\r\n/g, "\n");
   };
 
+  // The external catalogue is a separate pack. A host that has its own skills
+  // but none of the declared methods has not installed it: that is an absence,
+  // not a malformed procedure, and it is reported as such. A partial pack still
+  // fails, so a missing method is never hidden by the ones that are present.
+  if (EXTERNAL_METHODS.every((name) => read(name) === null))
+    skip("external harness method catalogue is not installed");
+
   for (const name of EXTERNAL_METHODS) {
     const body = read(name);
     assert.ok(body, `the declared method has a SKILL.md: ${name}`);

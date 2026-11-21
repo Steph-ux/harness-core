@@ -66,37 +66,51 @@ module.exports = async ({ assert, jiti }) => {
     process.env.HARNESS_TOOL_HOME = collection;
     try {
       const nested = registry.scan(true);
-      const union = nested.find((item) => item.name === "ct-union.py");
-      assert.ok(union, "a script one category down is a tool");
-      assert.match(
-        union.description,
-        /subdomain enumeration/,
-        "the script header is the description, not a generic label",
-      );
-      assert.equal(
-        union.command,
-        path.join(collection, "01-enumeration", "ct-union.py"),
-        "the command is the script, not the category",
-      );
-      assert.ok(
-        !nested.some((item) => item.name === "helper.py"),
-        "a library directory is not scanned",
-      );
-      assert.ok(
-        !nested.some((item) => item.name === "path-hidden.py"),
-        "PATH is not descended",
-      );
-      assert.ok(
-        registry
-          .discover(scope, "subdomain enumeration", [], 0, 15, true)
-          .tools.some((item) => item.name === "ct-union.py"),
-        "a query matches the script header",
-      );
-      assert.ok(
-        registry.discover(scope, "sous-domaines", [], 0, 15, true)
-          .tools.some((item) => item.name === "ct-union.py"),
-        "French plural subdomain queries match English script descriptions",
-      );
+      if (process.platform === "win32") {
+        // Windows carries no executable bit: the extension decides, so a .py
+        // staged in a collection is not a tool there (src/tool-registry.ts).
+        // The library directory and PATH are still not descended.
+        assert.ok(
+          !nested.some((item) => item.name === "ct-union.py"),
+          "a .py script is not a tool when the extension decides",
+        );
+        assert.ok(
+          !nested.some((item) => item.name === "path-hidden.py"),
+          "PATH is not descended",
+        );
+      } else {
+        const union = nested.find((item) => item.name === "ct-union.py");
+        assert.ok(union, "a script one category down is a tool");
+        assert.match(
+          union.description,
+          /subdomain enumeration/,
+          "the script header is the description, not a generic label",
+        );
+        assert.equal(
+          union.command,
+          path.join(collection, "01-enumeration", "ct-union.py"),
+          "the command is the script, not the category",
+        );
+        assert.ok(
+          !nested.some((item) => item.name === "helper.py"),
+          "a library directory is not scanned",
+        );
+        assert.ok(
+          !nested.some((item) => item.name === "path-hidden.py"),
+          "PATH is not descended",
+        );
+        assert.ok(
+          registry
+            .discover(scope, "subdomain enumeration", [], 0, 15, true)
+            .tools.some((item) => item.name === "ct-union.py"),
+          "a query matches the script header",
+        );
+        assert.ok(
+          registry.discover(scope, "sous-domaines", [], 0, 15, true)
+            .tools.some((item) => item.name === "ct-union.py"),
+          "French plural subdomain queries match English script descriptions",
+        );
+      }
     } finally {
       if (originalCustom === undefined) delete process.env.HARNESS_TOOL_HOME;
       else process.env.HARNESS_TOOL_HOME = originalCustom;

@@ -70,9 +70,20 @@ module.exports = async ({ assert, jiti, modules, skip }) => {
       /approve this transition once/,
     );
     await assert.rejects(() => call({ action: "unknown" }), /Invalid process action/);
-    await assert.rejects(() => call({ action: "run", argv: ["true"], timeout: 601 }), /Invalid timeout/);
+    // The command must resolve on the platform before the deadline is checked,
+    // so this uses the running interpreter rather than a POSIX builtin.
+    await assert.rejects(
+      () => call({ action: "run", argv: [process.execPath], timeout: 601 }),
+      /Invalid timeout/,
+    );
     fixture.ctx.permission.assert = async () => { throw new Error("denied"); };
-    await assert.rejects(() => call({ action: "run", argv: ["touch", "forbidden"] }), /denied/);
+    await assert.rejects(
+      () => call({
+        action: "run",
+        argv: [process.execPath, "-e", "require('node:fs').writeFileSync('forbidden','x')"],
+      }),
+      /denied/,
+    );
     assert.equal(fs.existsSync(path.join(workspace, "forbidden")), false);
     fixture.ctx.permission.assert = async () => {};
     const moved = path.join(workspace, "moved");
