@@ -441,22 +441,39 @@ export function directives(state: InvestigationState): Directive[] {
   }
 
   // Premature conclusion guard
+  const pct = addressedPct(cov);
   if (
     cov.total > 0 &&
-    cov.tested < cov.total &&
     cov.untested > 0 &&
-    state.completedWithEvidence > 0
+    state.completedWithEvidence > 0 &&
+    pct !== null &&
+    pct < CONCLUSION_THRESHOLD
   ) {
-    const pct = Math.round((cov.tested / cov.total) * 100);
-    if (pct < 60) {
-      result.push({
-        priority: "mandatory",
-        text: `PREMATURE CONCLUSION GUARD: Coverage is only ${pct}%. Do not declare findings or write a report until at least 60% of surfaces are tested or explicitly blocked with a reason.`,
-      });
-    }
+    result.push({
+      priority: "mandatory",
+      text: `PREMATURE CONCLUSION GUARD: Coverage is only ${pct}%. Do not declare findings or write a report until at least ${CONCLUSION_THRESHOLD}% of surfaces are tested or explicitly blocked with a reason.`,
+    });
   }
 
   return result;
+}
+
+/** The share of surfaces addressed: tested, or blocked with a reason. */
+export const CONCLUSION_THRESHOLD = 60;
+
+/**
+ * Addressed coverage, or null when no surface was declared.
+ *
+ * A surface blocked with a reason is addressed: the model looked at it and
+ * recorded why it cannot be tested. Only an untouched surface is a gap.
+ */
+export function addressedPct(cov: {
+  total: number;
+  tested: number;
+  blocked: number;
+}): number | null {
+  if (cov.total === 0) return null;
+  return Math.round(((cov.tested + cov.blocked) / cov.total) * 100);
 }
 
 /**

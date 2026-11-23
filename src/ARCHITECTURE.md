@@ -29,7 +29,7 @@ database, so a test can hand it a stub and a host can hand it the real store.
 | `store.ts` | An observation is written once and never edited; a finding cites only evidence from its own scope; operator rules override inferred knowledge |
 | `platform-store.ts` | A mission takes its stages in order; a scope is approved before work is dispatched; a finding is verified by an observation that is not its own evidence, and its negative control observes something else; entities and relations form the scope-local pivot graph |
 | `tasks.ts` | Mutations are locked; `complete` takes evidence ids resolved by the host; `block` requires a reason; the tree nests to a bounded depth, a branch closes only after its sub-steps, and the tree exports a coverage map |
-| `investigation.ts` | The signal functions are pure and read-only; a hypothesis confirms only against a successful observation and a refuted one is closed; a surface is tested only with evidence; the host assembles the state each turn and injects mandatory directives on a loop, stagnation, stale hypotheses or a conclusion under 60% coverage — silence while the work progresses |
+| `investigation.ts` | The signal functions are pure and read-only; a hypothesis confirms only against a successful observation and a refuted one is closed; a surface is tested only with evidence; addressed coverage counts tested plus blocked-with-reason; the host injects mandatory directives on a loop, stagnation, stale hypotheses or a conclusion under 60% coverage, and `closingGate` turns the same signals into hard blockers — silence while the work progresses |
 | `capsule.ts` | The returning session gets the exact state: open steps, blocked steps with reasons, the mission stage, pending approvals, commands the harness still owns. `closingGate` answers "are we done?" from that state alone |
 | `skills.ts` | A method becomes active only with support from two sessions and confidence ≥ 0.75; a global method is promotion-only, evidence-free, identifier-free, and visible from every project (project shadows global) |
 | `routing.ts` | One route per request, weighted triggers, an anti-noise guard (a single hit on a long text is not a route), and the declared method catalogue |
@@ -84,6 +84,12 @@ is the arbiter that reads the state and tells the model so.
   block after the closing gate. Mandatory directives fire on a tool loop, repeated
   failure, no progress, stale hypotheses, or a conclusion under 60% coverage. The
   block is empty while the work progresses, so a healthy session is never nagged.
+- The same signals are hard blockers, not only advice: the capsule carries an
+  `investigation` summary and `closingGate` refuses a conclusion while a declared
+  surface is untouched, a hypothesis is stale, or addressed coverage is under the
+  threshold. A surface blocked with a reason counts as addressed; a closed
+  engagement owes none of this. An individual finding stays free — the gate is on
+  concluding, not on recording one claim.
 - `cyber_investigation` is the tool the model uses to declare hypotheses and
   coverage and to read the directives. It is bookkeeping: its own calls do not
   count as operational proof (`OWN_TOOL`).

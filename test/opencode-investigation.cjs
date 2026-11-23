@@ -23,7 +23,10 @@ module.exports = async ({ assert, jiti }) => {
     INVESTIGATION_MARKER,
     InvestigationStore,
     assembleInvestigation,
+    addressedPct,
+    CONCLUSION_THRESHOLD,
   } = inv;
+  const { closingGate } = jiti(path.join(CORE, "src", "capsule.ts"));
 
   // --- HypothesisTracker ---------------------------------------------------
 
@@ -414,6 +417,88 @@ module.exports = async ({ assert, jiti }) => {
   assert.ok(
     !mature.some((d) => d.text.includes("PREMATURE CONCLUSION")),
     "above 60% coverage the conclusion guard stays silent",
+  );
+
+  // --- addressedPct: a blocked surface is addressed ------------------------
+
+  assert.equal(addressedPct({ total: 0, tested: 0, blocked: 0 }), null, "no surface means no percentage");
+  assert.equal(addressedPct({ total: 10, tested: 3, blocked: 4 }), 70, "tested plus blocked is addressed");
+  assert.equal(addressedPct({ total: 10, tested: 0, blocked: 10 }), 100, "all blocked with a reason is fully addressed");
+  assert.equal(CONCLUSION_THRESHOLD, 60, "the conclusion threshold is 60%");
+
+  // Blocked-with-reason surfaces lift the guard even when few are tested.
+  const blockedAddressed = directives({
+    hypotheses: [],
+    stagnation: [],
+    coverage: mkCov({
+      total: 10,
+      tested: 3,
+      blocked: 4,
+      untested: 3,
+      surfaces: Array.from({ length: 10 }, (_, i) => ({
+        id: `s${i}`,
+        label: `S${i}`,
+        state: i < 3 ? "tested" : i < 7 ? "blocked" : "untested",
+        evidence: i < 3 ? ["o1"] : [],
+        ...(i >= 3 && i < 7 ? { reason: "out of scope" } : {}),
+      })),
+    }),
+    completedWithEvidence: 2,
+    observationCount: 20,
+  });
+  assert.ok(
+    !blockedAddressed.some((d) => d.text.includes("PREMATURE CONCLUSION")),
+    "70% addressed (tested+blocked) does not trigger the premature guard",
+  );
+
+  // --- closingGate: hard blockers from the investigation -------------------
+
+  const mkCapsule = (investigation, mission) => ({
+    scope: "project-test",
+    sessionID: "ses_test",
+    tasks: [],
+    open: 0,
+    blocked: 0,
+    observations: [],
+    ...(mission ? { mission } : {}),
+    ...(investigation ? { investigation } : {}),
+  });
+
+  // Untouched declared surfaces block a conclusion.
+  const untestedGate = closingGate(
+    mkCapsule({ untested: 3, staleHypotheses: 0, coveragePct: 40 }),
+  );
+  assert.match(untestedGate, /3 declared surface\(s\) never tested nor blocked/, "untested surfaces block the gate");
+  assert.match(untestedGate, /under the 60% conclusion threshold/, "low coverage blocks the gate");
+
+  // A stale hypothesis blocks a conclusion.
+  const staleGate = closingGate(
+    mkCapsule({ untested: 0, staleHypotheses: 2, coveragePct: 100 }),
+  );
+  assert.match(staleGate, /2 hypothesis\(es\) left stale/, "stale hypotheses block the gate");
+
+  // Fully addressed coverage with no stale hypothesis: the gate is silent.
+  const resolvedGate = closingGate(
+    mkCapsule({ untested: 0, staleHypotheses: 0, coveragePct: 100 }),
+  );
+  assert.equal(resolvedGate, "", "a fully addressed investigation does not block the gate");
+
+  // Nothing declared: no coverage blocker (cannot force declaration here).
+  const noneGate = closingGate(
+    mkCapsule({ untested: 0, staleHypotheses: 0, coveragePct: null }),
+  );
+  assert.equal(noneGate, "", "no declared surface means no coverage blocker");
+
+  // A closed engagement is over by decision: it owes no investigation block.
+  const closedGate = closingGate(
+    mkCapsule(
+      { untested: 5, staleHypotheses: 3, coveragePct: 10 },
+      { id: "m1", title: "t", boundaries: "b", state: "CLOSED", stages: [] },
+    ),
+  );
+  assert.ok(
+    !/declared surface|left stale|conclusion threshold/.test(closedGate),
+    "a closed engagement owes no investigation blocker",
   );
 
   // --- investigationBlock --------------------------------------------------

@@ -608,6 +608,7 @@ export default {
     const {
       InvestigationStore,
       assembleInvestigation,
+      addressedPct,
       directives,
       investigationBlock,
       INVESTIGATION_MARKER,
@@ -1231,7 +1232,31 @@ export default {
         // session finds the exact state instead of a narration about it.
         const proofSessionID = ensureSession(event.sessionID, scope);
         const mission = platform.active(scope);
+        // The investigation arbiter reads the state once per turn. The summary
+        // gates the conclusion; the assembled state drives the injected block.
+        // A read failure here must never hold the turn.
+        const invNowMs = Date.now();
+        let invState: any;
+        let invSummary: any;
+        try {
+          investigation.tick(scope, invNowMs);
+          invState = assembleInvestigation({
+            observations: knowledge.observationsForSession(proofSessionID, scope, 30),
+            tasks: taskStore.list(scope),
+            hypotheses: investigation.hypotheses(scope),
+            coverage: investigation.coverageSummary(scope),
+            nowMs: invNowMs,
+          });
+          invSummary = {
+            untested: invState.coverage.untested,
+            staleHypotheses: invState.hypotheses.filter((h: any) => h.state === "stale").length,
+            coveragePct: addressedPct(invState.coverage),
+          };
+        } catch {
+          /* The arbiter reads; a read failure is not a reason to stop the turn. */
+        }
         const state = capsule(taskStore, knowledge, scope, proofSessionID, {
+          investigation: invSummary,
           mission: mission
             ? {
                 id: mission.id,
@@ -1415,21 +1440,11 @@ export default {
           });
         }
 
-        // The investigation arbiter. It reads the observation stream and the
-        // declared hypotheses/coverage, and tells the model when it is looping,
-        // leaving surfaces untested, or concluding too early. It stays silent
-        // while the work is progressing. It must never hold a turn.
+        // The investigation arbiter's injected block, from the state read above.
+        // It tells the model when it is looping, leaving surfaces untested, or
+        // concluding too early, and stays silent while the work progresses.
         try {
-          const nowMs = Date.now();
-          investigation.tick(scope, nowMs);
-          const invState = assembleInvestigation({
-            observations: knowledge.observationsForSession(proofSessionID, scope, 30),
-            tasks: taskStore.list(scope),
-            hypotheses: investigation.hypotheses(scope),
-            coverage: investigation.coverageSummary(scope),
-            nowMs,
-          });
-          const invDirectives = directives(invState);
+          const invDirectives = invState ? directives(invState) : [];
           const invBlock = investigationBlock(invDirectives);
           if (
             invBlock &&

@@ -12,6 +12,7 @@
  */
 import type { KnowledgeStore } from "./store";
 import type { Task, TaskStore } from "./tasks";
+import { CONCLUSION_THRESHOLD } from "./investigation";
 import { json } from "./util";
 
 export type CapsuleTaskStatus =
@@ -68,6 +69,15 @@ export interface Capsule {
   processes?: { id: string; command: string; status: string }[];
   /** What was read and found, that a later session may need. */
   references?: { kind: string; id: string; hash: string }[];
+  /** The investigation arbiter's reading of the declared work. */
+  investigation?: {
+    /** Surfaces declared but never tested nor blocked. */
+    untested: number;
+    /** Hypotheses left untouched past the stale window. */
+    staleHypotheses: number;
+    /** Addressed coverage (tested + blocked), or null when nothing declared. */
+    coveragePct: number | null;
+  };
 }
 
 const MAX_TITLE = 200;
@@ -168,6 +178,7 @@ export function capsule(
     approvals?: Capsule["approvals"];
     processes?: Capsule["processes"];
     references?: Capsule["references"];
+    investigation?: Capsule["investigation"];
   } = {},
 ): Capsule {
   const wanted = [
@@ -249,6 +260,7 @@ export function capsule(
     ...(options.approvals?.length ? { approvals: options.approvals } : {}),
     ...(options.processes?.length ? { processes: options.processes } : {}),
     ...(options.references?.length ? { references: options.references } : {}),
+    ...(options.investigation ? { investigation: options.investigation } : {}),
   };
 }
 
@@ -334,6 +346,21 @@ export function closingGate(value: Capsule): string {
     blockers.push(
       `engagement ${mission.id} has no recorded capitalization`,
     );
+  // The investigation arbiter blocks a conclusion the same way an open stage
+  // does: a declared surface never touched, a hypothesis left stale, or
+  // coverage under the threshold is work still standing. A closed engagement
+  // is over by decision, so it owes none of this.
+  const inv = value.investigation;
+  if (inv && (!mission || mission.state !== "CLOSED")) {
+    if (inv.untested > 0)
+      blockers.push(`${inv.untested} declared surface(s) never tested nor blocked`);
+    if (inv.staleHypotheses > 0)
+      blockers.push(`${inv.staleHypotheses} hypothesis(es) left stale`);
+    if (inv.coveragePct !== null && inv.coveragePct < CONCLUSION_THRESHOLD)
+      blockers.push(
+        `investigation coverage is ${inv.coveragePct}%, under the ${CONCLUSION_THRESHOLD}% conclusion threshold`,
+      );
+  }
   if (!blockers.length) return "";
   return [
     `${GATE_MARKER} The work is not finished:`,
