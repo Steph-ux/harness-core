@@ -440,6 +440,64 @@ export function directives(state: InvestigationState): Directive[] {
     }
   }
 
+  // Deepening discipline — a confirmed finding is a lead, not a conclusion.
+  // If the model confirmed a hypothesis but has no active follow-up, push it
+  // to explore the adjacent attack surface that the finding opens.
+  const confirmedH = state.hypotheses.filter((h) => h.state === "confirmed");
+  if (confirmedH.length > 0 && activeH.length === 0 && cov.untested > 0) {
+    const latest = confirmedH[confirmedH.length - 1];
+    const paths = escalationFor(latest.text);
+    const specific = paths
+      ? ` Escalation paths for this type: ${paths.slice(0, 3).join("; ")}.`
+      : "";
+    result.push({
+      priority: "recommended",
+      text: `DEEPEN: ${confirmedH.length} confirmed finding(s) but no active hypothesis.${specific} A confirmed vulnerability opens adjacent surfaces: escalation, lateral (same flaw on other endpoints), and chaining (combine with another finding). Formulate a deepening hypothesis.`,
+    });
+  }
+
+  // Cross-referencing: when multiple findings are confirmed, the model should
+  // look for chains, not just collect isolated bugs.
+  if (confirmedH.length >= 2 && activeH.length === 0) {
+    result.push({
+      priority: "recommended",
+      text: `CROSS-REFERENCE: ${confirmedH.length} confirmed findings. Look for attack chains: can finding A enable or amplify finding B? Document any chain as a new hypothesis.`,
+    });
+  }
+
+  // Shallow testing guard: a surface tested with a single observation and no
+  // deepening hypothesis is likely superficial. Only fire when there's room
+  // to deepen (other surfaces are covered, so this isn't a breadth problem).
+  if (cov.total > 0 && cov.tested > 0 && cov.untested === 0 && activeH.length === 0) {
+    const shallow = cov.surfaces.filter(
+      (s) => s.state === "tested" && s.evidence.length === 1,
+    );
+    if (shallow.length > 0 && shallow.length >= cov.tested / 2) {
+      result.push({
+        priority: "recommended",
+        text: `SHALLOW TESTING: ${shallow.length} surface(s) tested with a single observation each (${shallow.slice(0, 3).map((s) => s.label).join(", ")}). Depth matters: a surface tested once may hide subtler vulnerabilities. Pick the highest-value one and test it with a different technique.`,
+      });
+    }
+  }
+
+  // Data flow analysis nudge: if the model is making HTTP requests but has
+  // not recorded any hypothesis about parameter→sink flows, it may be testing
+  // blindly. This is a heuristic: the model should trace inputs, not just
+  // throw payloads.
+  const httpTools = ["curl", "httpx", "wget", "fetch", "burp", "ffuf", "gobuster", "nuclei", "sqlmap", "wfuzz", "feroxbuster"];
+  const httpObs = state.stagnation.length === 0 && state.observationCount > 8;
+  if (httpObs && activeH.length === 0 && confirmedH.length === 0 && cov.untested > 0) {
+    const hasFlowHypothesis = state.hypotheses.some((h) =>
+      /sink|source|parameter|flow|taint|inject|input.*reach/i.test(h.text),
+    );
+    if (!hasFlowHypothesis) {
+      result.push({
+        priority: "recommended",
+        text: "DATA FLOW: Multiple observations but no hypothesis about input→sink flows. Before throwing payloads, map which parameters reach which sinks (SQL, shell, template, file, reflection). A flow hypothesis guides targeted testing.",
+      });
+    }
+  }
+
   // Premature conclusion guard
   const pct = addressedPct(cov);
   if (
@@ -498,6 +556,83 @@ export function investigationBlock(ds: readonly Directive[]): string {
     for (const d of recommended) lines.push(`[RECOMMENDED] ${d.text}`);
   }
   return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Escalation knowledge — what a confirmed finding opens
+// ---------------------------------------------------------------------------
+
+/** When a hypothesis is confirmed, the finding type hints at what to try next. */
+const ESCALATION_PATHS: Record<string, string[]> = {
+  sqli: [
+    "file read (LOAD_FILE, INTO OUTFILE)",
+    "RCE via stacked queries or UDF",
+    "data exfiltration (dump credentials, PII)",
+    "lateral: same parameter on other endpoints",
+  ],
+  xss: [
+    "session hijacking (steal httpOnly cookie via DOM clobbering or CSP bypass)",
+    "account takeover via stored XSS in admin panel",
+    "chaining with CSRF for state-changing actions",
+    "DOM sink analysis for client-side prototype pollution",
+  ],
+  ssrf: [
+    "cloud metadata (169.254.169.254, metadata.google.internal)",
+    "internal port scan via response timing",
+    "file read via file:// protocol",
+    "chaining with deserialization on internal services",
+  ],
+  idor: [
+    "privilege escalation (access admin objects)",
+    "mass data harvesting (enumerate all IDs)",
+    "lateral: same pattern on other object types",
+    "chaining with information disclosure for targeted attacks",
+  ],
+  auth: [
+    "token forging (JWT none/weak secret, session fixation)",
+    "privilege escalation via role parameter tampering",
+    "account takeover via password reset flow",
+    "lateral: same auth flaw on API vs web vs mobile",
+  ],
+  rce: [
+    "persistence (cron, systemd, registry)",
+    "lateral movement (pivot to internal hosts)",
+    "data exfiltration (sensitive files, credentials)",
+    "container/cloud escape if sandboxed",
+  ],
+  lfi: [
+    "RCE via log poisoning or PHP wrappers",
+    "source code disclosure for further vulns",
+    "credential harvesting (/etc/shadow, .env, config files)",
+    "chaining with SSRF for internal file read",
+  ],
+  deserialization: [
+    "RCE via gadget chain",
+    "DoS via resource exhaustion",
+    "lateral: same library on other endpoints",
+    "chaining with SSRF to reach internal deserializers",
+  ],
+};
+
+/**
+ * Match a confirmed hypothesis text to known escalation paths.
+ *
+ * The match is by keyword in the hypothesis text, not by a formal category.
+ * A miss means no specific guidance — the generic deepen directive still fires.
+ */
+function escalationFor(hypothesisText: string): string[] | null {
+  const lower = hypothesisText.toLowerCase();
+  for (const [key, paths] of Object.entries(ESCALATION_PATHS)) {
+    if (lower.includes(key)) return paths;
+  }
+  if (lower.includes("injection") && lower.includes("sql")) return ESCALATION_PATHS.sqli;
+  if (lower.includes("redirect") || lower.includes("ssrf")) return ESCALATION_PATHS.ssrf;
+  if (lower.includes("file") && lower.includes("include")) return ESCALATION_PATHS.lfi;
+  if (lower.includes("remote code") || lower.includes("command injection")) return ESCALATION_PATHS.rce;
+  if (lower.includes("deseriali")) return ESCALATION_PATHS.deserialization;
+  if (lower.includes("access control") || lower.includes("authorization")) return ESCALATION_PATHS.idor;
+  if (lower.includes("authentication") || lower.includes("login") || lower.includes("bypass")) return ESCALATION_PATHS.auth;
+  return null;
 }
 
 export const INVESTIGATION_MARKER = "Investigation directives.";

@@ -421,6 +421,227 @@ module.exports = async ({ assert, jiti }) => {
     "above 60% coverage the conclusion guard stays silent",
   );
 
+  // --- Deepening directives -------------------------------------------------
+
+  // Confirmed findings with no active follow-up → deepen.
+  const deepenD = directives({
+    hypotheses: [
+      mkH("H1", "confirmed", { evidence: ["obs-1"] }),
+    ],
+    stagnation: [],
+    coverage: mkCov({
+      total: 5,
+      tested: 2,
+      untested: 3,
+      surfaces: Array.from({ length: 5 }, (_, i) => ({
+        id: `s${i}`, label: `S${i}`,
+        state: i < 2 ? "tested" : "untested",
+        evidence: i < 2 ? ["o1"] : [],
+      })),
+    }),
+    completedWithEvidence: 1,
+    observationCount: 10,
+  });
+  assert.ok(
+    deepenD.some((d) => d.text.includes("DEEPEN") && d.text.includes("escalation")),
+    "a confirmed finding with no active hypothesis triggers deepening",
+  );
+
+  // Escalation paths: a confirmed SQLi hypothesis gets specific paths.
+  const sqliDeepen = directives({
+    hypotheses: [
+      mkH("H1", "confirmed", { text: "SQLi on /api/login", evidence: ["obs-1"] }),
+    ],
+    stagnation: [],
+    coverage: mkCov({
+      total: 5, tested: 2, untested: 3,
+      surfaces: Array.from({ length: 5 }, (_, i) => ({
+        id: `s${i}`, label: `S${i}`,
+        state: i < 2 ? "tested" : "untested",
+        evidence: i < 2 ? ["o1"] : [],
+      })),
+    }),
+    completedWithEvidence: 1,
+    observationCount: 10,
+  });
+  assert.ok(
+    sqliDeepen.some((d) => d.text.includes("DEEPEN") && d.text.includes("file read")),
+    "a confirmed SQLi gets specific escalation paths (file read)",
+  );
+
+  // XSS escalation paths.
+  const xssDeepen = directives({
+    hypotheses: [
+      mkH("H1", "confirmed", { text: "Reflected XSS on search param", evidence: ["obs-1"] }),
+    ],
+    stagnation: [],
+    coverage: mkCov({
+      total: 5, tested: 2, untested: 3,
+      surfaces: Array.from({ length: 5 }, (_, i) => ({
+        id: `s${i}`, label: `S${i}`,
+        state: i < 2 ? "tested" : "untested",
+        evidence: i < 2 ? ["o1"] : [],
+      })),
+    }),
+    completedWithEvidence: 1,
+    observationCount: 10,
+  });
+  assert.ok(
+    xssDeepen.some((d) => d.text.includes("session hijacking")),
+    "a confirmed XSS gets session hijacking as an escalation path",
+  );
+
+  // Unknown type: generic deepen without specific paths.
+  const unknownDeepen = directives({
+    hypotheses: [
+      mkH("H1", "confirmed", { text: "Misconfigured CORS headers", evidence: ["obs-1"] }),
+    ],
+    stagnation: [],
+    coverage: mkCov({
+      total: 5, tested: 2, untested: 3,
+      surfaces: Array.from({ length: 5 }, (_, i) => ({
+        id: `s${i}`, label: `S${i}`,
+        state: i < 2 ? "tested" : "untested",
+        evidence: i < 2 ? ["o1"] : [],
+      })),
+    }),
+    completedWithEvidence: 1,
+    observationCount: 10,
+  });
+  const unknownText = unknownDeepen.find((d) => d.text.includes("DEEPEN"))?.text ?? "";
+  assert.ok(unknownText.includes("DEEPEN"), "unknown type still triggers deepen");
+  assert.ok(
+    !unknownText.includes("file read") && !unknownText.includes("session hijacking"),
+    "unknown type does not get specific escalation paths",
+  );
+
+  // Two confirmed findings with no active → cross-reference.
+  const crossD = directives({
+    hypotheses: [
+      mkH("H1", "confirmed", { evidence: ["obs-1"] }),
+      mkH("H2", "confirmed", { evidence: ["obs-2"] }),
+    ],
+    stagnation: [],
+    coverage: mkCov({
+      total: 5,
+      tested: 3,
+      untested: 2,
+      surfaces: Array.from({ length: 5 }, (_, i) => ({
+        id: `s${i}`, label: `S${i}`,
+        state: i < 3 ? "tested" : "untested",
+        evidence: i < 3 ? ["o1"] : [],
+      })),
+    }),
+    completedWithEvidence: 2,
+    observationCount: 15,
+  });
+  assert.ok(
+    crossD.some((d) => d.text.includes("CROSS-REFERENCE")),
+    "two confirmed findings trigger a cross-reference directive",
+  );
+
+  // An active follow-up hypothesis silences the deepen/cross directives.
+  const noDeepen = directives({
+    hypotheses: [
+      mkH("H1", "confirmed", { evidence: ["obs-1"] }),
+      mkH("H2", "testing"),
+    ],
+    stagnation: [],
+    coverage: mkCov({ total: 5, tested: 3, untested: 2 }),
+    completedWithEvidence: 2,
+    observationCount: 15,
+  });
+  assert.ok(
+    !noDeepen.some((d) => d.text.includes("DEEPEN")),
+    "an active hypothesis silences the deepen directive",
+  );
+
+  // Shallow testing: all surfaces tested but most with 1 observation.
+  const shallowD = directives({
+    hypotheses: [],
+    stagnation: [],
+    coverage: mkCov({
+      total: 4,
+      tested: 4,
+      untested: 0,
+      surfaces: [
+        { id: "a", label: "Auth", state: "tested", evidence: ["o1"] },
+        { id: "b", label: "SQLi", state: "tested", evidence: ["o1"] },
+        { id: "c", label: "XSS", state: "tested", evidence: ["o1"] },
+        { id: "d", label: "SSRF", state: "tested", evidence: ["o1", "o2", "o3"] },
+      ],
+    }),
+    completedWithEvidence: 4,
+    observationCount: 20,
+  });
+  assert.ok(
+    shallowD.some((d) => d.text.includes("SHALLOW TESTING")),
+    "surfaces tested with a single observation trigger the shallow guard",
+  );
+
+  // Deep testing: surfaces with multiple observations → no shallow guard.
+  const deepTestD = directives({
+    hypotheses: [],
+    stagnation: [],
+    coverage: mkCov({
+      total: 3,
+      tested: 3,
+      untested: 0,
+      surfaces: [
+        { id: "a", label: "Auth", state: "tested", evidence: ["o1", "o2"] },
+        { id: "b", label: "SQLi", state: "tested", evidence: ["o1", "o2"] },
+        { id: "c", label: "XSS", state: "tested", evidence: ["o1", "o2"] },
+      ],
+    }),
+    completedWithEvidence: 3,
+    observationCount: 20,
+  });
+  assert.ok(
+    !deepTestD.some((d) => d.text.includes("SHALLOW TESTING")),
+    "surfaces tested with multiple observations do not trigger the shallow guard",
+  );
+
+  // --- Data flow analysis nudge --------------------------------------------
+
+  const flowD = directives({
+    hypotheses: [],
+    stagnation: [],
+    coverage: mkCov({
+      total: 5, tested: 1, untested: 4,
+      surfaces: Array.from({ length: 5 }, (_, i) => ({
+        id: `s${i}`, label: `S${i}`,
+        state: i < 1 ? "tested" : "untested",
+        evidence: i < 1 ? ["o1"] : [],
+      })),
+    }),
+    completedWithEvidence: 0,
+    observationCount: 12,
+  });
+  assert.ok(
+    flowD.some((d) => d.text.includes("DATA FLOW")),
+    "many observations with no flow hypothesis triggers the data flow nudge",
+  );
+
+  // A hypothesis mentioning 'sink' or 'parameter' silences the nudge.
+  const flowSilent = directives({
+    hypotheses: [mkH("H1", "testing", { text: "parameter q reaches SQL sink" })],
+    stagnation: [],
+    coverage: mkCov({
+      total: 5, tested: 1, untested: 4,
+      surfaces: Array.from({ length: 5 }, (_, i) => ({
+        id: `s${i}`, label: `S${i}`,
+        state: i < 1 ? "tested" : "untested",
+        evidence: i < 1 ? ["o1"] : [],
+      })),
+    }),
+    completedWithEvidence: 0,
+    observationCount: 12,
+  });
+  assert.ok(
+    !flowSilent.some((d) => d.text.includes("DATA FLOW")),
+    "a flow hypothesis silences the data flow nudge",
+  );
+
   // --- addressedPct: a blocked surface is addressed ------------------------
 
   assert.equal(addressedPct({ total: 0, tested: 0, blocked: 0 }), null, "no surface means no percentage");
