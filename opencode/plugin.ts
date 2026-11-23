@@ -644,6 +644,9 @@ export default {
     const { summarizeOsv } = await import(
       path.join(coreRoot(), "src", "osv.ts")
     );
+    const { multiSourceLookup } = await import(
+      path.join(coreRoot(), "src", "cve-sources.ts")
+    );
     const { assetSteps } = await import(
       path.join(coreRoot(), "src", "coverage-roles.ts")
     );
@@ -1902,11 +1905,15 @@ export default {
       editor.add({
         name: "cyber_cve",
         description:
-          "Look up known vulnerabilities for a package version in OSV, the public vulnerability database. Use lookup for a single package, batch for multiple at once (up to 20). The investigation arbiter nudges you to run this after reconnaissance discovers technologies.",
+          "Look up known vulnerabilities. Use lookup for a single OSV package, batch for multiple OSV packages (up to 20), and search for services/servers/technologies not in an OSV ecosystem (queries NVD + searchsploit). The investigation arbiter nudges you to run this after reconnaissance.",
         input: {
           type: "object",
           properties: {
-            action: { type: "string", enum: ["lookup", "batch"] },
+            action: { type: "string", enum: ["lookup", "batch", "search"] },
+            technology: {
+              type: "string",
+              description: "For search: the technology name (e.g. 'Apache', 'OpenSSH', 'WordPress').",
+            },
             ecosystem: {
               type: "string",
               enum: [
@@ -1937,6 +1944,13 @@ export default {
           additionalProperties: false,
         },
         execute: async (input: any) => {
+          if (input.action === "search") {
+            const tech = String(input.technology ?? "").trim();
+            if (!tech || tech.length > 200) throw new Error("search requires a technology name (max 200 chars)");
+            const version = input.version ? String(input.version).trim() : undefined;
+            const result = await multiSourceLookup(tech, version);
+            return { content: JSON.stringify(result) };
+          }
           if (input.action === "batch") {
             const items = Array.isArray(input.packages) ? input.packages : [];
             if (!items.length) throw new Error("batch requires a packages array");

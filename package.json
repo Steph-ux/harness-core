@@ -27,7 +27,8 @@
     "./tool-gap": "./src/tool-gap.ts",
     "./techniques": "./src/techniques.ts",
     "./coverage-profiles": "./src/coverage-profiles.ts",
-    "./investigation": "./src/investigation.ts"
+    "./investigation": "./src/investigation.ts",
+    "./cve-sources": "./src/cve-sources.ts"
   },
   "scripts": {
     "test": "node test/run.cjs",

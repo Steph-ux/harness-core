@@ -44,6 +44,27 @@ module.exports = async ({ assert, jiti }) => {
   assert.deepEqual(summarizeOsv(null), [], "no payload, no vulnerability");
   assert.deepEqual(summarizeOsv({ vulns: "nope" }), []);
 
+  // --- Multi-source: categorizeTech and searchsploit ----------------------
+
+  const { categorizeTech, querySearchsploit } = jiti(
+    path.join(CORE, "src", "cve-sources.ts"),
+  );
+  assert.equal(categorizeTech("Apache 2.4.49"), "service", "apache is a service");
+  assert.equal(categorizeTech("OpenSSH 8.2"), "service", "openssh is a service");
+  assert.equal(categorizeTech("nginx 1.21"), "service", "nginx is a service");
+  assert.equal(categorizeTech("WordPress 6.4"), "service", "wordpress is a service");
+  assert.equal(categorizeTech("some-random-thing"), "unknown", "unknown technology is unknown");
+  assert.equal(categorizeTech("Jenkins 2.401"), "service", "jenkins is a service");
+  assert.equal(categorizeTech("Cisco IOS 15.1"), "service", "cisco is a service");
+
+  // searchsploit is on this Kali system: a known query returns results.
+  const ssResult = querySearchsploit("apache", "2.4.49");
+  assert.equal(ssResult.results[0]?.source, "searchsploit", "searchsploit results carry their source");
+  if (ssResult.results.length > 0) {
+    assert.match(ssResult.results[0].id, /^EDB-/, "searchsploit ids start with EDB-");
+    assert.ok(typeof ssResult.results[0].summary === "string", "searchsploit results have a summary");
+  }
+
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "harness-cve-"));
   process.env.HARNESS_STATE_ROOT = path.join(workspace, "state");
   process.env.HARNESS_CORE = CORE;
@@ -94,6 +115,18 @@ module.exports = async ({ assert, jiti }) => {
           ),
         /version/,
         "an invalid version is refused",
+      );
+
+      // search action validation
+      await assert.rejects(
+        () => tool.execute({ action: "search" }, context),
+        /technology/,
+        "search without a technology name is refused",
+      );
+      await assert.rejects(
+        () => tool.execute({ action: "search", technology: "" }, context),
+        /technology/,
+        "search with an empty technology name is refused",
       );
     } finally {
       if (typeof unload === "function") unload();
