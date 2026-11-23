@@ -468,6 +468,10 @@ module.exports = async ({ assert, jiti }) => {
     sqliDeepen.some((d) => d.text.includes("DEEPEN") && d.text.includes("file read")),
     "a confirmed SQLi gets specific escalation paths (file read)",
   );
+  assert.ok(
+    sqliDeepen.some((d) => d.text.includes("harness-sqli")),
+    "a confirmed SQLi directive recommends the harness-sqli skill",
+  );
 
   // XSS escalation paths.
   const xssDeepen = directives({
@@ -489,6 +493,10 @@ module.exports = async ({ assert, jiti }) => {
   assert.ok(
     xssDeepen.some((d) => d.text.includes("session hijacking")),
     "a confirmed XSS gets session hijacking as an escalation path",
+  );
+  assert.ok(
+    xssDeepen.some((d) => d.text.includes("harness-xss")),
+    "a confirmed XSS directive recommends the harness-xss skill",
   );
 
   // Unknown type: generic deepen without specific paths.

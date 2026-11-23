@@ -446,9 +446,9 @@ export function directives(state: InvestigationState): Directive[] {
   const confirmedH = state.hypotheses.filter((h) => h.state === "confirmed");
   if (confirmedH.length > 0 && activeH.length === 0 && cov.untested > 0) {
     const latest = confirmedH[confirmedH.length - 1];
-    const paths = escalationFor(latest.text);
-    const specific = paths
-      ? ` Escalation paths for this type: ${paths.slice(0, 3).join("; ")}.`
+    const entry = escalationFor(latest.text);
+    const specific = entry
+      ? ` Escalation paths: ${entry.paths.slice(0, 3).join("; ")}. Load: ${entry.skills.slice(0, 2).join(", ")}.`
       : "";
     result.push({
       priority: "recommended",
@@ -563,55 +563,84 @@ export function investigationBlock(ds: readonly Directive[]): string {
 // ---------------------------------------------------------------------------
 
 /** When a hypothesis is confirmed, the finding type hints at what to try next. */
-const ESCALATION_PATHS: Record<string, string[]> = {
-  sqli: [
-    "file read (LOAD_FILE, INTO OUTFILE)",
-    "RCE via stacked queries or UDF",
-    "data exfiltration (dump credentials, PII)",
-    "lateral: same parameter on other endpoints",
-  ],
-  xss: [
-    "session hijacking (steal httpOnly cookie via DOM clobbering or CSP bypass)",
-    "account takeover via stored XSS in admin panel",
-    "chaining with CSRF for state-changing actions",
-    "DOM sink analysis for client-side prototype pollution",
-  ],
-  ssrf: [
-    "cloud metadata (169.254.169.254, metadata.google.internal)",
-    "internal port scan via response timing",
-    "file read via file:// protocol",
-    "chaining with deserialization on internal services",
-  ],
-  idor: [
-    "privilege escalation (access admin objects)",
-    "mass data harvesting (enumerate all IDs)",
-    "lateral: same pattern on other object types",
-    "chaining with information disclosure for targeted attacks",
-  ],
-  auth: [
-    "token forging (JWT none/weak secret, session fixation)",
-    "privilege escalation via role parameter tampering",
-    "account takeover via password reset flow",
-    "lateral: same auth flaw on API vs web vs mobile",
-  ],
-  rce: [
-    "persistence (cron, systemd, registry)",
-    "lateral movement (pivot to internal hosts)",
-    "data exfiltration (sensitive files, credentials)",
-    "container/cloud escape if sandboxed",
-  ],
-  lfi: [
-    "RCE via log poisoning or PHP wrappers",
-    "source code disclosure for further vulns",
-    "credential harvesting (/etc/shadow, .env, config files)",
-    "chaining with SSRF for internal file read",
-  ],
-  deserialization: [
-    "RCE via gadget chain",
-    "DoS via resource exhaustion",
-    "lateral: same library on other endpoints",
-    "chaining with SSRF to reach internal deserializers",
-  ],
+interface EscalationEntry {
+  paths: string[];
+  skills: string[];
+}
+
+const ESCALATION_PATHS: Record<string, EscalationEntry> = {
+  sqli: {
+    paths: [
+      "file read (LOAD_FILE, INTO OUTFILE)",
+      "RCE via stacked queries or UDF",
+      "data exfiltration (dump credentials, PII)",
+      "lateral: same parameter on other endpoints",
+    ],
+    skills: ["harness-sqli", "harness-web-deep", "harness-source-deep"],
+  },
+  xss: {
+    paths: [
+      "session hijacking (steal httpOnly cookie via DOM clobbering or CSP bypass)",
+      "account takeover via stored XSS in admin panel",
+      "chaining with CSRF for state-changing actions",
+      "DOM sink analysis for client-side prototype pollution",
+    ],
+    skills: ["harness-xss", "harness-source-deep", "harness-headers"],
+  },
+  ssrf: {
+    paths: [
+      "cloud metadata (169.254.169.254, metadata.google.internal)",
+      "internal port scan via response timing",
+      "file read via file:// protocol",
+      "chaining with deserialization on internal services",
+    ],
+    skills: ["harness-web-deep", "harness-cloud-enum"],
+  },
+  idor: {
+    paths: [
+      "privilege escalation (access admin objects)",
+      "mass data harvesting (enumerate all IDs)",
+      "lateral: same pattern on other object types",
+      "chaining with information disclosure for targeted attacks",
+    ],
+    skills: ["harness-idor", "harness-access-control", "harness-api-testing"],
+  },
+  auth: {
+    paths: [
+      "token forging (JWT none/weak secret, session fixation)",
+      "privilege escalation via role parameter tampering",
+      "account takeover via password reset flow",
+      "lateral: same auth flaw on API vs web vs mobile",
+    ],
+    skills: ["harness-jwt", "harness-oauth2", "harness-iam", "harness-credential-spray"],
+  },
+  rce: {
+    paths: [
+      "persistence (cron, systemd, registry)",
+      "lateral movement (pivot to internal hosts)",
+      "data exfiltration (sensitive files, credentials)",
+      "container/cloud escape if sandboxed",
+    ],
+    skills: ["harness-red-team", "harness-network-pivot", "harness-container"],
+  },
+  lfi: {
+    paths: [
+      "RCE via log poisoning or PHP wrappers",
+      "source code disclosure for further vulns",
+      "credential harvesting (/etc/shadow, .env, config files)",
+      "chaining with SSRF for internal file read",
+    ],
+    skills: ["harness-web-deep", "harness-file-upload", "harness-source-deep"],
+  },
+  deserialization: {
+    paths: [
+      "RCE via gadget chain",
+      "DoS via resource exhaustion",
+      "lateral: same library on other endpoints",
+      "chaining with SSRF to reach internal deserializers",
+    ],
+    skills: ["harness-deserialization", "harness-web-deep"],
+  },
 };
 
 /**
@@ -620,10 +649,10 @@ const ESCALATION_PATHS: Record<string, string[]> = {
  * The match is by keyword in the hypothesis text, not by a formal category.
  * A miss means no specific guidance — the generic deepen directive still fires.
  */
-function escalationFor(hypothesisText: string): string[] | null {
+function escalationFor(hypothesisText: string): EscalationEntry | null {
   const lower = hypothesisText.toLowerCase();
-  for (const [key, paths] of Object.entries(ESCALATION_PATHS)) {
-    if (lower.includes(key)) return paths;
+  for (const [key, entry] of Object.entries(ESCALATION_PATHS)) {
+    if (lower.includes(key)) return entry;
   }
   if (lower.includes("injection") && lower.includes("sql")) return ESCALATION_PATHS.sqli;
   if (lower.includes("redirect") || lower.includes("ssrf")) return ESCALATION_PATHS.ssrf;
