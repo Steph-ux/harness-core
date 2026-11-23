@@ -609,6 +609,63 @@ module.exports = async ({ assert, jiti }) => {
     "surfaces tested with multiple observations do not trigger the shallow guard",
   );
 
+  // --- CVE lookup nudge -----------------------------------------------------
+
+  const cveD = directives({
+    hypotheses: [],
+    stagnation: [],
+    coverage: mkCov({ total: 5, tested: 1, untested: 4 }),
+    completedWithEvidence: 0,
+    observationCount: 8,
+    toolsUsed: ["nmap", "curl", "gobuster"],
+  });
+  assert.ok(
+    cveD.some((d) => d.text.includes("CVE CHECK")),
+    "recon tools without CVE lookup triggers the CVE nudge",
+  );
+
+  // A session with cyber_cve lookup silences the nudge.
+  const cveSilent = directives({
+    hypotheses: [],
+    stagnation: [],
+    coverage: mkCov({ total: 5, tested: 1, untested: 4 }),
+    completedWithEvidence: 0,
+    observationCount: 8,
+    toolsUsed: ["nmap", "curl", "cyber_cve"],
+  });
+  assert.ok(
+    !cveSilent.some((d) => d.text.includes("CVE CHECK")),
+    "a CVE lookup silences the CVE nudge",
+  );
+
+  // trivy also silences it.
+  const trivySilent = directives({
+    hypotheses: [],
+    stagnation: [],
+    coverage: mkCov({ total: 5, tested: 1, untested: 4 }),
+    completedWithEvidence: 0,
+    observationCount: 8,
+    toolsUsed: ["nmap", "trivy"],
+  });
+  assert.ok(
+    !trivySilent.some((d) => d.text.includes("CVE CHECK")),
+    "trivy also silences the CVE nudge",
+  );
+
+  // No recon tools = no nudge even without CVE lookup.
+  const noRecon = directives({
+    hypotheses: [],
+    stagnation: [],
+    coverage: mkCov({ total: 5, tested: 1, untested: 4 }),
+    completedWithEvidence: 0,
+    observationCount: 8,
+    toolsUsed: ["sqlmap", "cyber_tasks"],
+  });
+  assert.ok(
+    !noRecon.some((d) => d.text.includes("CVE CHECK")),
+    "no recon tools means no CVE nudge",
+  );
+
   // --- Data flow analysis nudge --------------------------------------------
 
   const flowD = directives({

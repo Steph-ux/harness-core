@@ -1902,11 +1902,11 @@ export default {
       editor.add({
         name: "cyber_cve",
         description:
-          "Look up known vulnerabilities for a package version in OSV, the public vulnerability database. The lookup is a tool call, so it leaves an observation; the answer is bounded before it reaches the model.",
+          "Look up known vulnerabilities for a package version in OSV, the public vulnerability database. Use lookup for a single package, batch for multiple at once (up to 20). The investigation arbiter nudges you to run this after reconnaissance discovers technologies.",
         input: {
           type: "object",
           properties: {
-            action: { type: "string", enum: ["lookup"] },
+            action: { type: "string", enum: ["lookup", "batch"] },
             ecosystem: {
               type: "string",
               enum: [
@@ -1919,11 +1919,68 @@ export default {
               description: "The package name, as the ecosystem writes it.",
             },
             version: { type: "string", description: "The version to test." },
+            packages: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  ecosystem: { type: "string" },
+                  package: { type: "string" },
+                  version: { type: "string" },
+                },
+                required: ["ecosystem", "package"],
+              },
+              description: "For batch: up to 20 packages to check at once.",
+            },
           },
           required: ["action"],
           additionalProperties: false,
         },
         execute: async (input: any) => {
+          if (input.action === "batch") {
+            const items = Array.isArray(input.packages) ? input.packages : [];
+            if (!items.length) throw new Error("batch requires a packages array");
+            if (items.length > 20) throw new Error("batch is limited to 20 packages");
+            const ecosystems = [
+              "PyPI", "npm", "Go", "Debian", "Ubuntu", "Alpine", "Packagist",
+              "Maven", "NuGet", "RubyGems", "crates.io", "Hex", "GitHub Actions",
+            ];
+            const results = [];
+            for (const item of items) {
+              const eco = String(item.ecosystem ?? "");
+              const pkg = String(item.package ?? "").trim();
+              const ver = item.version ? String(item.version) : undefined;
+              if (!ecosystems.includes(eco) || !pkg) {
+                results.push({ ecosystem: eco, package: pkg, version: ver ?? null, error: "invalid" });
+                continue;
+              }
+              try {
+                const resp = await fetch("https://api.osv.dev/v1/query", {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({
+                    package: { ecosystem: eco, name: pkg },
+                    ...(ver ? { version: ver } : {}),
+                  }),
+                  signal: AbortSignal.timeout(10000),
+                });
+                if (!resp.ok) {
+                  results.push({ ecosystem: eco, package: pkg, version: ver ?? null, error: `osv-${resp.status}` });
+                  continue;
+                }
+                const text = await resp.text();
+                results.push({
+                  ecosystem: eco,
+                  package: pkg,
+                  version: ver ?? null,
+                  vulnerabilities: summarizeOsv(JSON.parse(text)),
+                });
+              } catch (err) {
+                results.push({ ecosystem: eco, package: pkg, version: ver ?? null, error: String(err) });
+              }
+            }
+            return { content: JSON.stringify({ batch: results }) };
+          }
           if (input.action !== "lookup") throw new Error("Unknown CVE action");
           const ecosystems = [
             "PyPI", "npm", "Go", "Debian", "Ubuntu", "Alpine", "Packagist",

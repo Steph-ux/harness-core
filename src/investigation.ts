@@ -342,6 +342,8 @@ export interface InvestigationState {
   completedWithEvidence: number;
   /** Total observations in this session. */
   observationCount: number;
+  /** Tools used in the observation window, for proactive directives. */
+  toolsUsed?: readonly string[];
 }
 
 export interface Directive {
@@ -496,6 +498,19 @@ export function directives(state: InvestigationState): Directive[] {
         text: "DATA FLOW: Multiple observations but no hypothesis about input→sink flows. Before throwing payloads, map which parameters reach which sinks (SQL, shell, template, file, reflection). A flow hypothesis guides targeted testing.",
       });
     }
+  }
+
+  // CVE lookup nudge: when recon tools ran but no CVE lookup was performed,
+  // the model is missing known vulnerabilities on the discovered stack.
+  const reconTools = ["nmap", "httpx", "whatweb", "wappalyzer", "nuclei", "nikto", "wafw00f", "curl", "gobuster", "feroxbuster", "dirsearch"];
+  const used = new Set(state.toolsUsed ?? []);
+  const hasRecon = reconTools.some((t) => used.has(t));
+  const hasCveLookup = used.has("cyber_cve") || used.has("trivy") || used.has("retire");
+  if (hasRecon && !hasCveLookup && state.observationCount > 5) {
+    result.push({
+      priority: "recommended",
+      text: "CVE CHECK: Reconnaissance tools ran but no CVE lookup was performed. Use cyber_cve to check discovered technologies/versions against OSV, or run trivy/retire on collected artifacts. Known CVEs are low-hanging fruit.",
+    });
   }
 
   // Premature conclusion guard
@@ -936,5 +951,6 @@ export function assembleInvestigation(opts: {
     coverage: opts.coverage,
     completedWithEvidence,
     observationCount: opts.observations.length,
+    toolsUsed: [...new Set(opts.observations.map((o) => o.tool))],
   };
 }
