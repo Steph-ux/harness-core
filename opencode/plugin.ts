@@ -609,6 +609,7 @@ export default {
       InvestigationStore,
       assembleInvestigation,
       addressedPct,
+      taskCoverageSummary,
       directives,
       investigationBlock,
       INVESTIGATION_MARKER,
@@ -1240,11 +1241,16 @@ export default {
         let invSummary: any;
         try {
           investigation.tick(scope, invNowMs);
+          const explicitCov = investigation.coverageSummary(scope);
+          const tasks = taskStore.list(scope);
+          const coverage = explicitCov.total > 0
+            ? explicitCov
+            : taskCoverageSummary(tasks);
           invState = assembleInvestigation({
             observations: knowledge.observationsForSession(proofSessionID, scope, 30),
-            tasks: taskStore.list(scope),
+            tasks,
             hypotheses: investigation.hypotheses(scope),
-            coverage: investigation.coverageSummary(scope),
+            coverage,
             nowMs: invNowMs,
           });
           invSummary = {
@@ -2233,15 +2239,20 @@ export default {
           if (action === "status") {
             const nowMs = Date.now();
             investigation.tick(scope, nowMs);
+            const explicitCov = investigation.coverageSummary(scope);
+            const tasks = taskStore.list(scope);
+            const coverage = explicitCov.total > 0
+              ? explicitCov
+              : taskCoverageSummary(tasks);
             const state = assembleInvestigation({
               observations: knowledge.observationsForSession(
                 context.sessionID,
                 scope,
                 30,
               ),
-              tasks: taskStore.list(scope),
+              tasks,
               hypotheses: investigation.hypotheses(scope),
-              coverage: investigation.coverageSummary(scope),
+              coverage,
               nowMs,
             });
             return {
@@ -2289,8 +2300,10 @@ export default {
           }
 
           if (action === "surface") {
-            if (op === "list")
-              return { content: JSON.stringify(investigation.coverageSummary(scope)) };
+            if (op === "list") {
+              const ec = investigation.coverageSummary(scope);
+              return { content: JSON.stringify(ec.total > 0 ? ec : taskCoverageSummary(taskStore.list(scope))) };
+            }
             if (op === "add") {
               if (!input.label) throw new Error("add requires a surface label");
               const id = input.id ?? `surface-${Date.now().toString(36)}`;

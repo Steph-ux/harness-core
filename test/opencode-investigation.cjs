@@ -25,6 +25,8 @@ module.exports = async ({ assert, jiti }) => {
     assembleInvestigation,
     addressedPct,
     CONCLUSION_THRESHOLD,
+    surfacesFromTasks,
+    taskCoverageSummary,
   } = inv;
   const { closingGate } = jiti(path.join(CORE, "src", "capsule.ts"));
 
@@ -515,6 +517,35 @@ module.exports = async ({ assert, jiti }) => {
     block.indexOf("[MANDATORY]") < block.indexOf("[RECOMMENDED]"),
     "mandatory directives precede recommended ones",
   );
+
+  // --- surfacesFromTasks: coverage from the task tree -----------------------
+
+  const tasks = [
+    { id: "t1", title: "Recon", status: "completed", evidence: ["obs-1"] },
+    { id: "t2", title: "Auth", status: "blocked", reason: "no creds" },
+    { id: "t3", title: "SQLi", status: "in-progress" },
+    { id: "t4", title: "XSS", status: "pending" },
+    { id: "t5", title: "sub-step", status: "pending", parentId: "t4" },
+  ];
+  const surfaces = surfacesFromTasks(tasks);
+  assert.equal(surfaces.length, 4, "only root tasks become surfaces");
+  assert.equal(surfaces.find((s) => s.id === "t1").state, "tested", "completed with evidence is tested");
+  assert.equal(surfaces.find((s) => s.id === "t2").state, "blocked", "blocked is blocked");
+  assert.equal(surfaces.find((s) => s.id === "t3").state, "in-progress", "in-progress is in-progress");
+  assert.equal(surfaces.find((s) => s.id === "t4").state, "untested", "pending is untested");
+
+  const tCov = taskCoverageSummary(tasks);
+  assert.equal(tCov.total, 4, "task coverage counts root branches");
+  assert.equal(tCov.tested, 1, "task coverage tested from evidence");
+  assert.equal(tCov.blocked, 1, "task coverage blocked from status");
+  assert.equal(tCov.inProgress, 1, "task coverage in-progress");
+  assert.equal(tCov.untested, 1, "task coverage untested from pending");
+
+  // A completed task without evidence is untested — not proven.
+  const unproven = surfacesFromTasks([
+    { id: "t1", title: "Done", status: "completed" },
+  ]);
+  assert.equal(unproven[0].state, "untested", "a completion without evidence is untested");
 
   // --- InvestigationStore persistence --------------------------------------
 

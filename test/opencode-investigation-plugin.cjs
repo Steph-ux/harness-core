@@ -144,7 +144,71 @@ module.exports = async ({ assert, jiti }) => {
     "the looping session status carries a mandatory directive",
   );
 
-  store.close();
+  // --- Task-tree fallback: no declared surfaces, coverage from tasks -------
+
+  // A scope with tasks but no surfaces: the tool still reports coverage.
+  // Add root tasks with known evidence.
+  await tasksTool.execute({ action: "add", title: "Recon target ports" }, { sessionID: "ses_inv_loop" });
+  await tasksTool.execute({ action: "add", title: "Test authentication" }, { sessionID: "ses_inv_loop" });
+  const taskList = parse(await tasksTool.execute({ action: "list" }, { sessionID: "ses_inv_loop" }));
+  // The first root task we added ("Enumerate the target") plus the two new ones = 3 root tasks.
+  const rootTasks = taskList.tasks.filter((t) => !t.parentId);
+  assert.ok(rootTasks.length >= 3, "there are at least 3 root tasks");
+
+  // Complete one with evidence so it counts as tested.
+  const toComplete = rootTasks.find((t) => t.title === "Recon target ports");
+  await tasksTool.execute(
+    { action: "complete", id: toComplete.id, evidence: [goodObs.id] },
+    { sessionID: "ses_inv_loop" },
+  );
+
+  // The surface list should derive from the task tree (no explicit surfaces were added in this new scope... wait, we did add some above in the same scope).
+  // Instead, test via status which uses the same fallback: the coverage.total should reflect tasks.
+  // Actually, we DID add explicit surfaces (auth, sqli, xss) above. So the fallback won't fire for this scope.
+  // Create a fresh scope to test the fallback cleanly.
+  const ws2 = fs.mkdtempSync(path.join(os.tmpdir(), "harness-inv-fallback-"));
+  const state2 = path.join(ws2, "state");
+  fs.mkdirSync(state2, { recursive: true });
+  process.env.HARNESS_STATE_ROOT = state2;
+
+  const { ctx: ctx2, hooks: hooks2, tools: tools2 } = makeContext(ws2);
+  await loadPlugin(plugin, ctx2);
+  const tasksTool2 = tools2.get("cyber_tasks");
+  const inv2 = tools2.get("cyber_investigation");
+  const call2 = (input) => inv2.execute(input, { sessionID: "ses_fallback" });
+
+  const store2b = new KnowledgeStore(path.join(state2, "knowledge.sqlite"));
+  const scope2 = scopeFor(ws2);
+  store2b.upsertSession({ id: "ses_fallback", scope: scope2, cwd: ws2, status: "active", updatedAt: new Date().toISOString() });
+  const fbObs = store2b.recordObservation({
+    id: "obs-fb-1", sessionId: "ses_fallback", scope: scope2, tool: "nmap",
+    input: {}, output: "open ports", success: true, timestamp: new Date().toISOString(),
+  });
+
+  // Add tasks (no surfaces declared).
+  await tasksTool2.execute({ action: "add", title: "Port scan" }, { sessionID: "ses_fallback" });
+  await tasksTool2.execute({ action: "add", title: "Service fingerprint" }, { sessionID: "ses_fallback" });
+  const tl2 = parse(await tasksTool2.execute({ action: "list" }, { sessionID: "ses_fallback" }));
+  const portTask = tl2.tasks.find((t) => t.title === "Port scan");
+  await tasksTool2.execute(
+    { action: "complete", id: portTask.id, evidence: [fbObs.id] },
+    { sessionID: "ses_fallback" },
+  );
+
+  // surface list should derive 2 surfaces from the 2 root tasks.
+  const fbCov = parse(await call2({ action: "surface", op: "list" }));
+  assert.equal(fbCov.total, 2, "fallback coverage derives surfaces from root tasks");
+  assert.equal(fbCov.tested, 1, "one task completed with evidence is tested");
+  assert.equal(fbCov.untested, 1, "one open task is untested");
+
+  // status also uses the fallback.
+  const fbStatus = parse(await call2({ action: "status" }));
+  assert.equal(fbStatus.coverage.total, 2, "status fallback also shows task-derived coverage");
+
+  store2b.close();
   await unloadPlugins();
+  fs.rmSync(ws2, { recursive: true, force: true });
+
+  store.close();
   fs.rmSync(workspace, { recursive: true, force: true });
 };

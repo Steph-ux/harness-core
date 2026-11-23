@@ -666,6 +666,64 @@ export class InvestigationStore {
 }
 
 // ---------------------------------------------------------------------------
+// Coverage from the task tree — so the gate cannot be dodged by omission
+// ---------------------------------------------------------------------------
+
+/**
+ * Derive surfaces from the root branches of the task tree.
+ *
+ * A model that never declares surfaces still plans work as tasks. Those root
+ * branches are the surfaces it intended to cover, so the arbiter tracks them
+ * without a parallel declaration. A completed branch counts as tested only
+ * with evidence; an unproven completion is still a gap. Sub-steps are not
+ * surfaces: the branch is the unit of coverage.
+ */
+export function surfacesFromTasks(
+  tasks: readonly {
+    id: string;
+    title: string;
+    status: string;
+    parentId?: string;
+    evidence?: string[];
+    reason?: string;
+  }[],
+): SurfaceCoverage[] {
+  return tasks
+    .filter((t) => !t.parentId)
+    .map((t) => {
+      const proven = t.status === "completed" && (t.evidence?.length ?? 0) > 0;
+      const state: SurfaceState = proven
+        ? "tested"
+        : t.status === "blocked"
+          ? "blocked"
+          : t.status === "in-progress"
+            ? "in-progress"
+            : "untested";
+      return {
+        id: t.id,
+        label: t.title,
+        state,
+        evidence: t.evidence ?? [],
+        ...(t.reason ? { reason: t.reason } : {}),
+      };
+    });
+}
+
+/** The coverage summary of a task tree, for a scope that declared no surface. */
+export function taskCoverageSummary(
+  tasks: readonly {
+    id: string;
+    title: string;
+    status: string;
+    parentId?: string;
+    evidence?: string[];
+    reason?: string;
+  }[],
+): ReturnType<CoverageMap["summary"]> {
+  return CoverageMap.fromEntries(surfacesFromTasks(tasks)).summary();
+}
+
+// ---------------------------------------------------------------------------
 // Assembly — the state the host computes on every turn
 // ---------------------------------------------------------------------------
 
