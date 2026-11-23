@@ -359,7 +359,7 @@ const DEBUG = process.env.HARNESS_PROOF_DEBUG === "1";
 
 /** Bookkeeping cannot prove itself; operational harness tools still leave observations. */
 const OWN_TOOL =
-  /^(?:cyber_tasks|cyber_mission|cyber_approval|cyber_finding|cyber_review|cyber_memory|cyber_method|cyber_lessons|cyber_verification|cyber_report|cyber_capitalise|cyber_cleanup|cyber_toolbox|cyber_entity)$/;
+  /^(?:cyber_tasks|cyber_mission|cyber_approval|cyber_finding|cyber_review|cyber_memory|cyber_method|cyber_lessons|cyber_verification|cyber_report|cyber_capitalise|cyber_cleanup|cyber_toolbox|cyber_entity|cyber_investigation)$/;
 
 /** The first words of the injected operator block, used to detect a duplicate. */
 const OPERATOR_MARKER = "Operator rules.";
@@ -605,6 +605,13 @@ export default {
     const { capsule, capsuleText, closingGate, GATE_MARKER } = await import(
       path.join(coreRoot(), "src", "capsule.ts")
     );
+    const {
+      InvestigationStore,
+      assembleInvestigation,
+      directives,
+      investigationBlock,
+      INVESTIGATION_MARKER,
+    } = await import(path.join(coreRoot(), "src", "investigation.ts"));
     const { routeFor, requestText, ROUTER_MARKER } = await import(
       path.join(coreRoot(), "src", "routing.ts")
     );
@@ -669,6 +676,7 @@ export default {
       path.join(stateRoot(), "knowledge.sqlite"),
     );
     const taskStore = new TaskStore(stateRoot());
+    const investigation = new InvestigationStore(stateRoot());
     const skills = new SkillUpdater(stateRoot(), knowledge, DEFAULT_CONFIG);
     const toolRegistry = new ToolRegistry(stateRoot());
     // The engagement ledger. It is the same file the Pi harness writes to, so
@@ -1407,6 +1415,53 @@ export default {
           });
         }
 
+        // The investigation arbiter. It reads the observation stream and the
+        // declared hypotheses/coverage, and tells the model when it is looping,
+        // leaving surfaces untested, or concluding too early. It stays silent
+        // while the work is progressing. It must never hold a turn.
+        try {
+          const nowMs = Date.now();
+          investigation.tick(scope, nowMs);
+          const invState = assembleInvestigation({
+            observations: knowledge.observationsForSession(proofSessionID, scope, 30),
+            tasks: taskStore.list(scope),
+            hypotheses: investigation.hypotheses(scope),
+            coverage: investigation.coverageSummary(scope),
+            nowMs,
+          });
+          const invDirectives = directives(invState);
+          const invBlock = investigationBlock(invDirectives);
+          if (
+            invBlock &&
+            !event.system.some(
+              (block: any) =>
+                typeof block?.text === "string" &&
+                block.text.startsWith(INVESTIGATION_MARKER),
+            )
+          ) {
+            const anchor = event.system.findLastIndex(
+              (block: any) =>
+                typeof block?.text === "string" &&
+                (block.text.startsWith(GATE_MARKER) ||
+                  block.text.startsWith("Continuity.") ||
+                  block.text.startsWith(ROUTER_MARKER) ||
+                  block.text.startsWith("Harness capabilities.")),
+            );
+            event.system.splice(anchor >= 0 ? anchor + 1 : 1, 0, {
+              type: "text",
+              text: invBlock,
+            });
+            knowledge.audit(scope, "context.investigation", {
+              sessionID: event.sessionID,
+              directives: invDirectives.length,
+              mandatory: invDirectives.filter((d: any) => d.priority === "mandatory").length,
+              chars: invBlock.length,
+            });
+          }
+        } catch {
+          /* The arbiter reads; a read failure is not a reason to stop the turn. */
+        }
+
         // What the learned methods offered this turn. It is what tells the
         // curator which methods are still used.
         const learned = skills
@@ -2103,6 +2158,153 @@ export default {
               taskStore.complete(scope, input.id, input.evidence),
             ),
           };
+        },
+      });
+
+      editor.add({
+        name: "cyber_investigation",
+        description:
+          "Drive the investigation itself: declare hypotheses and test them, track which surfaces are tested or blocked, and read the directives the harness derives from your observations. A hypothesis confirms only against a successful observation; a refuted one is not revisited. The harness injects mandatory directives when you loop, stagnate, or conclude before covering the surface.",
+        input: {
+          type: "object",
+          properties: {
+            action: {
+              type: "string",
+              enum: ["hypothesis", "surface", "status"],
+              description:
+                "hypothesis manages the hypothesis register, surface manages coverage, status reads the assembled state and its directives.",
+            },
+            op: {
+              type: "string",
+              enum: [
+                "propose",
+                "test",
+                "evidence",
+                "refute",
+                "list",
+                "add",
+                "start",
+                "complete",
+                "block",
+              ],
+              description:
+                "For hypothesis: propose/test/evidence/refute/list. For surface: add/start/complete/block/list.",
+            },
+            id: {
+              type: "string",
+              description: "Hypothesis or surface id. Omit on propose/add to generate one.",
+            },
+            text: { type: "string", description: "The hypothesis statement, for propose." },
+            label: { type: "string", description: "The surface label, for add." },
+            reason: { type: "string", description: "Why a surface is blocked." },
+            observationId: {
+              type: "string",
+              description: "The observation that confirms or refutes a hypothesis.",
+            },
+            evidence: {
+              type: "array",
+              items: { type: "string" },
+              description: "Observation ids that prove a surface was tested.",
+            },
+          },
+          required: ["action"],
+          additionalProperties: false,
+        },
+        execute: async (input: any, context: any) => {
+          const scope = await scopeOf(context.sessionID);
+          const action = String(input.action);
+          const op = String(input.op ?? "");
+
+          if (action === "status") {
+            const nowMs = Date.now();
+            investigation.tick(scope, nowMs);
+            const state = assembleInvestigation({
+              observations: knowledge.observationsForSession(
+                context.sessionID,
+                scope,
+                30,
+              ),
+              tasks: taskStore.list(scope),
+              hypotheses: investigation.hypotheses(scope),
+              coverage: investigation.coverageSummary(scope),
+              nowMs,
+            });
+            return {
+              content: JSON.stringify({
+                coverage: state.coverage,
+                hypotheses: state.hypotheses,
+                stagnation: state.stagnation,
+                directives: directives(state),
+              }),
+            };
+          }
+
+          if (action === "hypothesis") {
+            if (op === "list")
+              return { content: JSON.stringify(investigation.hypotheses(scope)) };
+            if (op === "propose") {
+              if (!input.text) throw new Error("propose requires a hypothesis text");
+              return {
+                content: JSON.stringify(
+                  investigation.proposeHypothesis(scope, input.text, input.id),
+                ),
+              };
+            }
+            if (!input.id) throw new Error(`${op} requires a hypothesis id`);
+            if (op === "test")
+              return {
+                content: JSON.stringify(investigation.testHypothesis(scope, input.id)),
+              };
+            if (op === "evidence" || op === "refute") {
+              if (!input.observationId)
+                throw new Error(`${op} requires an observationId`);
+              const [obs] = knowledge.evidence(scope, [input.observationId]);
+              if (!obs) throw new Error("the observation does not exist in this scope");
+              if (op === "evidence" && !obs.success)
+                throw new Error("a hypothesis confirms only against a successful observation");
+              return {
+                content: JSON.stringify(
+                  op === "evidence"
+                    ? investigation.evidenceHypothesis(scope, input.id, input.observationId)
+                    : investigation.refuteHypothesis(scope, input.id, input.observationId),
+                ),
+              };
+            }
+            throw new Error(`unknown hypothesis op ${op}`);
+          }
+
+          if (action === "surface") {
+            if (op === "list")
+              return { content: JSON.stringify(investigation.coverageSummary(scope)) };
+            if (op === "add") {
+              if (!input.label) throw new Error("add requires a surface label");
+              const id = input.id ?? `surface-${Date.now().toString(36)}`;
+              investigation.addSurface(scope, id, input.label);
+              return { content: JSON.stringify({ added: id }) };
+            }
+            if (!input.id) throw new Error(`${op} requires a surface id`);
+            if (op === "start") {
+              investigation.startSurface(scope, input.id);
+              return { content: JSON.stringify({ started: input.id }) };
+            }
+            if (op === "block") {
+              if (!input.reason) throw new Error("a blocked surface requires a reason");
+              investigation.blockSurface(scope, input.id, input.reason);
+              return { content: JSON.stringify({ blocked: input.id }) };
+            }
+            if (op === "complete") {
+              if (!input.evidence?.length)
+                throw new Error("a tested surface requires observation ids");
+              const proven = knowledge.evidence(scope, input.evidence);
+              if (!proven.some((item: any) => item.success))
+                throw new Error("surface evidence must include a successful observation");
+              investigation.completeSurface(scope, input.id, input.evidence);
+              return { content: JSON.stringify({ tested: input.id }) };
+            }
+            throw new Error(`unknown surface op ${op}`);
+          }
+
+          throw new Error(`unknown investigation action ${action}`);
         },
       });
 
