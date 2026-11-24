@@ -60,7 +60,11 @@ Compare `data` vs `errors` vs `null`. Aliases/fragments: one extra if the simple
 | Depth | bounded 4 | shallow baseline timing |
 | Batch | 2 queries | 1 query |
 
-Do not send 100 aliases.
+Do not send 100 aliases. One batch of two queries is the DoS ceiling. A single slow request is not depth/batching proof. Mutations only on an owned object, then restore.
+
+### Evidence ids
+
+Introspection, allowed, forbidden, optional depth/batch. `contains` is the leaked field in `data`, not HTTP 200. `data:null` is the negative control.
 
 ## Done
 

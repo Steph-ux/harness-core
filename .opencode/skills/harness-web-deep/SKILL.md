@@ -69,7 +69,11 @@ OOB listener is its own observation. Correlation id in the callback path.
 
 ### WAF
 
-A block page is data. Record status, body hash, duration. Do not rotate five payloads in one observation. One encoding mutation per attempt (HTML entity, double URL, uncommon tag) then stop or open `harness-headers`.
+A block page is data. Record status, body hash, duration. Do not rotate five payloads in one observation. One encoding mutation per attempt (HTML entity, double URL, uncommon tag) then stop or open `harness-headers`. File-upload, websocket and cache-poison claims belong in their dedicated skills when that is the finding.
+
+### Evidence ids
+
+Baseline, payload, OOB or differential, original-value control. Correlation id in the callback. One class per finding.
 
 ## Done
 

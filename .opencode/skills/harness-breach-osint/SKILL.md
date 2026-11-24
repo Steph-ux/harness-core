@@ -46,6 +46,16 @@ near-match are negative controls for parser/correlation errors. Redact personal
 data in sources and retain only the minimum evidence needed for the approved
 finding.
 
+### Confirmation
+
+Two independent sources before "this email is in that breach". One dump hit is a candidate.
+
+```
+cyber_process argv=["h8mail","-t","<email>","-o","<evidence-dir>/h8mail.json"]
+```
+
+Missing tool → `not-tested`. Do not log in with a found password unless the operator approved a one-shot identity check (`harness-secret-scan`). Unused-address control must not share the same dump rows.
+
 ## Done
 
 Evidence holds the breach outputs (JSON/HTML). Confirmed findings cite the breach tool and a second source; tested credentials cite the auth observation.

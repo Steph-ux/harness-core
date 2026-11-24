@@ -45,6 +45,21 @@ If RTP is in scope, **hash a pcap already collected** — do not tap a live call
 
 Unauthenticated SIP or a default extension needs the banner/REGISTER observation and the unused-extension 404/403. A PSTN INVITE is never the proof.
 
+### Probe budget
+
+| Probe | Max |
+|---|---|
+| OPTIONS/REGISTER | 1 test extension |
+| Extension brute | 0 |
+| PSTN INVITE | 0 |
+| RTP tap of live call | 0 — hash collected pcap only |
+
+```
+cyber_process argv=["nmap","-sV","-Pn","-p","5060,5061","<approved-host>"]
+```
+
+Unused extension must 404/403.
+
 ## Done
 
 Evidence holds banner, one test REGISTER/OPTIONS, unused-extension control. No toll fraud.

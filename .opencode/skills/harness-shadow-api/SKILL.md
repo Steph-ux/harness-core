@@ -45,6 +45,22 @@ One shadow → one `cyber_finding`: contract obs + observed-list + live probe + 
 
 A shadow finding needs: (1) documented host+method+path template, (2) observed equivalent that survives normalization, (3) live HEAD/GET on the approved URL, (4) sibling 404 or documented-absence control. A crawl hit without a live probe stays a candidate. Authorization impact is a different method.
 
+### Diff rules
+
+Normalize method, host, path case, slash, encoding, version prefix, GraphQL operation. Same host only.
+
+```
+cyber_process argv=["curl","-sS","-D","-","-o","NUL","-X","HEAD","<approved-url>"]
+```
+
+| Result | Meaning |
+|---|---|
+| 404 | not a shadow |
+| 200 error page | triage |
+| 200 resource | shadow existence; impact is another method |
+
+No POST/PUT/DELETE merely to prove the route.
+
 ## Done
 
 Each shadow cites contract, crawl, live probe, sibling control. A 200 alone is never a finding.

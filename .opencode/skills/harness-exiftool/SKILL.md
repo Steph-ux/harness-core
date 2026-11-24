@@ -46,6 +46,20 @@ Known-clean fixture of the same type, plus the copy hash. Must not invent GPS/au
 
 `cyber_finding` needs hash + JSON `cyber_source` + second observation (CVE or second doc) + clean-fixture control. Redact GPS/author/serial unless necessary to the claim.
 
+### Fields vs claims
+
+| Field | Becomes a finding only with |
+|---|---|
+| GPS | geography in scope + second source |
+| Author | in-scope principal match |
+| Software | `cyber_cve` on exact version |
+
+```
+cyber_process argv=["exiftool","-json","-n","<file>"]
+```
+
+Clean-fixture negative control. No `-overwrite_original`.
+
 ## Done
 
 Evidence holds hash + JSON. No field alone is a finding.

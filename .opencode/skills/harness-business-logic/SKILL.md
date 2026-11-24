@@ -45,6 +45,22 @@ Two identical mutations ~50ms apart + final read. Double credit = signal. One sl
 
 A finding requires the illegal input, the server response, and an independent read of persisted state. `SUCCESSFUL` in a client callback is not settlement. Untested branches stay visible with the missing control named.
 
+### Field matrix (one per attempt)
+
+| Field | Probe | Persist proof |
+|---|---|---|
+| price/amount | `1` / `0.01` | GET total |
+| quantity | `-1` / `0` / `999999` | GET qty |
+| status | `paid` / `approved` | GET status |
+| step | skip id | GET step |
+| coupon | reused code | ledger line |
+
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","--data-binary","@mut.json","<url>"]
+```
+
+Gateway `SUCCESSFUL` callback is not settlement. Unique `referenceId` each try.
+
 ## Done
 
 Finding cites three observations. Submit `200` alone is never a finding.

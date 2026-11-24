@@ -65,7 +65,11 @@ cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <redact>",
 
 ### Stop
 
-Third-party jwt.io, `jku` to a random host, retrieving real `/etc/passwd`, spraying `HS256` secrets against production.
+Third-party jwt.io, `jku` to a random host, retrieving real `/etc/passwd`, spraying `HS256` secrets against production. One probe row per observation — do not batch alg/kid/aud in a single request.
+
+### Evidence ids
+
+Record observation ids for original, flip, and the winning probe. Missing any → candidate. `contains` is the accept/reject body marker, never the JWT itself. Reproduction must be a new request-id after the original claim.
 
 ## Done
 

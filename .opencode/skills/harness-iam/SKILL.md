@@ -60,7 +60,11 @@ Horizontal = B reads A's object. Vertical = B calls A's admin action. Say which.
 
 Cloud: still two identities, one action (`s3:GetObject`, `iam:PassRole`). No `*:*` dump.
 
-SSO/OIDC session: after B's replay, a resource request proves the session. Token internals → `harness-jwt`.
+SSO/OIDC session: after B's replay, a resource request proves the session. Token internals → `harness-jwt`. No policy write, no third identity, no spray. A 200 login HTML is not access.
+
+### Evidence ids
+
+A success, B replay, no-token or out-of-role control. Name both identities and the single permission in the finding title. Login HTML 200 is not access.
 
 ## Done
 

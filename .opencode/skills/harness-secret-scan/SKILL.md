@@ -46,6 +46,15 @@ If not attempted: limitation `not-attempted`.
 
 A live credential needs the scan observation, SHA256, fixture-path control, and either a one-shot identity observation or `not-attempted`. The raw secret never enters the ledger.
 
+### Engines
+
+```
+cyber_process argv=["gitleaks","detect","--source","<evidence-dir>","--report-format","json","--report-path","<evidence-dir>/gitleaks.json","--no-banner","--exit-code","0"]
+cyber_process argv=["trufflehog","filesystem","<evidence-dir>","--json","--no-verification"]
+```
+
+Dedup `(file, rule, SHA256(secret))`. Fixture paths are the negative control. One-shot auth only if approved. Raw secret never in the ledger.
+
 ## Done
 
 Each secret finding has a scan observation, `SHA256(secret)`, a source chunk, and auth or explicit `not-attempted`.

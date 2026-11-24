@@ -46,6 +46,16 @@ A syntactically valid **known-unused** address and a **near-match** must not yie
 
 `cyber_finding` with ≥2 observations, `cyber_source` chunk, unused-address control. No plaintext secret. New usernames stay leads until scoped.
 
+### Pairing (pick one)
+
+email + public name | email + approved username | email + approved breach row
+
+```
+cyber_process argv=["holehe","<email>","--only-used"]
+```
+
+Provider-registration alone is not ownership. Unused-address negative control required. No mail, no reset, no login.
+
 ## Done
 
 Evidence holds Holehe and the second source. Confirmed cites two observations + chunk + control.

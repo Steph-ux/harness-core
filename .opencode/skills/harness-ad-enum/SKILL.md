@@ -64,11 +64,15 @@ Users, groups, computers, trusts, SPNs, unconstrained delegation, GPOs, ACLs. Pr
 cyber_process argv=["ldapsearch","-x","-H","ldaps://<dc2>","-D","<identity>","-b","<base>","(objectClass=user)","dn"]
 ```
 
-Second DC is the confirmation observation, not a second forest.
+Second DC is the confirmation observation, not a second forest. A write is never the proof. Disabled and stale principals are listed separately from live credentials.
 
 ### Stop
 
 Password spray, `Add-ADGroupMember`, GPO edit, DCSync unless the letter names it, tickets for accounts not in the test set.
+
+### Evidence ids
+
+LDAP/BH collection, second-DC or denied-query control. Ticket hashes only. Finding title names the principal class (SPN, trust, ACL), not a password.
 
 ## Done
 

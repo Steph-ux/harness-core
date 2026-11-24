@@ -46,6 +46,12 @@ This method does not promote a scanner result into a `cyber_finding`. It only
 capitalizes already confirmed evidence into an abstract lesson; the original
 project finding and its observations remain the source of truth.
 
+### Leakage scan before promote
+
+Strip host, URL, IP, email, hash, token from the proposed fact. If `cyber_method promote` would refuse identifiers, fix the text — do not file a `cyber_finding` from the lesson itself.
+
+Two sessions, confidence ≥ 0.75. A lesson without positive and negative observations stays a candidate.
+
 ## Done
 
 One hunter session yields at most one abstract fact and, every second success, one reusable skill. Raw target data, hostnames, and secrets are never preserved.

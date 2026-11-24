@@ -68,7 +68,11 @@ cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <A>","<url
 cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <A>","<url>/api/<res>/<B-id>"]
 ```
 
-Restore write canaries. No customer id enumeration.
+Restore write canaries. No customer id enumeration. Public-by-design catalogs, cache hits, and redacted 200 bodies stay controls, not findings. Untested reference types remain `not-tested` with the reason.
+
+### Evidence ids
+
+Own GET, missing GET, cross GET, optional re-read: four ids if write, three if read-only. Missing the missing-id control → candidate. `contains` is B's private field.
 
 ## Done
 

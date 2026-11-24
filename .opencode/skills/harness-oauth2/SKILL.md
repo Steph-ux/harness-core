@@ -58,11 +58,15 @@ Client-A token on api-B. Acceptance = candidate → `harness-jwt` / triage. Impl
 | Strip PKCE | verifier required | token without verifier |
 | Wrong `aud` | api-B 401 | api-B 200 |
 
-Implicit and device-code: `not-tested` unless named. Redact codes.
+Implicit and device-code: `not-tested` unless named. Redact codes. Capture the callback only when it contains no token. A redirect to an error page is not account takeover.
 
 ```
 cyber_process argv=["curl","-sS","-D","-","-G","<authorize>","--data-urlencode","redirect_uri=https://attacker.example/cb"]
 ```
+
+### Evidence ids
+
+Legit token exchange, mutated authorize/callback, resource request if session claimed. SHA256 of codes only. A 302 to an error page is not takeover.
 
 ## Done
 

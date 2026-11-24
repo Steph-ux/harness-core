@@ -46,6 +46,16 @@ cyber_process argv=["python3","-c","print('control table is the snapshot input, 
 
 Do not run a compliance scanner and paste its score. If a tool is used (`lynis`, `inspec`), its output is an observation that still has to map to one control id.
 
+### Control states
+
+| State | Requires |
+|---|---|
+| passed | observation id + marker |
+| failed | finding id already verified |
+| not-tested | missing artifact named |
+
+A scanner score is not a control. Neighbouring out-of-scope controls must not appear as passed (negative control).
+
 ## Done
 
 Every in-scope control is passed, failed, or `not-tested`. No control is passed without an observation id. The framework name is in the mission scope, not inferred.

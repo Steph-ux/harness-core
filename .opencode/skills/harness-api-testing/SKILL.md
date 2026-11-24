@@ -61,6 +61,10 @@ Triage via `harness-vuln-triage`. `cyber_finding` with inventory source, unauth 
 
 A class not in the spec stays `not-tested`. Pagination, method override and duplicate parameters are extra rows, not a substitute for the matrix.
 
+### Evidence ids
+
+Inventory, unauth, low-priv, optional BOLA/canary. Spec chunk as `cyber_source`. Untested route classes stay `not-tested`.
+
 ## Done
 
 Every claimed route has unauth+auth observations. A finding cites the spec chunk + two controls + reproduction.

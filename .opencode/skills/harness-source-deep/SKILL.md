@@ -45,6 +45,21 @@ Regex/AST extract of `/api/` paths → `endpoints.json` observation for `harness
 
 A JS finding needs bundle hash, a quoted `file:line` taint path, runtime or XSS confirmation or an explicit candidate, and a benign-function negative control. A regex hit without a path is not a finding.
 
+### Sink classes (one per pass)
+
+| Class | Examples | Next method |
+|---|---|---|
+| DOM | innerHTML, document.write | xss |
+| network | fetch, XHR | api-testing |
+| storage | localStorage | secret-scan if token |
+| postMessage | event.origin missing | xss |
+
+```
+cyber_process argv=["curl","-sS","-o","<evidence-dir>/app.js","<approved-js-url>"]
+```
+
+Quote `file:line` from the map. Benign nearby function is the negative control.
+
 ## Done
 
 Evidence holds bundle hash, one sink `file:line`, negative control. String match without taint path is not a finding.
