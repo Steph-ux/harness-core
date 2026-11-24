@@ -33,11 +33,25 @@ cyber_process argv=["satdump","<pipeline>","<capture.iq>","<out-dir>"]
 
 Missing tool → `not-tested`. Do not retune a dish.
 
-If the surface is a **ground HTTP API**, one GET of a documented telemetry path with the test identity (`harness-api-testing` discipline).
+If the surface is a **ground HTTP API**, one GET of a documented telemetry path:
+
+```
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <test>","<ground-api>/api/v1/telemetry/<spacecraft-id>"]
+```
+
+Unauthenticated probe (test if auth is enforced):
+
+```
+cyber_process argv=["curl","-sS","-D","-","-o","/dev/null","-w","status:%{http_code}","<ground-api>/api/v1/telemetry/<spacecraft-id>"]
+```
 
 ### 3. Negative control
 
 A frequency or spacecraft **not** on the approved list must not be decoded or requested. A second API path that 404s is the control for "shadow telemetry".
+
+```
+cyber_process argv=["curl","-sS","-D","-","-o","/dev/null","-w","status:%{http_code}","<ground-api>/api/v1/telemetry/NOT-IN-SCOPE-ID"]
+```
 
 ### 4. Finding contract
 

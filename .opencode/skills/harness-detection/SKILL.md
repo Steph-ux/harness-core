@@ -45,7 +45,22 @@ Run the **same** rule on:
 
 A match there **rejects** the rule. The same output cannot be both the claim and its refutation.
 
-### 5. Tune once, then freeze
+### 5. SIEM query variant
+
+If the detector is a log query instead of Sigma/YARA:
+
+```
+cyber_process argv=["grep","-rnE","<pattern-from-finding>","<repro-log>"]
+cyber_process argv=["grep","-rnE","<pattern-from-finding>","<clean-log>"]
+```
+
+Or Splunk/Elastic CLI:
+
+```
+cyber_process argv=["curl","-sS","-H","Authorization: Bearer <siem-token>","-d","{\"query\":\"<spl-or-kql>\",\"earliest\":\"-1h\"}","<siem-url>/services/search/jobs/export"]
+```
+
+### 6. Tune once, then freeze
 
 If the clean twin matches, narrow **one** field (image name, hash, path template). Re-run steps 3 and 4. A second tune without a new observation is narration. Do not add a second technique to "make it hit".
 

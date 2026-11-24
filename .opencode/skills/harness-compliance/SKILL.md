@@ -44,7 +44,20 @@ The report snapshot carries the control table beside finding ids. Each passed ro
 cyber_process argv=["sha256sum","<evidence-dir>/control-table.json"]
 ```
 
-Do not run a compliance scanner and paste its score. If a tool is used (`lynis`, `inspec`), its output is an observation that still has to map to one control id.
+If a tool is used, its output is an observation that maps to one control id:
+
+```
+cyber_process argv=["lynis","audit","system","--cronjob","--logfile","<evidence-dir>/lynis.log","--report-file","<evidence-dir>/lynis-report.dat"]
+cyber_process argv=["inspec","exec","<profile>","--reporter","json:<evidence-dir>/inspec.json","--target","ssh://<host>"]
+```
+
+For TLS/crypto controls, link to `harness-crypto-tls` observation:
+
+```
+cyber_process argv=["testssl.sh","--quiet","--color","0","--jsonfile","<evidence-dir>/tls-compliance.json","https://<host>"]
+```
+
+Do not paste a scanner score as evidence. Map each finding to its control id.
 
 ### Control states
 

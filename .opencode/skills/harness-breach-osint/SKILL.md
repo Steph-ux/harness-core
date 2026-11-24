@@ -15,9 +15,9 @@ The identifier (email, username, or domain) must be named in the approved scope.
 
 1. Run one breach check at a time against the approved identifier:
 
-```text
-holehe <email> --only-used
-theHarvester -d <domain> -b all -l 100 -f <evidence-dir>/theharvester.html
+```
+cyber_process argv=["holehe","<email>","--only-used"]
+cyber_process argv=["theHarvester","-d","<domain>","-b","all","-l","100","-f","<evidence-dir>/theharvester.html"]
 ```
 
 When a breach-search binary is on PATH and the scope allows it (e.g. local `haveibeenpwned` wrapper, `dehashed` file), run it as `cyber_process` with `argv` and write into `<evidence-dir>/breach-<identifier>.json`. Record one observation per tool.
@@ -26,7 +26,33 @@ When a breach-search binary is on PATH and the scope allows it (e.g. local `have
 
 3. Confirm with a second independent source already allowed by `osint-deep`: the same identifier plus a known name, username, or phone hit. One breach-source hit is not confirmation.
 
-4. Extracted credentials stay leads. Testing a credential against a live service is a separate approved check: one request with the found credential via `cyber_process` `argv`, then stop. Record that attempt as its own observation.
+4. Extracted credentials stay leads. Testing a credential against a live service is a separate approved check:
+
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-H","Content-Type: application/json","-d","{\"email\":\"<email>\",\"password\":\"<hash-only-ref>\"}","<approved-login-url>"]
+```
+
+Then stop. Record that attempt as its own observation.
+
+5. Second-source confirmation — use a different tool:
+
+```
+cyber_process argv=["maigret","<username>","--json","simple","--timeout","10","-o","<evidence-dir>/maigret-<username>.json"]
+```
+
+Or domain-level email harvest:
+
+```
+cyber_process argv=["emailfinder","-d","<domain>","-o","<evidence-dir>/emailfinder.json"]
+```
+
+6. Negative control — query an address known NOT to be in scope:
+
+```
+cyber_process argv=["holehe","unused-control-address@example.com","--only-used"]
+```
+
+This must return zero breach hits. If it returns hits, the tool's noise floor is too high.
 
 Every confirmed credential is `cyber_finding` with its breach observation, the second-source observation, and the auth-attempt observation (or the explicit statement that auth was not attempted). Unconfirmed hits stay candidates.
 

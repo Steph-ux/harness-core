@@ -13,88 +13,120 @@ Approved `host+auth endpoint+test accounts` only. Every command via `cyber_proce
 
 ## Steps
 
-### 1. Authentication endpoint mapping
+### 1. Positive control — valid login
 
-Identify all auth surfaces:
-- Login forms (username+password)
-- API authentication (`/api/auth`, `/oauth/token`)
-- SSO/SAML endpoints
-- Password reset / forgot password
-- OTP/MFA verification
-- Account registration (for user enumeration)
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-H","Content-Type: application/json","-d","{\"username\":\"<test-user>\",\"password\":\"<test-pass>\"}","<url>/api/auth/login"]
+```
 
-### 2. User enumeration (timing-based)
+Record status (`200`), `Set-Cookie`, body schema. Hash the response. This is the functional baseline.
 
-Before spraying, check if the endpoint leaks valid usernames:
-- Send valid username + wrong password → measure response time
-- Send invalid username + wrong password → measure response time
-- 5 samples each, compare median response times
-- Difference > 100ms consistently → timing-based user enumeration
+### 2. Negative control — invalid credentials
 
-Also check:
-- Different error messages ("invalid username" vs "invalid password")
-- Different HTTP status codes
-- Different response lengths
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-H","Content-Type: application/json","-d","{\"username\":\"<test-user>\",\"password\":\"WRONG-aZ9x$\"}","<url>/api/auth/login"]
+```
 
-### 3. Lockout policy detection
+Record status, body, `Content-Length`. Then repeat with an invalid username:
 
-Before any spray, determine the lockout policy:
-1. Send 3 wrong passwords for a test account → still accessible?
-2. Send 5 wrong passwords → locked?
-3. Send 10 wrong passwords → locked?
-4. If locked, wait 5 min → unlocked? 15 min? 30 min?
-5. Record: threshold, lockout duration, reset mechanism
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-H","Content-Type: application/json","-d","{\"username\":\"nonexistent-user-xK3\",\"password\":\"anything\"}","<url>/api/auth/login"]
+```
 
-**If no lockout detected after 10 attempts → vulnerability (no account lockout).**
+Compare the two rejection responses. If error message, status, or body length differ → user enumeration signal.
 
-### 4. Rate limit analysis
+### 3. Timing-based user enumeration
 
-Test rate limiting on the auth endpoint:
-- Send 10 requests in 1 second → throttled?
-- Send 10 requests over 10 seconds → throttled?
-- Rotate source IP (if proxy available) → still throttled?
-- Change User-Agent → still throttled?
-- Use different HTTP methods (GET vs POST) → different limits?
+Five samples each, valid then invalid username, same wrong password:
 
-### 5. Password spray (bounded)
+```
+cyber_process argv=["curl","-sS","-o","/dev/null","-w","%{time_total}","-X","POST","-H","Content-Type: application/json","-d","{\"username\":\"<test-user>\",\"password\":\"WRONG\"}","<url>/api/auth/login"]
+```
 
-If no lockout or rate limit was detected:
-1. Select 3-5 common passwords: `Password1!`, `Summer2024!`, `Welcome1!`, `Company123!`, `Changeme1!`
-2. For each test account: try ONE password, wait 30 seconds, try the next
-3. Never try more than 5 passwords per account per hour
-4. Monitor for lockout after each attempt
+```
+cyber_process argv=["curl","-sS","-o","/dev/null","-w","%{time_total}","-X","POST","-H","Content-Type: application/json","-d","{\"username\":\"fake-nonexistent-9Zx\",\"password\":\"WRONG\"}","<url>/api/auth/login"]
+```
 
-Spray pattern: one password across all accounts before moving to the next password (avoids per-account lockout).
+Median difference > 100ms across 5 samples → timing-based enumeration candidate. Record each `time_total`.
 
-### 6. MFA bypass testing
+### 4. Lockout policy detection
 
-If MFA is present:
-- OTP brute-force: is the OTP rate-limited? (try 10 wrong OTPs)
-- OTP reuse: can the same OTP be used twice?
-- OTP expiry: does the OTP expire? After how long?
-- MFA fatigue: can unlimited push notifications be sent?
-- Fallback: can MFA be bypassed via a recovery flow?
-- API bypass: does the API enforce MFA or only the web UI?
+Three wrong passwords spaced 2 seconds apart for the test account:
 
-### 7. Session management
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-H","Content-Type: application/json","-d","{\"username\":\"<test-user>\",\"password\":\"WRONG-1\"}","<url>/api/auth/login"]
+```
 
-After successful authentication:
-- Session token entropy (is it predictable?)
-- Session fixation (can you set the session before auth?)
-- Concurrent sessions (is there a limit?)
-- Session revocation on password change
+After 3 failures, attempt valid login. Still works → no lockout at 3. Repeat to 5, then 10, testing valid login after each batch. Record the threshold where valid login fails or returns `423`/`429`.
 
-### 8. Negative controls
+If no lockout after 10 attempts → missing account lockout candidate.
 
-- Control 1: valid credentials → successful login (positive control)
-- Control 2: clearly invalid credentials → rejected (negative control)
-- Control 3: locked account → spray rejected (if lockout exists)
-- Control 4: rate-limited request → 429 or block (if rate limit exists)
+### 5. Rate limit analysis
 
-## Proof contract
+Ten requests in rapid succession:
 
-A finding needs: (1) identified auth endpoint and policy, (2) demonstrated weakness (no lockout, no rate limit, user enumeration, MFA bypass), (3) bounded evidence (not exhaustive brute-force), (4) reproduction, (5) four negative controls. A wrong password error is not a finding — missing lockout is.
+```
+cyber_process argv=["curl","-sS","-D","-","-o","/dev/null","-w","status:%{http_code} time:%{time_total}","-X","POST","-H","Content-Type: application/json","-d","{\"username\":\"<test-user>\",\"password\":\"WRONG\"}","<url>/api/auth/login"]
+```
+
+Run 10 times. Record each status and time. If no `429`, `503`, or CAPTCHA challenge after 10 rapid requests → missing rate limit candidate. Test also with different `User-Agent` and `X-Forwarded-For` to check if limits are per-IP or per-session.
+
+### 6. Bounded spray — one password, all accounts
+
+Spray pattern: ONE common password across all test accounts (wait 5s between each), then verify valid login still works:
+
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-H","Content-Type: application/json","-d","{\"username\":\"<test-user-1>\",\"password\":\"Password1!\"}","<url>/api/auth/login"]
+```
+
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-H","Content-Type: application/json","-d","{\"username\":\"<test-user-2>\",\"password\":\"Password1!\"}","<url>/api/auth/login"]
+```
+
+Maximum 5 passwords per account per hour. After each pass, re-login with valid credentials to confirm no lockout.
+
+### 7. MFA bypass — OTP rate limit
+
+If MFA is present, test OTP brute-force resistance:
+
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-H","Content-Type: application/json","-d","{\"otp\":\"000000\"}","<url>/api/auth/verify-otp"]
+```
+
+Send 5 wrong OTPs. If still accepted on 6th → no OTP rate limit. Test OTP reuse (send same valid OTP twice). Test OTP expiry (use a valid OTP after 5 min).
+
+### 8. API vs UI enforcement
+
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-H","Content-Type: application/json","-d","{\"username\":\"<test-user>\",\"password\":\"<test-pass>\"}","<url>/api/v1/login"]
+```
+
+If the web UI enforces CAPTCHA or MFA but the API endpoint at a different path does not → MFA/CAPTCHA bypass candidate.
+
+### Stop
+
+More than 10 attempts per account per cycle. Production accounts. Sustained brute-force. Lockout without recovery plan.
+
+### Evidence ids
+
+Keep positive-login, invalid-user-rejection, valid-user-rejection, timing samples (5+5), lockout probes, rate-limit probes, spray attempts, and MFA probes as separate observations. Each observation records status, body hash, and `time_total`.
+
+## Verification scenarios
+
+| Scenario | Observation | Expected classification |
+|---|---|---|
+| Valid login returns session token | 200 + Set-Cookie | positive control confirmed |
+| Invalid user vs invalid password same response | identical status+length+body | user enumeration: not vulnerable |
+| Invalid user 50ms, valid user 250ms, 5 samples | consistent delta > 100ms | timing-based enumeration candidate |
+| 10 wrong passwords, valid login still works | 200 on 11th attempt | missing account lockout candidate |
+| 10 rapid requests all return 200 | no 429/503/CAPTCHA | missing rate limit candidate |
+| OTP endpoint accepts 10 wrong codes | no block after 10 | OTP brute-force candidate |
+| API login skips CAPTCHA present in web UI | 200 without challenge | CAPTCHA bypass candidate |
+| Rate limit triggers at 5 req/s | 429 on 6th | negative control: rate limit present |
+| Account locks at 5 wrong passwords | 423 on 6th | negative control: lockout present |
+
+A wrong password rejection is not a finding. The finding is the missing protection (no lockout, no rate limit, differential responses, OTP bypass).
 
 ## Done
 
-Each finding cites the auth endpoint, the policy gap (lockout threshold, rate limit, MFA bypass), the bounded test results, and all negative controls. Never report a valid password found via spray — report the missing protection.
+`cyber_finding` cites the auth endpoint, the policy gap, the bounded evidence (attempt count, timing deltas, status codes), and all controls. A valid password discovered by spray is never reported — only the missing protection is. Untested MFA or API paths stay `not-tested`.

@@ -25,28 +25,58 @@ Record which account/project/subscription is in scope, the exact credential used
 
 Read what is already collected before touching a live API: `terraform.tfstate` / `*.tf`, CloudFormation templates, `docker-compose.yml`, CI config, provider bundles already in `evidence/`, and any `cloud-<provider>.json` output. Record the source with `cyber_source` (chunk id) and build the entity graph (`cyber_entity`). Most misconfigurations (public bucket, open SG, over-broad role) are already visible here; a live read only confirms one.
 
-```text
-grep -rn "0.0.0.0/0\|::/0\|public-read\|publicly_accessible\|acl.*public" <evidence-dir>
-grep -rn "Action.*\\*\|Resource.*\\*\|assume_role\|iam:PassRole" <evidence-dir>
+```
+cyber_process argv=["grep","-rnE","0\\.0\\.0\\.0/0|::/0|public-read|publicly_accessible|acl.*public","<evidence-dir>"]
+cyber_process argv=["grep","-rnE","Action.*\\*|Resource.*\\*|assume_role|iam:PassRole","<evidence-dir>"]
 ```
 
 ### 3. IAM, roles and trust policies
 
-The privilege-escalation graph, not a user list. Enumerate principals, attached/assumed policies, and **trust** relationships (`AssumeRolePolicyDocument`, workload identity, service accounts). Flag: `Action:"*"` with `Resource:"*"`; `iam:PassRole` + `ec2:RunInstances` / `lambda:CreateFunction`; `iam:CreatePolicyVersion` + `SetDefaultPolicyVersion`; a trust policy allowing a foreign account or `*` principal; a service account with `roles/owner` or `roles/editor`; a managed identity with subscription-level contributor. Candidate until two observations (evidence + live read) agree on the same principal and permission.
+The privilege-escalation graph, not a user list. Enumerate principals, attached/assumed policies, and **trust** relationships.
 
-- AWS: `aws iam get-account-authorization-details`, `aws iam list-roles`, `aws sts get-caller-identity`
-- GCP: `gcloud projects get-iam-policy <project> --format=json`
-- Azure: `az role assignment list --all --output json`, `az ad sp list --all`
+```
+cyber_process argv=["aws","sts","get-caller-identity","--output","json"]
+cyber_process argv=["aws","iam","get-account-authorization-details","--output","json"]
+cyber_process argv=["aws","iam","list-roles","--output","json"]
+```
+
+GCP:
+
+```
+cyber_process argv=["gcloud","projects","get-iam-policy","<project>","--format=json"]
+```
+
+Azure:
+
+```
+cyber_process argv=["az","role","assignment","list","--all","--output","json"]
+cyber_process argv=["az","ad","sp","list","--all","--output","json"]
+```
+
+Flag: `Action:"*"` + `Resource:"*"`, `iam:PassRole` + compute create, trust policy with foreign account or `*` principal, service account with `roles/owner`. Candidate until evidence + live read agree.
 
 ### 4. Storage
 
-Buckets, containers, disks and snapshots. For each: public access (`public-read` ACL, `allUsers`/`allAuthenticatedUsers`, `--allow-blob-public-access`), missing default encryption, disabled versioning/logging, cross-region replication to a foreign account, and a bucket policy with a `*` principal.
+```
+cyber_process argv=["aws","s3api","list-buckets","--output","json"]
+cyber_process argv=["aws","s3api","get-bucket-acl","--bucket","<bucket>","--output","json"]
+cyber_process argv=["aws","s3api","get-bucket-policy","--bucket","<bucket>","--output","json"]
+cyber_process argv=["aws","s3api","get-public-access-block","--bucket","<bucket>","--output","json"]
+```
 
-- AWS: `aws s3api list-buckets`, `aws s3api get-bucket-acl`, `get-bucket-policy`, `get-public-access-block`
-- GCP: `gcloud storage buckets list`, `gcloud storage buckets describe gs://<b>` (iamConfiguration)
-- Azure: `az storage account list`, `az storage container show-permission`
+GCP:
 
-A 200 listing where the ACL says `public-read` is the signal; a `403` with the same credential is the **negative control**. Never download objects to prove exposure — list metadata only.
+```
+cyber_process argv=["gcloud","storage","buckets","describe","gs://<bucket>","--format=json"]
+```
+
+Azure:
+
+```
+cyber_process argv=["az","storage","account","list","--output","json"]
+```
+
+A 200 listing where the ACL says `public-read` is the signal; a `403` on a private bucket is the **negative control**. Never download objects — list metadata only.
 
 ### 5. Compute, images, containers and Kubernetes
 
@@ -133,6 +163,27 @@ Run `harness-vuln-triage` first. A cloud finding is `cyber_finding` with `eviden
 - [ ] metadata endpoints and workload identity
 - [ ] read-only negative controls and dry-run validation
 - [ ] evidence review and cleanup boundary
+
+## Verification scenarios
+
+| Scenario | Observation | Expected classification |
+|---|---|---|
+| Bucket ACL `public-read` + anonymous list succeeds | 200 with object list | public bucket candidate |
+| Bucket ACL `private` + anonymous list → 403 | AccessDenied | negative control confirmed |
+| IAM policy `Action:*` + `Resource:*` on a principal | authorization-details JSON | over-permissive IAM candidate |
+| Trust policy allows foreign account as principal | AssumeRolePolicyDocument | cross-account trust candidate |
+| SG rule `0.0.0.0/0` on port 22 + nmap confirms SSH open | open port + SG JSON | public SSH candidate |
+| SG rule `0.0.0.0/0` on port 22 but nmap shows filtered | no connection | SG exists but not reachable (verify) |
+| IMDSv1 enabled on instance | HttpTokens: optional | SSRF → credential theft candidate |
+| IMDSv2 required | HttpTokens: required | negative control confirmed |
+| CloudTrail multi-region enabled | describe-trails JSON | negative control confirmed |
+| No CloudTrail | empty or absent | missing audit trail candidate |
+| Lambda env var contains secret | get-function-configuration | secret in env candidate |
+| Kubernetes anonymous auth | `kubectl auth can-i --list` as anonymous | anon K8s access candidate |
+| trivy config scan finds public SG in IaC | trivy output | IaC misconfiguration candidate |
+| Private key in evidence directory | grep match | key exposure candidate |
+
+A config file reference alone is not a finding. The finding requires a live read confirming the misconfiguration.
 
 ## Done
 

