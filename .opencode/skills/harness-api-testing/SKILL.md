@@ -1,52 +1,66 @@
 ---
 name: harness-api-testing
-description: "Test an approved API in a fixed order: inventory, authentication, authorization, then input handling, with a negative control for each claim."
+description: "Test an approved API in order: inventory, unauth negative, low-priv baseline, BOLA, one input canary; every claim has a control; 200 envelope is not a leak."
 ---
 
-# API testing — inventory → auth → BOLA → input (2024 realities)
+# API testing — inventory → auth → BOLA → input
 
-Source: `conducting-api-security-testing` (OpenAPI diff, BOLA-first, 2024 state).
+Source: OpenAPI diff, BOLA-first. Shadow routes go to `harness-shadow-api`.
 
 ## Gate
 
-Every command goes through `cyber_process` with `argv`. Do not build a shell string.
-Base URL, spec/OpenAPI, test accounts named in scope. Lowest-priv first. No real-customer mutation unless explicitly approved.
+Every command goes through `cyber_process` with `argv`. Do not build a shell string. Base URL, spec, and test accounts named in scope. Lowest-priv first. No real-customer mutation unless explicitly approved.
 
 ## Steps
 
-1. Inventory from `endpoints.json`+`openapi.json`+`katana -jc`/`hakrawler`/`cariddi`/`paramspider` in `<evidence-dir>`. Diff documented vs observed → shadow → `harness-shadow-api`. Record observation.
-2. Auth controls: each state-changing route `GET/POST` w/o cred → `401/403` (negative), then with low-priv cred → `200` baseline (positive). Both `cyber_process` `argv`.
-3. BOLA: swap `id` to `id+1` or second identity's object. Re-read `GET /api/<resource>/<id>` to see leak. `200` error envelope is not leak.
-4. Input: from `taint-inventory.json` / `semgrep --config p/xss,p/sqli,p/command-injection`, fuzz one tainted param with canary (`XSS-CANARY`, `SLEEP(2)`, `{{7*7}}`). Record.
-5. Triage every candidate via `harness-vuln-triage` → `cyber_finding`. Add `cyber_capture` when visual.
+### 1. Inventory
 
-### Coverage matrix
+From `openapi.json` + crawl already in evidence. Diff documented vs observed. Record one observation. `cyber_source` the spec.
 
-For every in-scope route record: method, path template, authentication state,
-role, object reference, content type, rate-limit response, and whether the
-operation is read or write. Test one representative route in each class:
-public read, authenticated read, authenticated write, admin-only function,
-file upload, webhook/callback, and batch/export. A route absent from the
-documented contract is a shadow-API candidate, not automatically a flaw.
+```
+cyber_process argv=["curl","-sS","-D","-","<base>/.well-known/openapi.json"]
+```
 
-### Input and state controls
+Missing spec → harvest from client (`harness-source-deep`), still one inventory obs.
 
-Use a harmless unique canary and one mutation at a time. For parsers compare
-the canary in JSON, form, multipart, path, query, header and webhook fields.
-For state changes capture before and after with a re-read; a response body or
-HTTP 200 alone never proves persistence. Check method override, duplicate
-parameters, content-type changes, pagination limits, cursor ownership and
-idempotency keys only when the endpoint supports them.
+### 2. Auth controls (every state-changing class)
 
-### Proof contract
+Unauth `GET/POST` → expect `401`/`403` (negative control). Low-priv cred → `200` baseline (positive). Both via `cyber_process` `argv`. One representative of: public read, auth read, auth write, admin function, upload, webhook, batch/export. Untested class stays `not-tested`.
 
-Each route gets an observation for the unauthenticated negative control and the
-authorized baseline. A suspected authorization or input issue additionally
-needs the exact mutated request, the server response, and a re-read or callback
-showing the effect. Redact tokens, cookies, PII and request bodies that are not
-needed to reproduce the claim. Unresolved routes remain `not-tested` with the
-reason (missing account, unavailable environment, or scope restriction).
+### 3. BOLA
+
+Swap `id` to a second identity's object or `id+1` **only if** that id is a test object. Re-read `GET`. Error envelope `200` is not a leak. Detail: `harness-idor`.
+
+```
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <token-A>","<url>/api/<res>/<B-id>"]
+```
+
+### 4. One input canary
+
+One tainted param from `taint-inventory.json` / semgrep: `XSS-CANARY`, `SLEEP` is **out** unless SQLi method is loaded. Prefer a unique marker. JSON vs form vs header: one transport.
+
+### 5. Method override / duplicate params
+
+Only if the endpoint supports them: `_method=DELETE`, duplicate `id`. One extra probe, then stop.
+
+### 6. Finding contract
+
+Triage via `harness-vuln-triage`. `cyber_finding` with inventory source, unauth negative, auth positive, mutated request, re-read or callback. Redact tokens. Capture if visual, linked to the re-read.
+
+### Route-class matrix
+
+| Class | Unauth | Low-priv | Extra |
+|---|---|---|---|
+| Public read | 200 ok | n/a | n/a |
+| Auth read | 401/403 | 200 + own fields | BOLA other-id |
+| Auth write | 401/403 | 200 + re-read | one-field mass assign |
+| Admin function | 401/403 | 403 | high-priv positive |
+| Upload | 401/403 | `harness-file-upload` | n/a |
+| Webhook | unauth reject | signed body | replay control |
+| Batch/export | 401/403 | own rows only | cursor ownership |
+
+A class not in the spec stays `not-tested`. Pagination, method override and duplicate parameters are extra rows, not a substitute for the matrix.
 
 ## Done
 
-Every route has unauth+auth observations. Finding cites inventory `cyber_source` chunk + 2 controls + reproduction.
+Every claimed route has unauth+auth observations. A finding cites the spec chunk + two controls + reproduction.
