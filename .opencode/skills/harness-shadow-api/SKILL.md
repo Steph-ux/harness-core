@@ -21,11 +21,22 @@ and preserve path case/encoding unless the server's equivalence is documented.
 
 ### 2. Observed set
 
-Attack-surface URLs, katana/HAR/BBOT, same host. Keep auth and content-type on the record.
+Collect observed URLs from crawl and traffic:
+
+```
+cyber_process argv=["katana","-u","https://<host>","-jc","-o","<evidence-dir>/katana-urls.txt"]
+cyber_process argv=["grep","-oP","https?://[^\\s\"']+","<evidence-dir>/traffic.har"]
+```
+
+Keep auth and content-type on the record.
 
 ### 3. Diff
 
 `observed − documented` on the **same host** = candidates. Other host = out of scope, not shadow. Health/static asset paths are not enough.
+
+```
+cyber_process argv=["comm","-23","<evidence-dir>/observed-paths-sorted.txt","<evidence-dir>/documented-paths-sorted.txt"]
+```
 
 ### 4. One live probe
 

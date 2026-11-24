@@ -62,6 +62,19 @@ Two sessions, confidence ≥ 0.75. A lesson without positive and negative observ
 
 ```
 cyber_process argv=["sha256sum","<evidence-dir>/taint-inventory.json"]
+cyber_process argv=["sha256sum","<evidence-dir>/endpoints.json"]
+```
+
+Verify semgrep evidence exists:
+
+```
+cyber_process argv=["ls","-la","<evidence-dir>/semgrep-*.json"]
+```
+
+Leakage scan on the proposed lesson text:
+
+```
+cyber_process argv=["grep","-rnE","https?://|[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+|@[a-z]|-----BEGIN|[a-f0-9]{32,}","<evidence-dir>/lesson-draft.md"]
 ```
 
 Use `cyber_lessons pending` then operator once before `run`. Evidence = semgrep + taint/endpoints + lab/persistence. Leakage scan before `cyber_method promote`. This method does not create a `cyber_finding` from a scanner; it capitalizes confirmed evidence. Negative control: lesson without both pos/neg observations stays candidate.

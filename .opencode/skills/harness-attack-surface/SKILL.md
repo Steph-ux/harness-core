@@ -14,54 +14,54 @@ Approved scope only. Every command goes through `cyber_process` with `argv`. `BB
 ## Steps (each step writes into `<evidence-dir>` and is its own observation)
 
 ### A — Passive enumeration
-```text
-bbot -t <apex> -p subdomain-enum -rf passive --strict-scope --no-deps -y --dry-run
-bbot -t <apex> -p subdomain-enum -rf passive --strict-scope --no-deps -y --json -o <evidence-dir>
-amass enum -d <apex> -passive -o <evidence-dir>/amass.txt
-subfinder -d <apex> -all -o <evidence-dir>/subfinder.txt
+
+```
+cyber_process argv=["bbot","-t","<apex>","-p","subdomain-enum","-rf","passive","--strict-scope","--no-deps","-y","--json","-o","<evidence-dir>"]
+cyber_process argv=["amass","enum","-d","<apex>","-passive","-o","<evidence-dir>/amass.txt"]
+cyber_process argv=["subfinder","-d","<apex>","-all","-o","<evidence-dir>/subfinder.txt"]
 ```
 Merge → `candidates.txt` (dedup, only `*.apex` parent kept; rest out-of-scope).
 
 ### B — DNS resolution
-```text
-dnsx -l <evidence-dir>/candidates.txt -resp -o <evidence-dir>/dnsx.json
+
+```
+cyber_process argv=["dnsx","-l","<evidence-dir>/candidates.txt","-resp","-o","<evidence-dir>/dnsx.json"]
 ```
 Only resolved names advance. Unresolved stays candidate.
 
 ### C — Liveness and TLS
-```text
-httpx -l <evidence-dir>/candidates.txt -tls-probe -cname -tech-detect -json -o <evidence-dir>/httpx.json
-tlsx -l <evidence-dir>/httpx.json -o <evidence-dir>/tlsx.json
+
+```
+cyber_process argv=["httpx","-l","<evidence-dir>/candidates.txt","-tls-probe","-cname","-tech-detect","-json","-o","<evidence-dir>/httpx.json"]
+cyber_process argv=["tlsx","-l","<evidence-dir>/httpx.json","-o","<evidence-dir>/tlsx.json"]
 ```
 Any attributable HTTP response, including 401/403/404, supports HTTP liveness.
 Certificate validity is a separate property; invalid TLS does not mean the host is down.
 
 ### D — Historical URLs
-```text
-waymore -i <apex> -mode U -oU <evidence-dir>/waymore.txt
-gau --threads 5 <apex>
-# dedup → historic-urls.txt — every URL is a lead
+
+```
+cyber_process argv=["waymore","-i","<apex>","-mode","U","-oU","<evidence-dir>/waymore.txt"]
+cyber_process argv=["gau","--threads","5","<apex>"]
 ```
 
 ### E — Crawl and params (live hosts in scope only)
-```text
-katana -u https://<live-host> -jc -o <evidence-dir>/katana.txt
-hakrawler -url https://<live-host> -depth 2
-cariddi -intense -plain -target https://<live-host>
-paramspider -d <apex>
-arjun --url https://<live-host>/ --passive -oT <evidence-dir>/arjun.txt
-gf xss <evidence-dir>/katana.txt  # 23 patterns in ~/.gf
+
+```
+cyber_process argv=["katana","-u","https://<live-host>","-jc","-o","<evidence-dir>/katana.txt"]
+cyber_process argv=["hakrawler","-url","https://<live-host>","-depth","2"]
+cyber_process argv=["paramspider","-d","<apex>"]
+cyber_process argv=["arjun","--url","https://<live-host>/","--passive","-oT","<evidence-dir>/arjun.txt"]
 ```
 Normalize → `endpoints.json` (`method + path template + host + params`).
 
 ### F — Deep source + vuln scan (on the same evidence)
-```text
-semgrep --config p/javascript --config p/xss --config p/command-injection --include="*.js" --json -o <evidence-dir>/semgrep.json <evidence-dir>
-nuclei -l <evidence-dir>/httpx.json -t ~/nuclei-templates/http/cves/ -o <evidence-dir>/nuclei-cves.json
-nuclei -l <evidence-dir>/httpx.json -o <evidence-dir>/nuclei.json
-gitleaks detect --source <evidence-dir> --redact=100 --report-format json --report-path <restricted-output-dir>/gitleaks.json --no-banner --exit-code 0
-# Real-secret second-engine scans require the redacting path in harness-secret-scan.
-trivy fs <evidence-dir> --format json --output <evidence-dir>/trivy.json --quiet
+
+```
+cyber_process argv=["nuclei","-l","<evidence-dir>/httpx.json","-t","~/nuclei-templates/http/cves/","-o","<evidence-dir>/nuclei-cves.json"]
+cyber_process argv=["nuclei","-l","<evidence-dir>/httpx.json","-o","<evidence-dir>/nuclei.json"]
+cyber_process argv=["gitleaks","detect","--source","<evidence-dir>","--redact=100","--report-format","json","--report-path","<restricted-output-dir>/gitleaks.json","--no-banner","--exit-code","0"]
+cyber_process argv=["trivy","fs","<evidence-dir>","--format","json","--output","<evidence-dir>/trivy.json","--quiet"]
 ```
 Every hit is a candidate. Needs `harness-vuln-triage` / `harness-secret-scan` / `harness-source-deep` before a finding.
 

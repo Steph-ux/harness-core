@@ -65,6 +65,24 @@ Unexpected secrets follow the owner's incident procedure, not automatic unrecord
 cyber_process argv=["curl","-sS","-X","POST","--data-binary","@canary-test.json","<canary-url>"]
 ```
 
+Send campaign message via approved channel:
+
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-H","Content-Type: application/json","-d","{\"to\":\"<recipient-hash>\",\"template\":\"<pretext>\",\"campaign\":\"<campaign-id>\"}","<sending-api>/send"]
+```
+
+Check delivery status:
+
+```
+cyber_process argv=["curl","-sS","<canary-url>/stats/<campaign-id>"]
+```
+
+Verify control recipient NOT in delivery list:
+
+```
+cyber_process argv=["curl","-sS","<canary-url>/deliveries/<campaign-id>"]
+```
+
 Store is canary fingerprint+timestamp only. Invalid canary is not counted.
 Control recipient never receives. First real secret → halt collection and notify.
 

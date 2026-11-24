@@ -31,13 +31,19 @@ That response is the positive control (A is allowed).
 
 Replay the same URL/method as identity B, one field or role swapped. Record status and body shape. A 200 with an empty list is **not** the same as A's 200 with the object. Compare ids in the JSON, not the HTTP code alone.
 
-### 4. Negative control
+### 4. Negative control — no credential
 
-The same call with:
-- no credential, or
-- a token for an object **A also must not read** (out of both roles)
+```
+cyber_process argv=["curl","-sS","-D","-","-o","/dev/null","-w","status:%{http_code}","<approved-url>"]
+```
 
-must fail (401/403 or empty authorized error). A 200 error page, a login HTML, or a verbose 500 is not "access". If B's "forbidden" response **equals** A's success body, that is the finding — not a control.
+And out-of-role object:
+
+```
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <token-A>","<approved-url>/objects/<out-of-role-id>"]
+```
+
+Must fail (401/403 or empty authorized error). A 200 error page, a login HTML, or a verbose 500 is not "access". If B's "forbidden" response **equals** A's success body, that is the finding — not a control.
 
 ### 5. Finding contract
 

