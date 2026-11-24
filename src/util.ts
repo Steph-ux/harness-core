@@ -200,9 +200,11 @@ export function assertPlainPath(file: string): void {
       real = fs.realpathSync.native(current);
       parent = fs.realpathSync.native(path.dirname(current));
     } catch (error) {
-      // A file can disappear between lstat and realpath: another owner
-      // removed it. An absent path is not a redirected one.
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      // A file can disappear between lstat and realpath, or Windows can
+      // refuse the call on a lock file held by another process (EPERM).
+      // Neither is a redirection.
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "EPERM" || code === "EACCES") continue;
       throw error;
     }
     const expected = path.join(parent, path.basename(current));
