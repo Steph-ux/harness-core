@@ -75,6 +75,36 @@ Real customer, reusing `referenceId`, treating gateway callback as settlement.
 
 Baseline, one mutation, independent read, recompute/400 negative control. Capture linked to final read if UI.
 
+### Reproduction recipe
+
+Invariant first, one mutation, persist via GET. Gateway callback is not settlement.
+
+## Verification scenarios
+
+Use synthetic orders in a sandbox; do not execute this table on live payments.
+Keep the actor, currency, product and quantity constant while changing amount.
+Account for tax, shipping and rounding before declaring an invariant violated.
+
+| Scenario | Observation to collect | Expected classification |
+|---|---|---|
+| Amount changed but recomputed server-side | final order still has catalogue total | clean negative control |
+| Submit echoes `paid`, later GET says `pending` | submit plus independent read | no persisted payment bypass |
+| Illegal price persists in a new order | authoritative total and unique order id | reproducible pricing candidate |
+| Identical idempotency key returns same order | two responses, one ledger entry | correct idempotency |
+| Two sandbox requests create two credits | unique ledger entries and balances | race candidate, not timing alone |
+
+An unexpected partial write needs a follow-up read even when the response is 500.
+Keep the provider's settlement id separate from the application's order id.
+A monetary discrepancy is not automatically a loss: show which actor benefits.
+Preserve test objects until the mission's restitution and cleanup gates permit removal.
+
+### Finding packet
+
+Record the invariant, actor, object id and exact changed field.
+Attach baseline, mutation, independent read and the actual rejecting control.
+State whether settlement, delivery and notifications were tested or not-tested.
+Do not substitute a different vulnerability's 400 response for this control.
+
 ## Done
 
 Finding cites three observations. Submit `200` alone is never a finding.

@@ -45,9 +45,10 @@ destination that is not the approved one.
    Prove the marker is readable and hashed before transfer.
 7. Exfiltration: approved destination, canary file, size cap. Prove the hash
    read back at the destination. Nothing else travels.
-8. Teardown: remove every artifact with the removal command written in step 3,
-   re-run the presence command to show it is gone, and take a final telemetry
-   read. A finding cannot be filed while an artifact remains.
+8. Quiesce emulation at the approved window boundary; preserve its evidence.
+   Record the teardown plan in the report. Remove mission resources only after
+   the reviewed report has recorded restitution and the cleanup gate permits it.
+   Then re-run the presence and telemetry queries to verify removal.
 
 Negative controls: the baseline query before any change (step 1), the second
 approved host that never received the mechanism, the un-obfuscated artifact
@@ -72,7 +73,33 @@ cyber_process argv=["<presence-cmd>"]
 cyber_process argv=["<removal-cmd>"]
 ```
 
-Detection twin → `harness-detection` after teardown. A `cyber_finding` needs the stage observation, the baseline negative control and the teardown proof.
+Detection twin → `harness-detection` using preserved synthetic artifacts.
+A `cyber_finding` needs the stage observation and baseline negative control.
+Track teardown as pending until the restitution/cleanup gate allows execution.
+
+### Reproduction recipe
+
+One artifact, observed second-host control and preserved detection twin.
+Quiesce at the deadline; teardown proof follows the restitution/cleanup gate.
+
+## Verification scenarios
+
+Use only synthetic canaries in a named isolated emulation environment.
+Bind each stage to its authorization family; permission for one stage does not authorize all.
+Separate execution success, sensor collection and alert delivery.
+
+| Scenario | Evidence compared | Expected classification |
+|---|---|---|
+| Collector receives a callback without an attributable host id | source record and host log | unproven channel |
+| Telemetry query misses both baseline and changed artifact | sensor health control | monitoring unavailable, not evasion |
+| Canary reaches the approved destination with matching digest | source and destination artifacts | synthetic transfer supported |
+| Restart is not approved | persistence presence only | survival not-tested |
+| Cleanup is requested before report restitution | mission stage and approval record | deny cleanup |
+
+An untouched second host is useful only if it is actually observed with the same query.
+Record sensor clock skew and ingestion delay before claiming a detection miss.
+Preserve evidence even when the emulation must be halted for safety.
+Report pending teardown explicitly; never fabricate completion to close a stage.
 
 ## Done
 

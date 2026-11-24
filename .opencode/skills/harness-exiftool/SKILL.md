@@ -77,6 +77,30 @@ Remote fetch, `-overwrite_original`, publishing precise GPS, extracting embedded
 
 Hash, JSON extract, clean-fixture control, second source if GPS/author/software is the claim.
 
+### Reproduction recipe
+
+Hash then JSON. GPS/author need a second source. Clean fixture control. No overwrite.
+
+## Verification scenarios
+
+Read metadata from a copy in a restricted parser environment.
+Record ExifTool version, file signature and intake hash before interpreting fields.
+Use grouped/duplicate tags where needed to distinguish EXIF, XMP and filesystem values.
+
+| Scenario | Observation | Expected classification |
+|---|---|---|
+| Synthetic photo has a known GPS tag | JSON tag group and numeric value | parser positive control |
+| Clean twin has the tag removed | same extraction command | negative control |
+| PDF inherits an author's name from a template | template and document metadata | no personal attribution |
+| CreateDate lacks timezone | raw timestamp and format | ambiguous time, not exact UTC |
+| File embeds a thumbnail with old metadata | thumbnail provenance | separate artifact, not current scene |
+
+Metadata is editable; consistency across fields does not establish authenticity.
+Software tags identify the producer that wrote a field, not a currently exposed server.
+A privacy finding needs evidence that the file was disclosed across a real boundary.
+Attach only the minimum redacted fields and the source proving disclosure.
+Keep derived-file hashes distinct from the original intake hash.
+
 ## Done
 
 Evidence holds hash + JSON. No field alone is a finding.

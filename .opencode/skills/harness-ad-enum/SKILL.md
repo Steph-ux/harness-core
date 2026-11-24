@@ -20,8 +20,8 @@ Record domain, foothold, test identity, and DC(s) already in evidence.
 ### 2. LDAP read-only (approved bind only)
 
 ```
-cyber_process argv=["ldapsearch","-x","-H","ldaps://<dc>","-D","<identity>","-b","<base>","(objectClass=user)","dn"]
-cyber_process argv=["ldapsearch","-x","-H","ldaps://<dc>","-D","<identity>","-b","<base>","(objectClass=computer)","dn"]
+cyber_process argv=["ldapsearch","-x","-H","ldaps://<dc>","-D","<identity>","-y","<restricted-password-file>","-z","200","-l","10","-b","<base>","(objectClass=user)","dn"]
+cyber_process argv=["ldapsearch","-x","-H","ldaps://<dc>","-D","<identity>","-y","<restricted-password-file>","-z","200","-l","10","-b","<base>","(objectClass=computer)","dn"]
 ```
 
 Cap the output (head via the tool's own size, not a piped shell). Prefer LDAPS. Record one observation per query.
@@ -29,8 +29,12 @@ Cap the output (head via the tool's own size, not a piped shell). Prefer LDAPS. 
 BloodHound, if in PATH **and** scope allows collection:
 
 ```
-cyber_process argv=["bloodhound-ce","-c","All","--zip","<evidence-dir>/bh.zip"]
+cyber_process argv=["<approved-bloodhound-collector>","--help"]
 ```
+
+This is preflight, not collection evidence. Identify the installed collector,
+its authentication input and bounded collection options before using it.
+The BloodHound CE server executable is not assumed to be a collector.
 
 ### 3. Graph without roasting yet
 
@@ -61,7 +65,7 @@ TGS/AS-REP material: path + SHA256 in the ledger, never the `$krb5tgs$` blob in 
 Users, groups, computers, trusts, SPNs, unconstrained delegation, GPOs, ACLs. Presence ≠ live credential. Disabled/stale separated.
 
 ```
-cyber_process argv=["ldapsearch","-x","-H","ldaps://<dc2>","-D","<identity>","-b","<base>","(objectClass=user)","dn"]
+cyber_process argv=["ldapsearch","-x","-H","ldaps://<dc2>","-D","<identity>","-y","<restricted-password-file>","-z","200","-l","10","-b","<base>","(objectClass=user)","dn"]
 ```
 
 Second DC is the confirmation observation, not a second forest. A write is never the proof. Disabled and stale principals are listed separately from live credentials.
@@ -73,6 +77,40 @@ Password spray, `Add-ADGroupMember`, GPO edit, DCSync unless the letter names it
 ### Evidence ids
 
 LDAP/BH collection, second-DC or denied-query control. Ticket hashes only. Finding title names the principal class (SPN, trust, ACL), not a password.
+
+### LDAPS only
+
+Prefer `ldaps://`. Plain LDAP is `not-tested` unless the letter allows it. Cap result size in the tool, not with a piped `head`.
+
+```
+cyber_process argv=["ldapsearch","-x","-H","ldaps://<dc>","-D","<identity>","-y","<restricted-password-file>","-z","200","-l","10","-b","<base>","(objectClass=computer)","dn"]
+```
+
+BloodHound `-c All` only if PATH and scope allow. Kerberoast/AS-REP: one request, hash only, cracking out unless approved.
+
+### Stop
+
+Spray, Add-ADGroupMember, GPO edit, DCSync unless named, tickets for non-test accounts.
+
+## Verification scenarios
+
+Record the LDAP base DN, bind principal, server and collection time.
+Use the installed collector's documented flags: a BloodHound server is not its collector.
+Pass authentication through its supported protected input, not a password in argv.
+Set the LDAP size and time limits explicitly; truncation is incomplete coverage.
+
+| Scenario | Evidence compared | Expected classification |
+|---|---|---|
+| User has an SPN but no ticket was requested | directory attributes | roastable candidate, no credential compromise |
+| Two DCs return different ACLs | object GUID, replication and timestamps | unresolved replication difference |
+| Authenticated query works; anonymous twin is denied | same base and filter | observed negative control |
+| Disabled account appears in a graph path | account status plus graph edge | inactive path distinguished |
+| Collector cannot page all results | size-limit response | partial collection, not empty directory |
+
+A second agreeing DC corroborates state; it is not a negative control.
+An ACL finding names the trustee SID, inherited scope and effective right.
+Keep ticket acquisition, cracking and directory write privileges separate in coverage.
+The packet includes collection, corroboration, denial and the relevant graph/source chunk.
 
 ## Done
 

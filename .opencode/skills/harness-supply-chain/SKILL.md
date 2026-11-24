@@ -80,6 +80,26 @@ Lockfile hash, one lookup per eco, unflagged-pin control, `affected-by` only aft
 
 Hash the pin file before parse. Lookup the exact version. Unflagged pin or absent name is the negative control. Do not install. Reachability is another method. GHSA without matching pin is not a finding.
 
+## Verification scenarios
+
+Record advisory database version/time and scanner version with the lockfile hash.
+Distinguish declared, resolved, installed and actually imported versions.
+Use the correct ecosystem's version rules; distro backports need distro advisories.
+
+| Scenario | Evidence compared | Expected classification |
+|---|---|---|
+| Upstream version looks old but distro package contains the backport | vendor advisory and package release | do not flag by upstream semver alone |
+| go.sum lists an unused historical module | selected build graph or SBOM | not proof of deployed dependency |
+| Fixed-version fixture is scanned with the same database | same package identity | negative control |
+| Advisory requires an optional feature not enabled | configuration/source | applicability limited |
+| Scanner fails to download its database | error and cache age | unavailable/stale results, not clean |
+
+An installed affected component can support a version-based finding without proven exploitation.
+State reachability as unknown when source/runtime evidence is absent.
+Keep source package, binary package, package URL and aliases linked without merging unrelated names.
+The packet includes exact version, affected range, fixing version, context and control.
+Runtime exploitability, malicious package provenance and build-pipeline compromise are distinct branches.
+
 ## Done
 
 Each reported dependency has a pin, a lookup, and a control. An unscanned ecosystem stays `not-tested`. The lockfile hash is in evidence.

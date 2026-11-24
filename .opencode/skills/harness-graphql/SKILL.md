@@ -74,6 +74,40 @@ Owned test object, reversible marker, re-read, restore. Persisted query: proof i
 
 100 aliases, unbounded batch, load-test, treating `data:null` as bypass.
 
+### Depth ceiling
+
+Four nested fields max. Batch = two queries. Shallow query is the timing baseline. HTTP 200 + `data:null` is the negative control, not bypass.
+
+```
+cyber_process argv=["curl","-sS","-H","Content-Type: application/json","--data-binary","{\"query\":\"{ me { email } }\"}","<url>"]
+```
+
+Disabled `__schema` is a control. Harvest from client if needed. Mutations: owned object, restore.
+
+### Stop
+
+100 aliases, unbounded batch, load-test.
+
+## Verification scenarios
+
+Construct queries from the actual schema; `a{a{...}}` is only a shape illustration.
+Use two owned test accounts and distinguish object-level from field-level authorization.
+Inspect partial `data` even when the response also contains `errors`.
+
+| Scenario | Observation | Expected classification |
+|---|---|---|
+| Private field is null but an unrelated public field is returned | field paths and errors | private field denial holds |
+| Other synthetic user's private field is returned | owner baseline and cross-account query | authorization candidate |
+| Alias requests the same private field | resolver result and matching denial twin | alias does not create permission |
+| Batch of two queries is accepted | both operation results | feature support, not DoS |
+| Depth probe names nonexistent fields | validation errors | invalid probe, not depth enforcement |
+
+Introspection availability alone is not a vulnerability.
+A clean invalid-field error validates parsing, not object authorization.
+Persisted-query registration and execution authorization are separate boundaries.
+Mutation proof requires an independent read under the object owner's identity.
+Attach query variables, operationName, actor and exact returned field path.
+
 ## Done
 
 Cites introspection, allowed, forbidden, single depth/batch. Disabled introspection is not a finding. Untested mutations stay `not-tested`.

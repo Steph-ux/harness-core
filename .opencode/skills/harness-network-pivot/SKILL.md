@@ -76,6 +76,30 @@ Internet-wide naabu, psexec without named auth, unnamed host, non-test identity.
 
 Inventory, scan, unauth, auth. Scan alone is not a `cyber_finding`.
 
+### Reproduction recipe
+
+Bounded scan, unauth then lowest-priv, one hop. Closed port is a control.
+
+## Verification scenarios
+
+Record source host, source address, tunnel endpoint and destination for every probe.
+Confirm whether the scanner uses TCP connect, raw SYN or another transport.
+SOCKS wrappers do not automatically carry raw sockets, UDP or remote DNS.
+
+| Scenario | Observation | Expected classification |
+|---|---|---|
+| Operator workstation reaches a destination directly | local route and socket | no proof of a foothold pivot |
+| Named foothold reaches the approved synthetic service | source and destination connection logs | pivot reachability supported |
+| Adjacent approved service refuses the same connection | answered refusal | network negative control |
+| Proxy resolves a hostname locally instead of remotely | DNS and tunnel logs | topology assumption invalid |
+| SSH BatchMode succeeds using an unintended agent key | key fingerprint and identity | contaminated auth probe |
+
+Use explicit test identities and suppress ambient credentials for unauthenticated checks.
+An unreachable address is inconclusive, not proof that segmentation enforcement works.
+Reachability is not lateral code execution, and code execution is not privilege escalation.
+Attach source attribution, target identity, transport and actual denial evidence.
+Keep the next-hop network untested until it has a separate scope decision.
+
 ## Done
 
 Evidence holds bounded scans and two observations per claimed service (unauth + auth). A pivot is a finding only after the second host's evidence.

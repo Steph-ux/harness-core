@@ -75,6 +75,36 @@ Missing satdump → `not-tested` for decode, do not retune a dish.
 
 Approved frequency list only. No spoofed TC.
 
+### Reproduction recipe
+
+Receive-only. Hash IQ or one TM GET. Use a noise fixture or an actual API denial as control. No TX.
+
+## Verification scenarios
+
+Separate offline RF decoding from ground-API authorization in the coverage record.
+An unqueried frequency is a scope restriction, not an executed negative control.
+Use synthetic IQ and operator-owned telemetry records for actual comparisons.
+
+| Scenario | Observation to collect | Expected result |
+|---|---|---|
+| Known synthetic IQ with documented sample rate | decoder output and capture hash | expected test frame |
+| Noise-only IQ in the same format | same decoder, same parameters | no valid test frame |
+| Decoder emits frames without valid checksums | CRC/quality statistics | unconfirmed decode |
+| Ground API receives a no-token request | HTTP status and body | rejected if access is private |
+| Test tenant requests another synthetic tenant's telemetry | owner baseline and cross-tenant response | authorization candidate only if data matches |
+
+Record sample rate, sample encoding, center frequency and pipeline version.
+Archive the decoder's exact argv only after checking the installed version's help.
+Do not assume the four-argument illustrative pipeline works on every SatDump release.
+Clear telemetry may be intentionally public; confidentiality impact needs a requirement.
+
+### Finding packet
+
+Attach capture identity, decoder configuration, valid-frame marker and noise control.
+For API findings attach policy, owner response and independent denial control.
+Separate packet authenticity from successful demodulation.
+Uplink, command execution and spacecraft state changes are outside this receive-only method.
+
 ## Done
 
 Evidence holds capture/API hash, one decode or GET, and a control. No TX.

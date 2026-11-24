@@ -39,11 +39,14 @@ Firmware/version from the read or from a collected project file (`cyber_source`)
 
 ### 4. Negative control
 
-A register/node **not** in the named list must not be polled. A second PLC not in scope must not be contacted. Same value on an unused register is not "the process".
+Use an offline clean fixture or vendor-approved simulator denial as the negative control.
+Registers and PLCs outside scope remain unqueried; that exclusion is not a control observation.
 
 ### 5. Finding contract
 
-`cyber_finding` only for: default/no auth on an engineering port, cleartext credentials in a collected project, version with a matching lookup — each with the poll/hash observation and the unpolled-point control. **Never** a finding that required a write to prove.
+`cyber_finding` only for a documented boundary violation, credential exposure or
+applicable version issue, with the poll/hash observation and an executed matching control.
+**Never** a finding that required a write to prove.
 
 Wireless/radio on the plant → `harness-wireless` with OT gate, not this method.
 
@@ -62,7 +65,7 @@ cyber_process argv=["tshark","-r","<pcap>","-Y","modbus or dnp3 or enip","-T","f
 cyber_process argv=["mbpoll","-1","-a","<unit>","-r","<reg>","<approved-plc>"]
 ```
 
-Timeout → stop, no retry loop. Unnamed register must not be polled (negative control).
+Timeout → stop, no retry loop. Keep unnamed registers outside coverage, not as tested controls.
 
 ### Stop
 
@@ -70,9 +73,44 @@ Coil write, PLC stop/start, firmware, safety-network scan, radio jamming.
 
 ### Evidence ids
 
-Protocol identity, at most one poll, unpolled-point control. A write is a method violation. Banner ≠ CVE until `cyber_cve` matches the exact version.
+Protocol identity, at most one poll and offline/simulator control. A write is a method violation. Banner ≠ CVE until `cyber_cve` matches the exact version.
 
 Process-safety owner named in scope or stop.
+
+### Safety owner
+
+Process-safety owner must be named. If in doubt, stop. Full cell port-sweep only with named range **and** maintenance window.
+
+```
+cyber_process argv=["mbpoll","-1","-a","<unit>","-r","<reg>","<approved-plc>"]
+```
+
+Timeout → stop, no retry loop. Use the simulator for denial controls. Radio → `harness-wireless`.
+
+### Stop
+
+Coil write, PLC stop/start, firmware, safety-network scan, jamming.
+
+## Verification scenarios
+
+An unpolled point is a scope boundary, not an observed negative control.
+Prefer offline traffic and a vendor-approved simulator for negative comparisons.
+Confirm register type, address base, count and endian interpretation before a poll.
+The mbpoll example omits device-specific settings; resolve them with the safety owner.
+
+| Scenario | Observation | Expected classification |
+|---|---|---|
+| Known simulator point returns the documented value | unit, register and decoder output | parser positive control |
+| Simulator denies a protected synthetic node | same protocol and identity | negative control |
+| One-based and zero-based registers are confused | project map and requested offset | invalid probe |
+| Historian returns cached measurements | timestamp and source | no proof of a fresh PLC read |
+| Live device times out once | deadline and owner notification | stop; availability state unknown |
+
+Plain Modbus without authentication needs network/control-policy context for impact.
+An exposed engineering service is not proof that write access was obtained.
+Record safety owner, maintenance window, source file and exact permitted point.
+Attach actual comparison evidence; never label non-execution as a passed test.
+Unexercised protocol branches remain explicitly not-tested.
 
 ## Done
 

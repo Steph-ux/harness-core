@@ -9,9 +9,9 @@ Source: phishing simulation as a **control test**, not an attack on a person. De
 
 ## Gate
 
-Written authorization, approved recipient list, informed HR/legal owner. Every command goes through `cyber_process` with `argv`. Do not build a shell string. No external third-party kit, no malware attachment, no availability impact, no pretext from personal data of a named individual. The capture endpoint stores **only** `sha256(password)` + timestamp, never the secret.
+Written authorization, approved recipient list, informed HR/legal owner. Every command goes through `cyber_process` with `argv`. Do not build a shell string. No external third-party kit, no malware attachment, no availability impact, no pretext from personal data of a named individual. Collect only a campaign-specific canary fingerprint + timestamp, never a password.
 
-**Stop** at the first real credential: destroy capture, notify owner, halt campaign. **Stop** if any recipient is outside the list.
+**Stop** at the first real credential: halt collection, notify the owner and follow the incident procedure. **Stop** if any recipient is outside the list.
 
 ## Steps
 
@@ -21,13 +21,13 @@ Record approval reference, **hash of the recipient list**, campaign window, cont
 
 ### 2. Canary endpoint proof
 
-Build so a submission records hash+timestamp only. Prove with a test submission:
+Build so a submission accepts the synthetic campaign token and records only its fingerprint and timestamp. Prove with a test submission:
 
 ```
 cyber_process argv=["curl","-sS","-X","POST","--data-binary","@canary-test.json","<canary-url>"]
 ```
 
-Observation must show the store has no plaintext. Empty-password submission is not counted (negative control).
+Observation must show the store has no secret fields. Empty or invalid canary submission is not counted (negative control).
 
 ### 3. One campaign, one pretext class
 
@@ -41,11 +41,13 @@ Delivery, click, canary submission — three observations. An open is not a clic
 
 - control recipient never receives
 - address outside the window is discarded
-- empty password not counted
+- empty or invalid campaign token not counted
 
-### 6. Destroy
+### 6. Quiesce and plan cleanup
 
-Destruction command recorded; store empty observation. If a real secret appeared, it was destroyed in the stop path — the finding is the **control failure rate**, not the secret.
+Halt collection at the approved deadline. Preserve aggregate evidence through restitution.
+Record the cleanup command and execute it only after the mission's restitution gate allows it.
+Unexpected secrets follow the owner's incident procedure, not automatic unrecorded destruction.
 
 ### 7. Finding contract
 
@@ -63,7 +65,8 @@ Destruction command recorded; store empty observation. If a real secret appeared
 cyber_process argv=["curl","-sS","-X","POST","--data-binary","@canary-test.json","<canary-url>"]
 ```
 
-Store is hash+timestamp only. Empty password not counted. Control recipient never receives. Destroy before any `cyber_finding`. First real secret → halt, destroy, notify.
+Store is canary fingerprint+timestamp only. Invalid canary is not counted.
+Control recipient never receives. First real secret → halt collection and notify.
 
 ### Stop
 
@@ -71,10 +74,42 @@ Malware attachment, personal pretext, recipient off-list, third-party kit, conti
 
 ### Evidence ids
 
-Approval chunk, canary-store proof, three counts, control misses, destruction. Finding is the **rate**, never a name. One click without its control stays a candidate.
+Approval chunk, canary-store proof, three counts, control misses and cleanup status.
+Finding is the **rate**, never a name. One click without its control stays a candidate.
 
 Recipient list is stored as a hash, never as a roster in the finding.
 
+### Reproduction recipe
+
+Canary fingerprint+timestamp only. Three counts. Retain aggregate proof through restitution. Rate not names.
+
+## Verification scenarios
+
+Validate the campaign against synthetic recipients before sending to the approved list.
+Prefer a campaign-specific canary token rather than requesting a real password.
+Hashing a submitted real password is still handling a secret; avoid that collection.
+
+| Scenario | Test observation | Expected result |
+|---|---|---|
+| Canary recipient submits a campaign token | token id and timestamp only | count one synthetic submission |
+| Same recipient refreshes the confirmation page | repeated event id | no duplicate success |
+| Mail security scanner prefetches a link | known scanner event | separate from human clicks |
+| Request arrives after campaign expiry | server rejection | negative control |
+| Unlisted recipient requests a campaign URL | allowlist decision | no message or collection |
+
+Record delivered, bounced, unique clicks and synthetic submissions separately.
+Define the denominator before calculating rates; exclude failed deliveries explicitly.
+Report uncertainty caused by proxies, link scanners and incomplete telemetry.
+Campaign simulation must not attribute intent or competence to a named employee.
+
+### Finding packet
+
+Attach authorization, list fingerprint, event schema and synthetic preflight controls.
+Retain aggregate proof through restitution; purge event data through approved cleanup.
+If real credentials appear, halt collection and follow the owner's incident procedure.
+Do not silently delete mission evidence merely to make a report appear clean.
+
 ## Done
 
-Evidence holds approval, canary-store proof, three counts, control misses, destruction proof. No name, no plaintext password.
+Evidence holds approval, canary-store proof, three counts, control misses and
+explicit cleanup status. No name or plaintext password; removal proof is added after approved cleanup.

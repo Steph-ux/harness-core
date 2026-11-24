@@ -15,7 +15,9 @@ Every command goes through `cyber_process` with `argv`. Do not build a shell str
 
 ### 1. Documented set
 
-`cyber_source` `openapi.json` / GraphQL schema / vendor doc. Normalize `method + path template + host` (case, slash, encoding, version prefix, GraphQL operation name).
+`cyber_source` `openapi.json` / GraphQL schema / vendor doc. Match
+`method + path template + host`: uppercase the method, lowercase the host,
+and preserve path case/encoding unless the server's equivalence is documented.
 
 ### 2. Observed set
 
@@ -30,7 +32,7 @@ Attack-surface URLs, katana/HAR/BBOT, same host. Keep auth and content-type on t
 HEAD or harmless GET:
 
 ```
-cyber_process argv=["curl","-sS","-D","-","-o","NUL","-X","HEAD","<approved-url>"]
+cyber_process argv=["curl","-sS","--head","<approved-url>"]
 ```
 
 Record status, content-type, body hash, redirect, auth requirement. `404` = not a shadow. `200` → `harness-vuln-triage` (resource vs error page).
@@ -47,10 +49,10 @@ A shadow finding needs: (1) documented host+method+path template, (2) observed e
 
 ### Diff rules
 
-Normalize method, host, path case, slash, encoding, version prefix, GraphQL operation. Same host only.
+Normalize method/host and documented base path; retain raw path and GraphQL operation. Same approved host only.
 
 ```
-cyber_process argv=["curl","-sS","-D","-","-o","NUL","-X","HEAD","<approved-url>"]
+cyber_process argv=["curl","-sS","--head","<approved-url>"]
 ```
 
 | Result | Meaning |
@@ -74,6 +76,36 @@ Wordlist off-host, POST/PUT/DELETE merely to prove the route, claiming BOLA from
 ### Evidence ids
 
 Contract source, observed-list, live HEAD/GET, sibling 404 negative control.
+
+### Reproduction recipe
+
+Doc vs observed, HEAD/GET, sibling 404. Impact is another method.
+
+## Verification scenarios
+
+Keep raw paths and normalized paths so normalization decisions can be inspected.
+Do not lowercase case-sensitive route paths or decode encoded slashes speculatively.
+Match against the OpenAPI `servers` base path and path-parameter templates.
+
+| Scenario | Comparison | Expected result |
+|---|---|---|
+| `/users/123` matches `/users/{id}` | same method and server | documented route |
+| Old archive route now returns 404 | current response | historical candidate only |
+| Every path returns the same SPA shell | candidate vs invalid sibling | not proof of API existence |
+| HEAD returns 405 | explicit `Allow` header | method unsupported; approved GET may still exist |
+| Candidate returns JSON while sibling returns a distinct 404 | same identity and content negotiation | route existence supported |
+
+Use curl `--head` rather than `-X HEAD` when only headers are needed.
+Use an engagement response file instead of hard-coded Windows `NUL` on Linux.
+A 401 or 403 can establish a protected route exists without proving unauthorized access.
+API version drift is a documentation finding only if the contract is intended complete.
+
+### Finding packet
+
+Attach spec revision, observed client revision, normalized key and raw requests.
+Attach invalid-sibling response, content type and body fingerprint.
+Classify undocumented existence separately from data exposure or authorization bypass.
+Do not turn an observation-only inventory discrepancy into an exploit finding.
 
 ## Done
 

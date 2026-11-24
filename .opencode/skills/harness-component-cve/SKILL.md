@@ -80,6 +80,30 @@ Fuzzing production, publishing a working exploit, proprietary source outside bou
 
 Inventory, lab identity, white-box, lab payload, original-value control, patched miss, `file:line` chunk.
 
+### Reproduction recipe
+
+Lab same pin, one sink, original-value and patched-lab miss. Never live host.
+
+## Verification scenarios
+
+Keep the component pin, lab configuration and exact reproduction fixture immutable.
+Use synthetic marker files rather than real system files for read/write claims.
+A patched miss supports remediation; novelty needs a separate prior-art/advisory check.
+
+| Scenario | Evidence compared | Expected classification |
+|---|---|---|
+| Scanner lists no advisory for the version | scanner/database state | no match found, not “no CVE exists” |
+| Lab uses a different configuration from inventory | digests and feature flags | applicability unresolved |
+| Same trigger works only in the vulnerable build | vulnerable/fixed traces | patch differential supported |
+| Fixed build fails every request, including benign input | functional positive control | broken control, not proof of fix |
+| Request times out without a process crash | process log and exit state | timeout, not confirmed crash |
+
+Check that authentication, parser and feature prerequisites match the actual deployed component.
+Record both original-value and fixed-build controls; neither replaces a fresh reproduction.
+Use offline or approved cached semgrep rules when the lab is network-isolated.
+Attach source location, root cause, minimal patch and affected-version limits.
+Do not claim vendor confirmation, CVE assignment or public disclosure that has not occurred.
+
 ## Done
 
 Evidence holds inventory, lab identity, white-box hits, one successful lab payload, original-value control, patched-lab miss. No finding from an advisory alone.

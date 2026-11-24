@@ -74,6 +74,40 @@ Baseline step, mutated submit, independent read, control. `cyber_finding` after 
 
 GET after mutate is mandatory. Client-disabled button is not a server flaw. Idempotent replay that does not double-write is a negative control.
 
+### Money cap
+
+1 XOF / 0.01 unless the letter allows more. Fresh identity, object, reference each attempt. Two parallel requests max for race + one final read.
+
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","--data-binary","@mut.json","<url>"]
+```
+
+Server recompute/reject is the negative control. Client-disabled button is not a server flaw. `harness-vuln-triage` before `cyber_finding`.
+
+### Stop
+
+Real beneficiary, external payment, customer record, reused `referenceId`.
+
+## Verification scenarios
+
+Derive a state-transition table from source or the actual product contract.
+Reserve fresh references for independent attempts, but retain the same key inside an idempotency replay test.
+The two-request race is scheduled locally; model/tool-call latency cannot guarantee 50 ms.
+
+| Scenario | Postcondition read | Expected classification |
+|---|---|---|
+| Skipped prerequisite returns success without state advance | authoritative workflow state | no transition bypass |
+| Stale version overwrites a newer synthetic object | version and persisted fields | lost-update candidate |
+| Same idempotency key returns one ledger entry | ledger and response references | negative control |
+| Two concurrent requests persist two forbidden credits | both receipts and final balance | concurrency candidate |
+| Mutated amount is accepted then compensated | settlement and compensation history | describe actual net effect |
+
+Describe novelty as unassessed until the affected component and existing advisories are checked.
+A workflow flaw is not a CVE solely because the skill is named logic-cve.
+Use a patched lab or rejecting transition as the actual negative control.
+Separate client validation, server validation, persistence and downstream effects.
+The packet includes state before/after, actor, invariant, version and each observation id.
+
 ## Done
 
 Each logic CVE cites the baseline flow, the single-field mutation, and the later read that proves persistence. No finding from the submit response alone; no finding without the control.

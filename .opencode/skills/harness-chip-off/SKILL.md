@@ -82,6 +82,25 @@ Dump hash, parse, blank-dump control, chunk not the whole NAND.
 
 No dump and no sacrificial approval → `not-tested`. Hash first. Parse read-only. Blank dump must not yield the same keys. Do not flash back. Production phone only with written approval + that hash.
 
+## Verification scenarios
+
+Parse a working copy and compare its hash with the sealed intake image.
+Record NAND page, spare/OOB, ECC and bad-block handling before extracting files.
+Use an isolated parser environment: recursive unpackers execute helper programs.
+
+| Scenario | Observation | Expected result |
+|---|---|---|
+| Blank synthetic dump is scanned | no filesystem or key marker | parser negative control |
+| Header magic appears without a valid filesystem | parser rejects offsets/checksums | format candidate only |
+| Same key belongs to an included test certificate | source path and certificate metadata | fixture, not private device key |
+| ECC correction modifies the working image | before/after hashes and correction log | derived artifact, preserve original |
+| Volume is encrypted and keys are unavailable | parser/decryption error | extraction not-tested |
+
+Do not compare an erased image of unrelated geometry as if extraction methods were identical.
+Separate evidence of key bytes from evidence that a live service trusts that key.
+The finding cites dump identity, partition offset, parsed path and a real parser control.
+Physical extraction success alone is not an authorization or confidentiality flaw.
+
 ## Done
 
 Evidence holds dump hash, parse listing, control. No iron, no reflash.

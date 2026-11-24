@@ -50,7 +50,7 @@ Original value: no OOB/no 49. Syntactically invalid payload: no hit. Out-of-scop
 | Class | Benign marker | Success | Control |
 |---|---|---|---|
 | SSRF | OOB URL you own | callback or 127 banner | original URL, no callback |
-| SSTI | `{{7*7}}` | `49` in body | `{{7*8}}` not 56 |
+| SSTI | `{{7*7}}` | `49` in body | literal text `7*7` stays text |
 | XXE | entity to your marker | marker in response | DTD disabled / no marker |
 | Deser | sleep canary | delay > control median | original blob, no delay |
 | Pollution | `__proto__.x=1` | read-back `x` | `{}` without proto |
@@ -74,6 +74,36 @@ A block page is data. Record status, body hash, duration. Do not rotate five pay
 ### Evidence ids
 
 Baseline, payload, OOB or differential, original-value control. Correlation id in the callback. One class per finding.
+
+### Reproduction recipe
+
+One class per pass. OOB or differential. Original-value control. WAF block is data.
+
+## Verification scenarios
+
+Choose the branch from the observed parser or source-to-sink path, not the error text.
+Use a lab fixture when a control would otherwise require touching an unrelated host.
+A second valid arithmetic expression is corroboration, not a negative control.
+
+| Scenario | Observation required | Expected result |
+|---|---|---|
+| SSTI marker produces 49 and a second expression produces 56 | same rendering sink | engine evaluation supported |
+| Plain `7*7` input returns plain `7*7` | identical route and identity | SSTI negative control |
+| SSRF payload creates a correlated server callback | OOB log plus request id | server request supported |
+| Callback arrives from the testing browser | callback source attribution | not server-side proof |
+| Prototype field appears only on the submitted object | independent clean-object read | no global prototype proof |
+| Serial duplicate is idempotent but concurrent lab requests double-credit | authoritative ledger | race candidate |
+
+Use inert XML or a DTD-disabled lab build as the XXE negative control.
+An XML parser error alone does not establish external entity resolution.
+For deserialization require an attributable effect or a bounded lab differential.
+Do not promote a single timeout into RCE.
+
+### Finding packet
+
+Attach input context, exact mutation, effect observation and matching branch control.
+Mark upload, cache, WebSocket and deserialization subtests not-tested until their methods run.
+Scope non-execution is not a substitute for an observed negative control.
 
 ## Done
 

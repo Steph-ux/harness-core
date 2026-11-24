@@ -83,6 +83,30 @@ Real-customer mutation, mixing five classes in one observation, promoting OpenAP
 
 Inventory, unauth negative control, low-priv positive, optional BOLA/canary, spec chunk.
 
+### Reproduction recipe
+
+Inventory, unauth, low-priv, one extra class. Spec chunk as source.
+
+## Verification scenarios
+
+Resolve server URLs, authentication schemes and request media types from the real spec.
+An OpenAPI URL example is not permission to assume that endpoint exists.
+Use disposable fixtures for every state-changing route class.
+
+| Scenario | Observation | Expected classification |
+|---|---|---|
+| Unknown route returns the same JSON envelope | invalid-sibling response | soft-404 control |
+| First page is filtered but next cursor leaks another test tenant | independent owner data and cursor | pagination authorization candidate |
+| Signed webhook fails with an altered signature | raw body bytes and signature decision | negative control |
+| Duplicate parameter is rejected by parser | request encoding and body | input validation holds |
+| POST is denied but GET succeeds publicly by design | per-method policy | do not infer a write bypass |
+
+Preserve exact request bytes when signatures, duplicate keys or parsers are involved.
+Do not let redirect-following carry test credentials to a different origin.
+Method override tests require reversible synthetic resources, not a real DELETE.
+Attach route class, actor, schema revision, effect and the matching denial control.
+List untested route classes so one representative does not imply full endpoint coverage.
+
 ## Done
 
 Every claimed route has unauth+auth observations. A finding cites the spec chunk + two controls + reproduction.

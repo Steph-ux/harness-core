@@ -76,6 +76,30 @@ Authorization-code + PKCE is the default path. Implicit and device-code stay `no
 
 Redirect to a random Internet host with a real code, capturing tokens in screenshots, mixing three mutations in one callback.
 
+### Reproduction recipe
+
+Legit code exchange, one mutation, resource request if session claimed. Redact codes.
+
+## Verification scenarios
+
+Keep authorization-server validation separate from client callback validation.
+Use an approved callback sink and synthetic accounts; never follow a redirect with a live code off-scope.
+The abbreviated token example needs real code, redirect, client and PKCE inputs from the valid flow.
+Use an actual response artifact instead of platform-specific `NUL` when saving headers.
+
+| Scenario | Observation | Expected classification |
+|---|---|---|
+| State absent but another CSRF binding rejects the callback | client decision and session state | no demonstrated login CSRF |
+| Missing verifier prevents code redemption | token error and code binding | PKCE negative control |
+| Code replay fails with invalid_grant | fresh second exchange | single-use enforcement |
+| Redirect reaches an error page without a code | Location and client state | no code leakage |
+| Wrong-audience access token returns private API data | issuer/audience plus resource response | token boundary candidate |
+
+A new session cookie alone is not proof of a session for the wrong identity.
+Missing `state` is not conclusive if equivalent transaction-bound protections hold.
+Keep ID-token `nonce`/audience verification separate from access-token audience checks.
+The packet names the failing component, grant, binding, resulting identity and control.
+
 ## Done
 
 Each flaw cites legit + altered flow. Missing `state` is weakness only when the stripped callback still creates a session.

@@ -77,6 +77,30 @@ Permute, all-sites first pass, contacting accounts, storing tokens.
 
 Maigret and/or Sherlock, second attribute, unused-username control, HTML/JSON chunk for found URLs only.
 
+### Reproduction recipe
+
+Top-sites only. 200 login is claimed not found. Unused-username control.
+
+## Verification scenarios
+
+Check installed CLI help and the selected site list before a bounded scan.
+Sherlock is not bounded by Maigret's top-sites flag; restrict its sites independently.
+Use approved fixture usernames for the near-match and unused-name controls.
+
+| Scenario | Evidence compared | Expected classification |
+|---|---|---|
+| Profile URL redirects to a generic signup page | redirect chain and body | not a found profile |
+| Site returns the same soft-404 for every username | known-unused twin | reject detector hit |
+| Two people share a username on different sites | independent attributes | identity unresolved |
+| Avatar is a stock image or public template | provenance | weak correlation only |
+| CAPTCHA/rate limit hides the page | tool status and response | unavailable, not account absence |
+
+Keep exact username case when a provider treats it as significant.
+Record final URL, tested site definition version and profile-specific marker.
+Do not expand discovered aliases without a new scope decision.
+Public account existence is inventory, not automatically a security vulnerability.
+Attach the correlation basis and controls without private messages or account contact.
+
 ## Done
 
 Evidence holds Maigret JSON and/or Sherlock text. Confirmed cites two observations + chunk + control.

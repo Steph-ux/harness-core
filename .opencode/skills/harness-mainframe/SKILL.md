@@ -60,7 +60,8 @@ Unauthenticated TN3270 or a named HLQ over cleartext FTP needs the banner/inquir
 cyber_process argv=["nmap","-sV","-Pn","-p","23,992,322","<approved-host>"]
 ```
 
-Default users SAP*/DDIC are out unless a **non-prod** client is named. Denied transaction is the negative control.
+Keep SAP identity checks in `harness-sap`; they are not mainframe principals.
+An approved synthetic transaction denied to the test identity is the negative control.
 
 ### Stop
 
@@ -73,6 +74,40 @@ Banner, one inquiry, denied-transaction control. CVE via `cyber_cve` on exact PT
 A second LPAR not in scope must not be contacted.
 
 LISTCAT/DSPLIB only for a named HLQ. No PAYROLL dump. No `SUBMIT`.
+
+### Inquiry only
+
+One allowed lookup transaction. Screen hash via emulator log, not a PII screenshot.
+
+```
+cyber_process argv=["nmap","-sV","-Pn","-p","23,992,322","<approved-host>"]
+```
+
+Denied transaction is the negative control. Missing emulator → banner-only `not-tested` for apps.
+
+### Stop
+
+SUBMIT, STRQSH write, RACF change, production spray, second LPAR.
+
+## Verification scenarios
+
+Distinguish z/OS datasets and HLQs from IBM i libraries and objects.
+Bind the inquiry to the actual emulator session, LPAR and test principal.
+`x3270if Query Host` identifies a connection; it does not prove application authorization.
+
+| Scenario | Observation | Expected classification |
+|---|---|---|
+| TN3270 negotiation succeeds but login is required | terminal screen and session state | exposed login, not auth bypass |
+| Read-only test inquiry shows a synthetic private marker | principal, transaction and policy | authorized positive control |
+| Same principal is denied another approved test transaction | security response | negative control |
+| Lookup crosses into another LPAR | session/system identity | stop at scope boundary |
+| FTP banner is visible without any data transfer | transport metadata | no claim of disclosed datasets |
+
+Record RACF/ACF2/TSS resource class when it is present in collected policy.
+Banner versions need exact component/PTF applicability before advisory claims.
+A disconnected terminal screen may be cached; verify the current session before attribution.
+Attach redacted screen/log excerpts, host identity, inquiry and actual denial.
+Document untested CICS, IMS, JES and IBM i application branches individually.
 
 ## Done
 

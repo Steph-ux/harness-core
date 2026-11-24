@@ -47,14 +47,16 @@ Record the response hash. No community-string guessing. No radio (`aireplay`, `u
 
 ### 4. Negative control
 
-An interface **not** in scope, or a closed port on the same device, must not be queried or reported as exposed. A version string in a banner is not a CVE until `cyber_cve lookup` says the **exact** version is affected.
+An out-of-scope interface remains unqueried. Use a clean offline firmware fixture
+or an approved interface's actual denial response for the negative control.
+A banner needs exact version/advisory applicability before a CVE claim.
 
 ### 5. Finding contract
 
 `cyber_finding` needs:
 - firmware hash observation
 - unpack or interface observation
-- negative control (out-of-scope iface or unflagged version)
+- executed negative control (clean firmware fixture or permitted interface denial)
 - source chunk (extracted config, not the whole image)
 
 Hardcoded key in firmware: the finding is the **key material in the image**, not a claim you authenticated to the live fleet.
@@ -67,7 +69,7 @@ cyber_process argv=["binwalk","-e","-M","<firmware.bin>"]
 cyber_process argv=["nmap","-sV","-Pn","-p","<port>","<approved-host>"]
 ```
 
-Native blob → `harness-ghidra`. Secret string → `harness-secret-scan`. Lockfile → `harness-supply-chain`. Radio → `harness-wireless`. One banner/TLS/HTTP/MQTT/SNMP named OID. Closed/out-of-scope iface is the negative control. Version ≠ CVE until lookup.
+Native blob → `harness-ghidra`. Secret string → `harness-secret-scan`. Lockfile → `harness-supply-chain`. Radio → `harness-wireless`. One named interface probe with an actual fixture/denial control. Version ≠ CVE until lookup.
 
 ### Stop
 
@@ -75,11 +77,32 @@ Jamming, deauth, firmware write, UART brute, live RCE, default-password spray on
 
 ### Evidence ids
 
-Firmware hash, unpack or interface, out-of-scope iface control, source chunk.
+Firmware hash, unpack or interface, executed fixture/denial control, source chunk.
 
 ### Reproduction recipe
 
-Hash firmware first. Unpack read-only. One live probe if an iface is named. Closed/out-of-scope iface is the control. Banner version waits for `cyber_cve`. No radio in this method.
+Hash firmware first. Unpack read-only. One named live probe if approved.
+Use a clean fixture or actual denial as control. Banner version waits for `cyber_cve`.
+
+## Verification scenarios
+
+Record firmware model, hardware revision, vendor version and intake origin.
+Extract only into a disposable directory with parser resource limits.
+An untouched out-of-scope interface is not an executed negative control.
+
+| Scenario | Evidence compared | Expected classification |
+|---|---|---|
+| Firmware contains a vendor public certificate | certificate purpose and path | public material, not a secret |
+| Sample configuration includes a nonfunctional test password | fixture provenance | scanner negative control |
+| Private management request is denied without credentials | approved interface and response | access-control negative control |
+| Image version differs from the live device | label/project vs runtime identity | no transferred CVE claim |
+| Unpacker reports a filesystem without extracting it | parser log and directory | incomplete analysis |
+
+An MQTT CONNECT may change broker session state; use a disposable client id.
+SNMP read-only claims require the permitted OID and credential, not community guessing.
+Firmware secure boot, update signatures and rollback remain separate unexercised branches.
+Attach actual control responses; scope exclusions belong in coverage limitations.
+Report extracted secrets separately from any claim about live authentication.
 
 ## Done
 

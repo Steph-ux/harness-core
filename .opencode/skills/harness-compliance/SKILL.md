@@ -41,7 +41,7 @@ A failed control becomes a `cyber_finding` only when a reproduction and a negati
 The report snapshot carries the control table beside finding ids. Each passed row cites observation ids. Each failed row cites the finding id. `not-tested` cites the missing artifact name.
 
 ```
-cyber_process argv=["python3","-c","print('control table is the snapshot input, not a scan')"]
+cyber_process argv=["sha256sum","<evidence-dir>/control-table.json"]
 ```
 
 Do not run a compliance scanner and paste its score. If a tool is used (`lynis`, `inspec`), its output is an observation that still has to map to one control id.
@@ -73,6 +73,40 @@ Scope table chunk, one obs or `not-tested` per control, neighbouring out-of-scop
 The report snapshot carries the table beside finding ids. No passed row without an observation.
 
 Lynis/inspec output still maps to one control id, never a pasted score.
+
+### Snapshot
+
+The report table sits beside finding ids. Passed → observation id. Failed → finding id already verified. `not-tested` → missing artifact named.
+
+A scanner score is not a control. Out-of-scope neighbour must not be marked passed (negative control). Failed without a verified finding stays a gap, not a `cyber_finding`.
+
+### Stop
+
+Inventing a vuln from a missing policy, copying ISO annex as evidence, maturity scores.
+
+### Reproduction recipe
+
+Each control is passed/failed/not-tested with an observation id or named gap. Out-of-scope neighbours stay unmarked.
+
+## Verification scenarios
+
+Freeze framework edition, system boundary, assessment period and any tailoring.
+Policy/document review can satisfy a documentation control, but not its operational effectiveness.
+Keep a compliance exception distinct from a technically reproduced vulnerability.
+
+| Scenario | Evidence compared | Expected result |
+|---|---|---|
+| Configuration observation belongs to another system | scope and asset id | reject pass |
+| Required policy document is absent from supplied evidence | artifact request and scope | missing-evidence gap |
+| Document exists but operational test contradicts it | document and runtime observation | record design/effectiveness separately |
+| Previously passed control loses its source citation | source existence and marker | invalidate pass |
+| One technical weakness maps to several controls | finding id and control table | one finding, multiple mappings |
+
+An independent attestation is not invented from scanner output or a compliance label.
+Do not apply CVSS to the mere absence of an interview or document.
+Hashing a table identifies a snapshot; it does not prove its rows are true.
+Attach control-specific expected evidence and the exact supporting observation.
+State applicability and compensating controls without declaring formal certification.
 
 ## Done
 

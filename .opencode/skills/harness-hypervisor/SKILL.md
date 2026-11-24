@@ -75,6 +75,37 @@ Restore the snapshot before filing.
 
 A second VM not in scope must not be used as a "control guest".
 
+### Reproduction recipe
+
+Snapshot, one guest interface, restore. Host panic without guest command is not escape.
+
+## Verification scenarios
+
+Record both management-plane and guest-plane versions: they are different surfaces.
+Device visibility alone does not prove host access or an escape.
+For Linux, `/dev/vhost-vsock` is normally a host acceleration device;
+discover the actual guest endpoint instead of assuming this path exists there.
+
+| Scenario | Evidence required | Expected result |
+|---|---|---|
+| Guest lists an explicitly shared directory | VM configuration and guest mount | intended sharing, not escape |
+| Unshared lab directory is requested | guest request and permission denial | negative control |
+| Interface absent on the guest | device inventory | not-tested for interface probes |
+| Guest command affects host state outside an allowed share | guest request plus host-side marker | candidate boundary violation |
+| Snapshot restore removes test changes | restored guest and host inventories | recorded restoration |
+
+A valid host marker must identify its host path and the test time.
+A marker inside the intended shared folder proves the share works, not escape.
+Hypervisor-management API authorization uses separate admin and low-privilege identities.
+CPU side channels, device passthrough and nested virtualization remain separate branches.
+
+### Finding packet
+
+Attach hypervisor build, guest build, VM device configuration and snapshot id.
+Attach the specific interface request, host result and denied-interface control.
+State which control plane was tested; do not generalize a share misconfiguration.
+Use a guest snapshot plus a host cleanup plan: guest restore does not restore the host.
+
 ## Done
 
 Evidence holds build string, one interface, one probe, snapshot restore. Production cluster untouched.

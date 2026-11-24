@@ -81,6 +81,30 @@ dnsbrute, naabu, ffuf, probing off-apex, treating CT-only as live.
 
 Each passive tool, candidates.txt, dnsx. Out-of-scope, NXDOMAIN, one-source names kept as controls.
 
+### Reproduction recipe
+
+Three passive sources, dnsx, two-source confirm. No brute. Not a finding method.
+
+## Verification scenarios
+
+Preserve per-source provenance before de-duplication.
+Use a label-boundary suffix check, not a substring match, for the approved apex.
+DNS resolution is an active verification phase even when discovery is passive.
+
+| Scenario | Evidence compared | Expected classification |
+|---|---|---|
+| Two tools reuse the same CT record | underlying source fingerprint | not independent corroboration |
+| Name ends in `example.test.evil.test` | parsed DNS labels | out-of-scope |
+| Random approved lab name also resolves | wildcard response and candidate response | wildcard ambiguity |
+| Name returns SERVFAIL | resolver and response code | indeterminate, not NXDOMAIN |
+| CNAME points outside the apex | owner name and target | retain link, no automatic permission to probe target |
+
+Mark a confirmed candidate independently from DNS-resolved and HTTP-live states.
+Check Amass/BBOT CLI version before invoking version-dependent passive flags.
+The dnsx examples emit text unless JSON output is explicitly selected and validated.
+Keep the actual output format in the artifact name and parser contract.
+Inventory completeness depends on available sources; tool absence is a coverage gap.
+
 ## Done
 
 Subdomain list cites three tool observations + dnsx. One-source or non-apex names stay candidates.

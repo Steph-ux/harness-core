@@ -33,12 +33,13 @@ Only resolved names advance. Unresolved stays candidate.
 httpx -l <evidence-dir>/candidates.txt -tls-probe -cname -tech-detect -json -o <evidence-dir>/httpx.json
 tlsx -l <evidence-dir>/httpx.json -o <evidence-dir>/tlsx.json
 ```
-No `200/3xx` and no valid TLS = not live.
+Any attributable HTTP response, including 401/403/404, supports HTTP liveness.
+Certificate validity is a separate property; invalid TLS does not mean the host is down.
 
 ### D — Historical URLs
 ```text
 waymore -i <apex> -mode U -oU <evidence-dir>/waymore.txt
-gau --threads 5 <apex> > <evidence-dir>/gau.txt
+gau --threads 5 <apex>
 # dedup → historic-urls.txt — every URL is a lead
 ```
 
@@ -58,8 +59,8 @@ Normalize → `endpoints.json` (`method + path template + host + params`).
 semgrep --config p/javascript --config p/xss --config p/command-injection --include="*.js" --json -o <evidence-dir>/semgrep.json <evidence-dir>
 nuclei -l <evidence-dir>/httpx.json -t ~/nuclei-templates/http/cves/ -o <evidence-dir>/nuclei-cves.json
 nuclei -l <evidence-dir>/httpx.json -o <evidence-dir>/nuclei.json
-gitleaks detect --source <evidence-dir> --report-format json --report-path <evidence-dir>/gitleaks.json --no-banner --exit-code 0
-trufflehog filesystem <evidence-dir> --json --no-verification > <evidence-dir>/trufflehog.json
+gitleaks detect --source <evidence-dir> --redact=100 --report-format json --report-path <restricted-output-dir>/gitleaks.json --no-banner --exit-code 0
+# Real-secret second-engine scans require the redacting path in harness-secret-scan.
 trivy fs <evidence-dir> --format json --output <evidence-dir>/trivy.json --quiet
 ```
 Every hit is a candidate. Needs `harness-vuln-triage` / `harness-secret-scan` / `harness-source-deep` before a finding.
@@ -88,6 +89,29 @@ The attack-surface method records assets and candidates; it does not create a
 `cyber_finding` from enumeration alone. A finding must cite the relevant
 pipeline observations, source chunks and reproduction/positive-control/
 negative-control checks from the owning deep method.
+
+## Verification scenarios
+
+Treat the text blocks above as tool inventories, not shell scripts to execute.
+Discover installed CLI input formats before composing the argv for each stage.
+Store stdout in the owned process trace; use native output options rather than redirection.
+
+```
+cyber_process argv=["httpx","-u","https://<approved-host>","-json"]
+```
+
+| Scenario | Observation | Expected result |
+|---|---|---|
+| In-scope host returns 403 with expired TLS | HTTP and certificate records | live, restricted, TLS issue separate |
+| Historical URL now serves a generic error | current invalid-sibling comparison | historical lead only |
+| JSON scanner output is fed to a URL-list tool | input schema check | convert/validate first, not empty coverage |
+| Redirect or CNAME leaves approved scope | normalized target and scope decision | do not follow actively |
+| Parser accepts an off-apex fixture | label-boundary test | reject parser result |
+
+Extract URL lines for nuclei and host:port lines for tlsx instead of assuming JSON compatibility.
+Use an observed lab NXDOMAIN/soft-404 as control; merely excluding a hostname is not a test.
+Record source outages and parser failures separately from a successful empty inventory.
+Attach the stage provenance chain so every live asset can be traced to actual responses.
 
 ## Done
 

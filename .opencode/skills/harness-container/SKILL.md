@@ -81,6 +81,29 @@ Link `technology:container:<digest>` in the entity graph. CVEs on the image go t
 
 Escape, `nsenter`, `docker run --privileged` are out. Image CVEs → `harness-supply-chain`.
 
+### Reproduction recipe
+
+Digest identity, read-only trivy/kubectl, drop-ALL pod as control. No escape.
+
+## Verification scenarios
+
+Record Kubernetes context, namespace and workload UID before each live read.
+Distinguish image defaults, rendered manifests, admission changes and actual pod state.
+Evaluate effective capabilities and uid, not only one manifest key.
+
+| Scenario | Evidence compared | Expected classification |
+|---|---|---|
+| Root image overridden by non-root pod context | image user and live securityContext | runtime override accounted for |
+| Token automount omitted but inherited as false | service account and pod settings | not an exposed-token finding |
+| Role grants `get` but not `list` on one resource | exact can-i action and namespace | bounded permission |
+| Hardened twin denies the same requested privilege | manifest and authorization response | negative control |
+| Registry pull works with cached credentials | credential configuration | anonymous access not established |
+
+Pin the digest and cluster API resourceVersion to bound state drift.
+Drop-ALL capabilities do not by themselves disable privileged or host namespace settings.
+An unpinned tag is a reproducibility issue, not proof that malicious code ran.
+Attach policy requirement, effective state, matching control and scope limitation.
+
 ## Done
 
 Evidence holds the hash, the read-only inventory, and the negative control. An unscanned image stays `not-tested` with the missing tool named.

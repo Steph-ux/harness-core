@@ -29,13 +29,14 @@ List NS/A/AAAA/CNAME/MX/TXT/CAA/SOA for the approved zone. Record resolver, time
 cyber_process argv=["dig","AXFR","<zone>","@<approved-ns>","+time=5","+tries=1"]
 ```
 
-Each NS is its own observation. Five-second timeout, one retry maximum.
+Each NS is its own observation. Five-second timeout, one try and no retry.
 
 ### 3. Negative controls
 
-`Transfer failed` / `REFUSED` / timeout = **negative controls**, not findings. Also query:
-- the **wrong zone** on the same NS
-- a **non-delegated** NS
+`REFUSED` is a possible negative control; timeout is inconclusive transport failure.
+Only where separately approved, also query:
+- a **synthetic nonexistent zone** on the same NS
+- another **in-scope** NS configured to deny transfers
 
 Those must not return the in-scope zone.
 
@@ -68,7 +69,7 @@ cyber_process argv=["dnsx","-silent","-a","-aaaa","-cname","-mx","-txt","-ns","-
 cyber_process argv=["dig","AXFR","<zone>","@<approved-ns>","+time=5","+tries=1"]
 ```
 
-REFUSED/timeout = negative control, not a finding. Names from AXFR stay unprobed until scope filter. Takeover → second method.
+REFUSED is a negative control; timeout is not a denial. Names from AXFR stay unprobed until scope filter. Takeover → second method.
 
 ### Stop
 
@@ -80,7 +81,26 @@ Inventory, each AXFR, refuse/wrong-zone control, source chunk if transfer succee
 
 ### Reproduction recipe
 
-One AXFR per approved NS, 5s, one retry. REFUSED is a control. Success = records returned, then scope-filter before any probe. Wrong-zone on the same NS must not return the in-scope zone.
+One AXFR per approved NS, 5s, one try. REFUSED is a control. Success = complete records returned, then scope-filter before any probe. A synthetic wrong-zone control must not return the in-scope zone.
+
+## Verification scenarios
+
+Use a delegated lab zone with known public records and a deny-transfer twin.
+Store full DNS response flags and RCODE, not just the last line from dig.
+`+tries=1` means one try; do not describe it as one additional retry.
+
+| Scenario | Evidence | Expected result |
+|---|---|---|
+| AXFR starts but connection closes early | opening SOA without closing SOA | incomplete transfer |
+| Complete zone returns to an unauthorized client | matching first/last SOA and records | exposure candidate |
+| Deny-transfer twin replies REFUSED | answered TCP request | negative control |
+| TCP connection times out | connection trace and deadline | transport not-tested |
+| DNS answer changes between resolvers | TTL, resolver and timestamp | reconcile before ownership claim |
+
+An AXFR finding needs the access policy; deliberately public transfers are not automatically flawed.
+Keep authoritative DNS, recursive cache and split-horizon views distinct.
+Do not register a dangling name or cloud resource to confirm a takeover here.
+Attach zone serial, server identity, completeness and denied-transfer observations.
 
 ## Done
 

@@ -78,6 +78,31 @@ INVITE to PSTN, REGISTER flood, extension brute 1000-9999, RTP inject.
 
 Banner, one test REGISTER/OPTIONS, unused-extension negative control.
 
+### Reproduction recipe
+
+OPTIONS/one test REGISTER, unused extension 404. No PSTN, no flood.
+
+## Verification scenarios
+
+Record SIP transport, SBC route, Call-ID and test address-of-record.
+Check sipsak's installed help: its command example is an OPTIONS-style probe,
+not proof that a REGISTER transaction occurred.
+Use an operator-listed unused extension; do not choose random subscriber numbers.
+
+| Scenario | Observation | Expected classification |
+|---|---|---|
+| OPTIONS gets 200 without authentication | method and Allow headers | protocol reachability, not open registration |
+| REGISTER receives a 401/407 challenge | complete transaction and WWW/Proxy-Authenticate | authentication requested |
+| Approved test registration fails with invalid credentials | matching test transaction | negative control |
+| UDP 5060 is filtered while TCP responds | per-transport probes | distinguish transport coverage |
+| Collected test-call pcap contains SRTP | SDP and media format | do not call encrypted payload clear audio |
+
+Digest challenge material is not a plaintext password.
+Plain SIP on 5060 is not alone proof of credential disclosure or toll fraud.
+Version banners may be masked by an SBC; bind advisories to the actual component.
+Attach correlated transactions and actual access/transport policy, not status alone.
+Call placement, live media capture and PSTN remain outside this bounded probe.
+
 ## Done
 
 Evidence holds banner, one test REGISTER/OPTIONS, unused-extension control. No toll fraud.

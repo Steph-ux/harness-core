@@ -61,7 +61,7 @@ Two sessions, confidence ≥ 0.75. A lesson without positive and negative observ
 | host/URL/IP in text | 0 |
 
 ```
-cyber_process argv=["true"]
+cyber_process argv=["sha256sum","<evidence-dir>/taint-inventory.json"]
 ```
 
 Use `cyber_lessons pending` then operator once before `run`. Evidence = semgrep + taint/endpoints + lab/persistence. Leakage scan before `cyber_method promote`. This method does not create a `cyber_finding` from a scanner; it capitalizes confirmed evidence. Negative control: lesson without both pos/neg observations stays candidate.
@@ -73,6 +73,40 @@ Promoting with a hostname, skipping operator on lessons run, manufacturing valid
 ### Evidence ids
 
 Hunter artefacts already recorded, lesson outcome, memory list check.
+
+### Promote gate
+
+`cyber_method promote` refuses host/URL/IP/email/hash/token. Fix the text. Two sessions, ≥0.75. Lesson without pos+neg observations stays candidate.
+
+```
+cyber_process argv=["sha256sum","<evidence-dir>/lab-reproduction.json"]
+```
+
+`cyber_lessons pending` then operator once before `run`. This method does not turn a scanner into a `cyber_finding`.
+
+### Stop
+
+Hostname in the fact, skipping operator, manufacturing validation.
+
+## Verification scenarios
+
+Hashing artifacts identifies inputs; it does not validate a reusable method.
+Reuse existing observations rather than generating placeholder successes.
+Inspect current tool schemas for lesson/session arguments before invoking extraction.
+
+| Scenario | Store observation | Expected outcome |
+|---|---|---|
+| One successful session proposes a reusable method | one distinct supporting session | remains candidate |
+| Same evidence id is repeated under two labels | evidence provenance | not independent support |
+| Two sessions include reproduction and different-output control | method status and computed confidence | eligible only if store gates pass |
+| Proposed global text contains a target URL | rejected promotion reason | negative control for leakage guard |
+| Local fact is valid but source was later invalidated | source status and lesson review | revise or deprecate, not silent reuse |
+
+Store the precondition, observation, failure mode and boundary of applicability.
+A lesson about a known defect is not evidence of a novel vulnerability or CVE assignment.
+Verify status through `cyber_method list`, not merely the proposal acknowledgement.
+Keep project evidence local when promoting an identifier-free global procedure.
+Report extraction failures and rejected reasons rather than fabricating validation markers.
 
 ## Done
 

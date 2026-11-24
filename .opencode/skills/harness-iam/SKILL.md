@@ -74,6 +74,40 @@ A success, B replay, no-token or out-of-role control. Name both identities and t
 
 Password spray, policy write, role assignment, third identity.
 
+### One permission
+
+Read object X or call action Y — not both in one pass. Horizontal vs vertical: say which.
+
+```
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <token-B>","<approved-url>"]
+```
+
+No-token or out-of-role object is the negative control. Login HTML 200 is not access. Cloud `*:*` dump is out.
+
+### Stop
+
+Spray, policy write, third identity, temporary admin.
+
+## Verification scenarios
+
+Freeze tenant, resource and action while changing only the approved actor.
+Record effective policy, inherited group roles and session issue time.
+Use read-only simulation for write-sensitive permissions; simulation is not runtime proof.
+
+| Scenario | Evidence compared | Expected classification |
+|---|---|---|
+| Lower role receives a filtered empty result | higher-role object marker | access denied or filtered, not bypass |
+| Old token retains access after revocation | token age and documented revocation window | evaluate against that window |
+| Explicit deny overrides an inherited allow | policy and denied request | negative control |
+| Simulator permits `iam:PassRole` | principal, resource and conditions | simulated permission only |
+| Tenant B reads a private tenant A object | two owned actors and owner baseline | horizontal isolation candidate |
+
+A successful SSO login does not grant every downstream service permission.
+AWS role passing also depends on the service operation and trust policy; do not claim escalation from one allow.
+For PAM, separate checkout permission, session establishment and actual target privileges.
+When delegated admin creates a new session, bind its new identity to the approved actor.
+Attach the policy expectation and denial control for the same permission family.
+
 ## Done
 
 The finding names both identities and the permission that differed. An untested provider stays `not-tested`. No third identity, no spray.

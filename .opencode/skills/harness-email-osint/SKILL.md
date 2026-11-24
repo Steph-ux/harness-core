@@ -58,7 +58,8 @@ Provider-registration alone is not ownership. Unused-address negative control re
 
 ### Normalize
 
-Plus-tags and Gmail dots are the same mailbox — record the normalization, do not invent a second identity.
+Apply dot/plus normalization only where the provider documents those rules.
+Preserve the exact supplied address; custom domains need not follow Gmail behavior.
 
 ```
 cyber_process argv=["theHarvester","-d","<domain>","-b","all","-l","100","-f","<evidence-dir>/theharvester"]
@@ -73,6 +74,40 @@ Contacting the target, premium API without cost approval, treating one Holehe hi
 ### Evidence ids
 
 Holehe, second source, unused-address negative control, source chunk.
+
+### Harvest limit
+
+theHarvester `-l 100` max. The address under test must appear or it is not a second source for **that** email.
+
+```
+cyber_process argv=["holehe","<email>","--only-used"]
+```
+
+Plus-tags/Gmail dots: record normalization, do not split identities. Unused-address negative control required.
+
+### Stop
+
+Mail, reset, login, premium API without cost approval, one Holehe hit as ownership.
+
+## Verification scenarios
+
+Inspect enabled registration-check modules before running them.
+Skip any module that sends mail, initiates a reset, or violates the mission's no-contact gate.
+Use an operator-owned unused address or offline fixtures, not a random third party.
+
+| Scenario | Comparison | Expected classification |
+|---|---|---|
+| Exact address appears in an approved directory | original source and collection time | public association supported |
+| Provider blocks or rate-limits enumeration | module error and status | unavailable, not registered |
+| Catch-all domain answers equally for every address | owned unused-address twin | enumeration signal rejected |
+| Same local part appears on another domain | exact identifiers differ | no identity merge |
+| Search result repeats another source verbatim | provenance and timestamps | not independent corroboration |
+
+A registration signal does not prove that a particular person owns the account.
+Current ownership needs a current approved association; old directories can be stale.
+Email exposure, registration and compromise are different claim types.
+Keep domain-wide harvesting separate from consent to investigate every discovered address.
+Attach the exact match, second attribute, executed control and normalization decisions.
 
 ## Done
 

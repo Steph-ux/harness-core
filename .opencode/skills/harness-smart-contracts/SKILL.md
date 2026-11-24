@@ -74,6 +74,41 @@ Mainnet `send` is a method violation even if the ABI looks like a view.
 
 Fork/testnet only for exploits. Do not drain a live pool.
 
+### Pin first
+
+Address + `solc` version + source hash. Explorer bytecode mismatch → stop.
+
+```
+cyber_process argv=["sha256sum","<Contract.sol>"]
+cyber_process argv=["cast","call","<address>","owner()(address)","--rpc-url","<approved-rpc>"]
+```
+
+One slither config. View-call only on mainnet. Patched fork / benign function is the negative control. `.env` keys → `harness-secret-scan`.
+
+### Stop
+
+Mainnet write, draining a pool, four scanners as one observation.
+
+## Verification scenarios
+
+Pin chain id and fork block number in addition to the address.
+For proxies, resolve the implementation and relevant storage at that same block.
+Compare compiler metadata, linked libraries and immutable values when checking bytecode.
+
+| Scenario | Observation | Expected classification |
+|---|---|---|
+| Slither flags a protected external call | access control and call ordering | detector candidate, not proven reentrancy |
+| Identical fork trace violates a balance invariant only before patch | state diff and successful benign call | patched negative control |
+| `owner()` reverts because contract has no such ABI | exact ABI and RPC error | invalid probe |
+| Oracle price changes at a different block | block and feed state | incomparable reproduction |
+| View call succeeds on mainnet | returned value | no proof of state-changing exploit |
+
+Static analysis and eth_call cannot establish every multi-transaction or reentrancy claim.
+Execute exploit fixtures only on the pinned local fork or authorized testnet.
+Keep gas costs, rounding and token decimal conventions in arithmetic invariants.
+Attach initial state, transaction/call trace, state diff and fixed-build control.
+RPC credentials and private keys stay outside argv and report bodies.
+
 ## Done
 
 Evidence holds pin, one analyzer, one view-call, control. No mainnet state change.

@@ -72,7 +72,42 @@ Restore write canaries. No customer id enumeration. Public-by-design catalogs, c
 
 ### Evidence ids
 
-Own GET, missing GET, cross GET, optional re-read: four ids if write, three if read-only. Missing the missing-id control → candidate. `contains` is B's private field.
+Keep A-own, B-own, missing, A-for-B and unauthenticated observations distinct.
+For writes add the independent B read and restoration record.
+Missing ownership or denial evidence leaves a candidate. `contains` is B's private marker.
+
+### Write path
+
+Reversible `notes:CANARY-<id>` only. Proof is B's GET, not PUT 200. Restore + verify. No `referenceId` reuse. Mass assignment: one field then GET then restore.
+
+```
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <A>","-X","PUT","--data-binary","@canary.json","<url>/api/<res>/<B-id>"]
+```
+
+Public catalogs and cache hits are not IDOR. Untested reference types stay `not-tested`.
+
+### Stop
+
+Enumerating real customer ids, skipping the missing-id control.
+
+## Verification scenarios
+
+Use owner-created synthetic objects with unique markers, never inferred customer ids.
+Treat list, detail, nested, export and download references as separate authorization paths.
+Keep parent and child ownership explicit when testing nested resources.
+
+| Scenario | Observation | Expected classification |
+|---|---|---|
+| A reads public B catalogue fields | policy and owner baseline | public by design, not IDOR |
+| A receives B's private marker | B-own vs A-for-B response | read-isolation candidate |
+| Missing id returns a generic success shell | body fingerprint | existence signal unreliable |
+| Write echoes a marker but B's read is unchanged | mutation plus owner read | write bypass not established |
+| Export job is denied but its download is public | job and artifact policies | separate download boundary |
+
+Compare stable fields; timestamps and request ids can make equivalent denials look different.
+Check whether a proxy cache, rather than the origin, served the private marker.
+Random or unguessable ids do not replace an authorization decision.
+Retain actor/object mapping and the independent owner response in every finding packet.
 
 ## Done
 

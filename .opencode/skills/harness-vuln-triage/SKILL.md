@@ -75,6 +75,36 @@ Promoting nuclei severity, timing-only, reusing scanner id as repro.
 
 Original, named negative control, fresh reproduction.
 
+### Reproduction recipe
+
+Name the control first. Fresh request-id. contains is the field not 200.
+
+## Verification scenarios
+
+Apply this decision table to synthetic or previously collected evidence first.
+Changing an observation id does not make an old request a fresh reproduction.
+Distinguish technical confirmation from the independent finding-verification stage.
+
+| Scenario | Evidence available | Expected classification |
+|---|---|---|
+| Scanner reports critical; response is a login page | status 200, no effect | false positive or unsupported |
+| Marker appears in the response but never executes | reflected bytes only | candidate, not XSS |
+| Effect repeats with a new request and clean control differs | correlated effect observations | technically reproduced |
+| Control and reproduction have identical output | different ids, same output | reject verification pair |
+| Reproduction cannot run because test identity expired | original signal only | not-tested for reproduction |
+
+For timing, collect interleaved baseline and probe samples before inferring an effect.
+For caches, compare authoritative state rather than a stale browser view.
+For asynchronous effects, bind callback id, event time and originating request.
+Do not equate one failed transport with application rejection.
+
+### Finding packet
+
+Attach claim, original request, fresh reproduction, negative control and limitation.
+Use only markers visible in the cited observations.
+Keep `cyber_finding` unverified until the harness's independent attestation succeeds.
+Human report approval and actual restitution are later, distinct decisions.
+
 ## Done
 
 Ledger is a finding (three citations) or an explicit candidate with the missing control named.

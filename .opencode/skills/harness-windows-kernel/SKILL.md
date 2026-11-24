@@ -77,6 +77,31 @@ Production, BYOVD on the operator PC, IOCTL spray, public exploit vs live estate
 
 Hash, dispatch, one runtime or not-tested, truncated-buffer control, decompile chunk. SYSTEM claims need lab token proof.
 
+### Reproduction recipe
+
+Lab snapshot, one documented IOCTL, truncated-buffer control. Restore.
+
+## Verification scenarios
+
+Record Windows build, loaded driver hash, service name and VM snapshot.
+`ioctl-probe` denotes an operator-supplied lab helper, not a bundled or standard tool.
+Check its source/interface before use; absence leaves runtime testing not-tested.
+A truncated-buffer negative test needs its own explicit bounded lab approval.
+
+| Scenario | Evidence compared | Expected classification |
+|---|---|---|
+| Standard user cannot open the device | device ACL and open result | access-control negative control |
+| Signed driver exposes a dangerous routine | signature plus static dispatch | signing is not a safety guarantee |
+| IOCTL returns success but no privileged effect occurs | token/process state before and after | no escalation proof |
+| Approved lab control rejects malformed size | driver status and unchanged state | bounded input validation holds |
+| One request causes a crash | minidump hash and stack attribution | lab crash; stop, not SYSTEM execution |
+
+Map IOCTL method/access bits to actual buffer handling and caller privilege checks.
+Distinguish `METHOD_NEITHER` pointer validation from buffered I/O assumptions.
+Keep static unsafe paths separate from exercised runtime behavior.
+Attach device ACL, dispatch address, exact benign input and observed outcome.
+A guest rollback does not restore artifacts outside the guest; record host-side cleanup separately.
+
 ## Done
 
 Evidence holds driver hash, dispatch map, at most one runtime IOCTL, snapshot restore note. Production not touched.
