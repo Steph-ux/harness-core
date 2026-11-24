@@ -1,49 +1,54 @@
 ---
 name: harness-idor
-description: "Test an approved object reference by comparing the owner's response with another authorized test identity's response."
+description: "Prove BOLA/IDOR with owner GET, nonexistent 404/403, other-id GET, optional reversible write re-read, and no real customer identifiers."
 ---
 
 # IDOR/BOLA — owner vs other, re-read for write
 
-Source: `exploiting-idor-vulnerabilities` (2024: BOLA #1 API risk; UUIDs still leak via enumeration).
+Source: OWASP API1 BOLA. UUIDs still leak. `200` with an error JSON is not access.
 
 ## Gate
 
-Every command goes through `cyber_process` with `argv`. Do not build a shell string.
-Two approved test identities or one + non-owned ref. Do not read real customer object. One field mutated per request.
+Every command goes through `cyber_process` with `argv`. Do not build a shell string. Two approved test identities, or one identity plus a non-owned **test** reference the operator listed. Do not enumerate real customer objects. One field mutated per request. Restore any write.
 
 ## Steps
 
-1. A → `GET /api/<resource>/<A-id>` own object. Record stable field. Positive control.
-2. A → `GET /api/<resource>/000...` non-existent. Record `404/403`. Existence-oracle negative control.
-3. A → `GET /api/<resource>/<B-id>` only ref swapped. Identical fields to B's own GET = candidate. `{"error":…}`/`{}` not.
-4. Write variant (if reversible scope): `PUT /api/<resource>/<B-id>` benign field `notes:CANARY-<id>` as A → `GET` as B to see write land. Re-read is proof, not `PUT 200`. Restore + record.
-5. Mass assignment: `PUT ... {"ownerId":"<B-id>"}` or `{"role":"admin"}` — one field, then `GET` as A to see ownership/role changed.
-6. `cyber_finding` with A-own+missing+A-for-B + B-own comparison + final re-read `evidence`, endpoint chunk `sources`, `checks` A-own:positive, missing:negative, A-for-B:reproduction. No `referenceId` reuse.
+### 1. Positive control — owner read
 
-### Reference matrix
+Identity A, A's object:
 
-Repeat the owner-vs-other comparison for every reference location exposed by
-the route: numeric id, UUID, slug, filename, tenant id, nested child id,
-cursor, export id and websocket/channel id. Start with one known-owned object
-and one known-nonexistent object; do not enumerate real customer identifiers.
-Compare status, response schema, field values, timing only as supporting data,
-and side effects after a re-read.
+```
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <token-A>","<url>/api/<resource>/<A-id>"]
+```
 
-### Write proof and controls
+Record status, schema, one stable field (name, balance, notes). Hash the body.
 
-Only use a reversible field on an object owned by the test account. The owner
-read is the positive control, the nonexistent reference is the negative
-control, and the other-owner read is the reproduction. A write is confirmed
-only when the other authorized test account can re-read the marker; the PUT
-response is insufficient. Restore the marker and verify the original value.
+### 2. Existence-oracle control
 
-### Limits
+A → nonexistent id (`000…` or operator-listed unused UUID). Expect `404`/`403`. If this returns the **same** body as step 1, stop — you cannot tell access from a template.
 
-An object that is intentionally public, a redacted response, a cache hit, or a
-404/403 without comparison is not an IDOR proof. Keep untested reference types
-visible as `not-tested`, with the reason and the missing observation.
+### 3. Cross-id read
+
+A → B's id, **only** the reference swapped. Compare field values to B's own GET (B as positive for that object). Identical private fields = candidate. `{"error":…}` or `{}` is not BOLA.
+
+Repeat **one** extra location if the first is clean: numeric, UUID, slug, nested child, export id, channel id. Untested types stay `not-tested`.
+
+### 4. Write only if reversible
+
+`PUT` as A on B's object, benign `notes:CANARY-<id>`. Proof is **B's GET** seeing the canary, not `PUT 200`. Restore + verify original. No `referenceId` reuse across attempts.
+
+Mass assignment: one field (`ownerId` or `role`), then GET as A. Same restore.
+
+### 5. Negative control (authz)
+
+Unauthenticated GET of A's object must fail. If unauth sees B's fields, that is a different finding (`harness-access-control`).
+
+### 6. Finding contract
+
+`cyber_finding` evidence: A-own, missing, A-for-B, B-own, unauth. Checks: A-own positive, missing negative, A-for-B reproduction. `contains` is the leaked field, not `200`. Sources: endpoint chunk.
+
+Public-by-design objects, cache hits, and redacted responses are not IDOR.
 
 ## Done
 
-Finding cites 3 GETs + re-read. `200` without B's fields is not finding.
+Finding cites three GETs (own, missing, cross) plus re-read if write. `200` without B's fields is not a finding.

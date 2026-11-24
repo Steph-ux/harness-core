@@ -1,49 +1,51 @@
 ---
 name: harness-secret-scan
-description: "Search files already collected in an engagement for secrets, record the location and hash, and leave the secret value out of the ledger."
+description: "Scan collected evidence with Gitleaks and Trufflehog, dedupe by SHA256(secret), fixture path as control, optional one-shot identity check; never put the secret in the ledger."
 ---
 
-# Secrets — Gitleaks + Trufflehog, dedup by hash, no raw secret in ledger
+# Secrets — two engines, hash only, no raw value
 
-Source: `implementing-secret-scanning-with-gitleaks` + supply-chain (2024: Trufflehog verification via OOB is a second opinion, not a replacement).
+Source: Gitleaks, Trufflehog. Verification is a second opinion, not a replacement.
 
 ## Gate
 
-Every command goes through `cyber_process` with `argv`. Do not build a shell string. Scan only `<evidence-dir>` or an approved repo already cloned into evidence (never a live service, never a customer repo outside scope). Do not `pip install` during the scan.
+Every command goes through `cyber_process` with `argv`. Do not build a shell string. Scan only the evidence directory or an approved clone **already** in evidence. Never a live customer repo outside scope. Do not `pip install` during the scan. Do not print the secret.
 
 ## Steps
 
-1. Two scans on the same evidence, each its own observation:
-```text
-gitleaks detect --source <evidence-dir> --report-format json --report-path <evidence-dir>/gitleaks.json --no-banner --exit-code 0
-trufflehog filesystem <evidence-dir> --json --no-verification > <evidence-dir>/trufflehog.json
+### 1. Two scans, two observations
+
 ```
-Record both run observations. Dedup findings by `(file, rule, SHA256(secret))`.
+cyber_process argv=["gitleaks","detect","--source","<evidence-dir>","--report-format","json","--report-path","<evidence-dir>/gitleaks.json","--no-banner","--exit-code","0"]
+cyber_process argv=["trufflehog","filesystem","<evidence-dir>","--json","--no-verification"]
+```
 
-2. For each match, create a candidate citing the engine observation + `file:line:rule` + `SHA256(secret)`. `cyber_source` ingest the file chunk (no secret bytes).
-3. A match in `tests/`, `examples/`, `fixtures/`, or `*.md` doc is a candidate until the same value authenticates — mark it `likely-false-positive` with the path reason.
-4. Auth is a separate approved `cyber_process` `argv` check: one request with the found credential (`Authorization: Bearer …`), then stop. Record success/failure as its own observation. If auth is not attempted or fails, state it explicitly in the finding limitation.
-5. Visual proof (e.g. `aws sts get-caller-identity` `Account: …` screen) via `cyber_capture` linked to the auth observation id.
+No shell `>`. Dedup by `(file, rule, SHA256(secret))`. One secret in two files = one candidate, two locations.
 
-6. `cyber_finding` with `evidence` = Gitleaks and/or Trufflehog observation + auth-attempt observation (or explicit `not-attempted`), `sources` = file chunk, `checks` = `gitleaks.json:positive-control` / fixture path:negative-control. Never copy the secret value into the finding, prompt, or report.
+### 2. Classify
 
-### Secret lifecycle matrix
+active / revoked / fixture / example / high-entropy junk / private key / webhook / PII. `tests/`, `examples/`, `fixtures/`, `*.md` → `likely-false-positive` until auth proves otherwise.
 
-Classify each match as active credential, revoked credential, test fixture,
-example/documentation, high-entropy non-secret, private key, webhook token or
-personal data. Search current files, history and generated artifacts only when
-that source is explicitly in scope. Deduplicate by secret hash while retaining
-every location; one secret in two files is one secret candidate with two source
-locations.
+`cyber_source` the file chunk **without** secret bytes.
 
-### Validation and containment
+### 3. Negative control
 
-Authentication is opt-in and one bounded request. Prefer a harmless identity
-endpoint and stop on success; never enumerate data or rotate/revoke a key from
-the scanner. If exposure is confirmed, record the minimum identity metadata,
-request operator remediation through the engagement workflow, and keep the raw
-value out of stdout, observations, reports and prompts.
+A known fixture file that contains an example key must match as fixture, not as a finding. If Gitleaks flags it as live, the rule is too wide — record that, do not open a critical finding.
+
+### 4. Optional one-shot auth
+
+Only if the operator approved: one harmless identity call (`sts get-caller-identity`, `/user`). Stop on success. Never enumerate data, never rotate. `cyber_capture` linked to that observation if visual.
+
+If not attempted: limitation `not-attempted`.
+
+### 5. Finding contract
+
+`cyber_finding` evidence = scan obs + auth or `not-attempted`, sources = chunk, checks = gitleaks positive / fixture negative. SHA256 in the finding, **never** the value in prompt, report, or observation text.
+
+## Proof contract
+
+A live credential needs the scan observation, SHA256, fixture-path control, and either a one-shot identity observation or `not-attempted`. The raw secret never enters the ledger.
 
 ## Done
 
-Each secret finding has a scan observation, a `SHA256(secret)`, a source chunk, and an auth observation or an explicit `not-attempted` limitation.
+Each secret finding has a scan observation, `SHA256(secret)`, a source chunk, and auth or explicit `not-attempted`.
