@@ -28,8 +28,8 @@ database, so a test can hand it a stub and a host can hand it the real store.
 |---|---|
 | `store.ts` | An observation is written once and never edited; a finding cites only evidence from its own scope; operator rules override inferred knowledge |
 | `platform-store.ts` | A mission takes its stages in order; a scope is approved before work is dispatched; a finding is verified by an observation that is not its own evidence, and its negative control observes something else; entities and relations form the scope-local pivot graph |
-| `tasks.ts` | Mutations are locked; `complete` takes evidence ids resolved by the host; `block` requires a reason; the tree nests to a bounded depth, a branch closes only after its sub-steps, and the tree exports a coverage map |
-| `investigation.ts` | The signal functions are pure and read-only; a hypothesis confirms only against a successful observation and a refuted one is closed; a surface is tested only with evidence; addressed coverage counts tested plus blocked-with-reason; the host injects mandatory directives on a loop, stagnation, stale hypotheses or a conclusion under 60% coverage, and `closingGate` turns the same signals into hard blockers — silence while the work progresses |
+| `tasks.ts` | Mutations are locked; `complete` takes evidence ids resolved by the host, all successful; `block` requires a reason; the tree nests to a bounded depth, a branch closes after its sub-steps are completed or blocked with a reason, and the tree exports a coverage map |
+| `investigation.ts` | The signal functions are pure and read-only; a hypothesis confirms only with a reproduction and a negative control that observe different outputs, and a refuted one is closed; a surface is tested only with evidence; addressed coverage counts tested plus blocked-with-reason; the host injects mandatory directives on a loop, stagnation, stale hypotheses or a conclusion under 60% coverage, and `closingGate` turns the same signals into hard blockers — silence while the work progresses |
 | `capsule.ts` | The returning session gets the exact state: open steps, blocked steps with reasons, the mission stage, pending approvals, commands the harness still owns. `closingGate` answers "are we done?" from that state alone |
 | `skills.ts` | A method becomes active only with support from two sessions and confidence ≥ 0.75; a global method is promotion-only, evidence-free, identifier-free, and visible from every project (project shadows global) |
 | `routing.ts` | One route per request, weighted triggers, an anti-noise guard (a single hit on a long text is not a route), and the declared method catalogue |
@@ -41,7 +41,7 @@ database, so a test can hand it a stub and a host can hand it the real store.
 
 ## Where the host plugs in
 
-`opencode/plugin.ts` and `opencode/workflow-tools.ts` form the host boundary. They register:
+`opencode/plugin.ts` and the modules next to it (`permissions.ts`, `display.ts`, `workflow-tools.ts`, `ledger-tools.ts`) form the host boundary. They register:
 
 - `context` — injects continuity, the routing table and the closing gate; starts
   the background lesson extraction for pending sessions.
@@ -76,8 +76,9 @@ is the arbiter that reads the state and tells the model so.
 - The signal functions (`detectStagnation`, `directives`, `assembleInvestigation`)
   are pure: they read the observation stream, the task tree and the clock.
 - `HypothesisTracker` and `CoverageMap` hold what the model declares. A hypothesis
-  confirms only against a successful observation; a refuted one is closed and is
-  not revisited. A surface is tested only with evidence, blocked only with a reason.
+  confirms only with a successful reproduction and a negative control that observe
+  different outputs; a successful observation alone does not confirm it; a refuted
+  one is closed and is not revisited. A surface is tested only with evidence, blocked only with a reason.
 - `InvestigationStore` persists both per scope (locked, atomic, read on every use),
   so a resumed session finds them.
 - The host assembles the state on every context turn and injects the resulting

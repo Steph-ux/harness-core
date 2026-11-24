@@ -29,7 +29,12 @@ export interface Hypothesis {
   id: string;
   text: string;
   state: HypothesisState;
+  /** Observation ids of the reproduction — the claim firing. */
   evidence: string[];
+  /** Observation ids of the negative control — the claim not firing. */
+  control: string[];
+  /** Output fingerprints keyed by observation id. Compared, not the ids. */
+  outputs: Record<string, string>;
   /** Observation ids that refute this hypothesis. */
   counterEvidence: string[];
   createdAt: string;
@@ -38,22 +43,76 @@ export interface Hypothesis {
 
 const STALE_MS = 30 * 60 * 1000;
 
+function normalizeHypothesis(h: Hypothesis): Hypothesis {
+  return {
+    ...h,
+    evidence: [...(h.evidence ?? [])],
+    control: [...(h.control ?? [])],
+    outputs: { ...(h.outputs ?? {}) },
+    counterEvidence: [...(h.counterEvidence ?? [])],
+  };
+}
+
+/**
+ * A hypothesis confirms only with a reproduction and a negative control that
+ * observe different outputs. A successful observation alone is not a claim.
+ */
+export function canConfirmHypothesis(h: Hypothesis): boolean {
+  const control = h.control ?? [];
+  const outputs = h.outputs ?? {};
+  if (h.evidence.length === 0 || control.length === 0) return false;
+  for (const eid of h.evidence) {
+    if (!outputs[eid]) return false;
+    if (control.includes(eid)) return false;
+  }
+  for (const cid of control) {
+    if (!outputs[cid]) return false;
+    if (h.evidence.includes(cid)) return false;
+    for (const eid of h.evidence) {
+      if (outputs[cid] === outputs[eid]) return false;
+    }
+  }
+  return true;
+}
+
 export function advanceHypothesis(
   h: Hypothesis,
   now: number,
 ): HypothesisState {
   if (h.state === "confirmed" || h.state === "refuted") return h.state;
   if (h.counterEvidence.length > 0) return "refuted";
-  if (h.state === "testing" && h.evidence.length > 0) return "confirmed";
+  if (h.state === "testing" && canConfirmHypothesis(h)) return "confirmed";
   if (now - Date.parse(h.updatedAt) > STALE_MS) return "stale";
   return h.state;
+}
+
+function bindObservation(
+  h: Hypothesis,
+  list: "evidence" | "control",
+  observationId: string,
+  outputHash: string,
+): void {
+  const fingerprint = outputHash.trim();
+  if (!fingerprint)
+    throw new Error("A bound observation needs the output fingerprint");
+  const other = list === "evidence" ? h.control : h.evidence;
+  if (other.includes(observationId))
+    throw new Error("A negative control cannot be the reproduction");
+  for (const id of other) {
+    if (h.outputs[id] && h.outputs[id] === fingerprint)
+      throw new Error(
+        "A negative control must observe a different output than the reproduction",
+      );
+  }
+  if (!h[list].includes(observationId)) h[list].push(observationId);
+  h.outputs[observationId] = fingerprint;
 }
 
 export class HypothesisTracker {
   private items: Hypothesis[] = [];
 
   constructor(initial?: readonly Hypothesis[]) {
-    if (initial) this.items = initial.map((h) => ({ ...h, evidence: [...h.evidence], counterEvidence: [...h.counterEvidence] }));
+    if (initial) this.items = initial.map((h) => normalizeHypothesis(h));
   }
 
   propose(id: string, text: string, timestamp: string): Hypothesis {
@@ -64,12 +123,14 @@ export class HypothesisTracker {
       text,
       state: "proposed",
       evidence: [],
+      control: [],
+      outputs: {},
       counterEvidence: [],
       createdAt: timestamp,
       updatedAt: timestamp,
     };
     this.items.push(h);
-    return { ...h };
+    return { ...h, evidence: [...h.evidence], control: [...h.control], outputs: { ...h.outputs }, counterEvidence: [...h.counterEvidence] };
   }
 
   test(id: string, timestamp: string): Hypothesis {
@@ -78,14 +139,35 @@ export class HypothesisTracker {
       throw new Error(`Hypothesis ${id} is ${h.state}, cannot start testing`);
     h.state = "testing";
     h.updatedAt = timestamp;
+    h.state = advanceHypothesis(h, Date.parse(timestamp));
     return { ...h };
   }
 
-  addEvidence(id: string, observationId: string, timestamp: string): Hypothesis {
+  addEvidence(
+    id: string,
+    observationId: string,
+    timestamp: string,
+    outputHash: string,
+  ): Hypothesis {
     const h = this.find(id);
     if (h.state === "confirmed" || h.state === "refuted")
       throw new Error(`Hypothesis ${id} is already ${h.state}`);
-    if (!h.evidence.includes(observationId)) h.evidence.push(observationId);
+    bindObservation(h, "evidence", observationId, outputHash);
+    h.updatedAt = timestamp;
+    h.state = advanceHypothesis(h, Date.parse(timestamp));
+    return { ...h };
+  }
+
+  addControl(
+    id: string,
+    observationId: string,
+    timestamp: string,
+    outputHash: string,
+  ): Hypothesis {
+    const h = this.find(id);
+    if (h.state === "confirmed" || h.state === "refuted")
+      throw new Error(`Hypothesis ${id} is already ${h.state}`);
+    bindObservation(h, "control", observationId, outputHash);
     h.updatedAt = timestamp;
     h.state = advanceHypothesis(h, Date.parse(timestamp));
     return { ...h };
@@ -779,10 +861,29 @@ export class InvestigationStore {
     });
   }
 
-  evidenceHypothesis(scope: string, id: string, observationId: string): Hypothesis {
+  evidenceHypothesis(
+    scope: string,
+    id: string,
+    observationId: string,
+    outputHash: string,
+  ): Hypothesis {
     return this.mutate(scope, (data) => {
       const tracker = new HypothesisTracker(data.hypotheses);
-      const h = tracker.addEvidence(id, observationId, now());
+      const h = tracker.addEvidence(id, observationId, now(), outputHash);
+      data.hypotheses = tracker.list().map((x) => ({ ...x }));
+      return h;
+    });
+  }
+
+  controlHypothesis(
+    scope: string,
+    id: string,
+    observationId: string,
+    outputHash: string,
+  ): Hypothesis {
+    return this.mutate(scope, (data) => {
+      const tracker = new HypothesisTracker(data.hypotheses);
+      const h = tracker.addControl(id, observationId, now(), outputHash);
       data.hypotheses = tracker.list().map((x) => ({ ...x }));
       return h;
     });

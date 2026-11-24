@@ -3,8 +3,9 @@
 Evidence and mission-tracking kernel for OpenCode v2. Observations, findings,
 tasks and methods live in a shared state that stays independent of the host.
 The adapter is in `opencode/`; `src/` uses Node's native modules.
-Node 24 or newer is required. Command supervision needs Linux and a `node`
-executable the server can reach (`HARNESS_NODE` can pin its path).
+Node 24 or newer is required. Command supervision needs a `node` executable
+the server can reach (`HARNESS_NODE` can pin its path). Off Linux, pass
+`argv`; process-group ownership stays Linux-only.
 A trace capture opens in the operator's terminal (qterminal), decorations
 included, then the window is closed; without a display, or with
 `HARNESS_CAPTURE_TERMINAL=off`, a printed rendering is produced instead (Python 3
@@ -51,9 +52,9 @@ never satisfies that requirement.
   code 0. States: `running`, `succeeded`, `failed`, `timed_out`, `stopped`,
   `unknown`. An old process without a reliable result stays `unknown`.
 - The Node supervisor is independent of the server. Default deadline: 120 s;
-  maximum: 600 s. Descendants in the group that outlive their parent are killed
-  and make the result fail. A program that deliberately leaves its group cannot
-  be fully supervised here.
+  maximum: 600 s. On Linux, descendants in the group that outlive their parent
+  are killed and make the result fail. Off Linux the supervisor signals the
+  child it spawned; a program that starts other processes is not fully owned.
 - Registry commands and reads are redacted. Full traces, results and control
   files stay local, under restricted access. The control key of a run is never
   returned to the model.

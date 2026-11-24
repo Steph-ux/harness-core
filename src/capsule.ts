@@ -220,7 +220,10 @@ export function capsule(
     .map((task) => {
       if (task.status !== "completed" || !task.evidence) return task;
       const evidence = task.evidence.filter((id) => proofs.has(id));
-      if (!evidence.some((id) => proofs.get(id)?.success))
+      if (
+        evidence.length !== task.evidence.length ||
+        evidence.some((id) => !proofs.get(id)?.success)
+      )
         return {
           ...task,
           status: "blocked" as const,

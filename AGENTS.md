@@ -19,10 +19,11 @@ runs the legacy harness host (`~/.pi/agent/cyber-harness/tests/run.cjs`), which
 calls the same suites inside its own gate. Exit code 0 is the only "done".
 
 A suite that needs a platform the machine does not have is skipped with its
-reason, and the runner reports how many were skipped. The command supervision
-owns a process group and reads a durable terminal result: it runs on Linux
-only, so the suites that cover it are skipped elsewhere and checked on Linux.
-A skipped suite is never a suite that passed.
+reason, and the runner reports how many were skipped. A traced command with
+`argv` is supervised everywhere; the result file and the trace hash are the
+proof. Process-group ownership, `/proc` identity and POSIX shells stay
+Linux-only, so those checks are skipped elsewhere. A skipped suite is never
+a suite that passed.
 
 The runtime has no third-party dependency (Node built-ins only). The test
 runner needs `jiti` to load the TypeScript sources, so `jiti` is a
@@ -65,7 +66,8 @@ answered (`lessons.extracted.model`).
   a hard link is refused, and so is a volume that is not the one it is named as.
 - **A negative control observes a different output.** It cannot observe what
   the reproduction observed, or the same output would be both the claim and
-  its refutation.
+  its refutation. A hypothesis confirms only with both; a successful
+  observation alone does not confirm it.
 - **Never edit `src/` or `opencode/plugin.ts` while an A/B bench is running:**
   each run reloads the module, so the arms would mix.
 

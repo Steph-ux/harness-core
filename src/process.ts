@@ -48,15 +48,16 @@ export function spawnTraced(
     argv?: string[];
   },
 ): { pid: number; detached: boolean; runKey: string } {
-  if (process.platform !== "linux")
-    throw new Error("Traced commands require Linux");
   if (
     !Number.isFinite(options.deadlineMs) ||
     options.deadlineMs <= 0 ||
     options.deadlineMs > MAX_DEADLINE_MS
   )
     throw new Error("Invalid deadline");
-  const argv = options.argv ?? ["/bin/sh", "-c", command];
+  const argv =
+    options.argv ??
+    (process.platform === "linux" ? ["/bin/sh", "-c", command] : undefined);
+  if (!argv) throw new Error("Traced commands need argv on this platform");
   if (
     !argv.length ||
     argv.some((p) => typeof p !== "string" || /[\0\r\n]/.test(p))
@@ -92,6 +93,7 @@ export function spawnTraced(
       env: { ...process.env, ...options.env },
       detached: true,
       stdio: "ignore",
+      windowsHide: true,
     },
   );
   child.on("error", () =>

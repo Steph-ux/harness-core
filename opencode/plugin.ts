@@ -9,341 +9,30 @@
  *    be satisfied by narration.
  *
  * The store is the same file the Pi harness writes to, so evidence collected on
- * one host stays reachable from the other. The core is host-neutral: this file
- * is the only part that knows about OpenCode.
+ * one host stays reachable from the other. The core is host-neutral: this
+ * adapter is the only part that knows about OpenCode.
  */
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { fileURLToPath } from "node:url";
+import { coreRoot } from "./paths";
+import {
+  assertOperatorDecision,
+  assertProcessPermission,
+} from "./permissions";
+import {
+  captureWindow,
+  commandArguments,
+  listWindows,
+  quoteArgument,
+  renderTrace,
+  rootWindowId,
+  runCommand,
+  windowGeometry,
+} from "./display";
 
-/** Use the official client's discovery and authentication, never a guessed URL. */
-async function localApi(args: string[], signal?: AbortSignal): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ["api", ...args], {
-      stdio: ["ignore", "pipe", "pipe"],
-      signal,
-    });
-    let output = "";
-    const timer = setTimeout(() => child.kill("SIGTERM"), 15000);
-    child.stdout.on("data", (chunk) => {
-      output += chunk;
-    });
-    // API errors may contain a command or credentials; do not echo stderr.
-    child.stderr.resume();
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      if (code !== 0)
-        return reject(new Error("OpenCode permission API request failed"));
-      try {
-        resolve(JSON.parse(output));
-      } catch {
-        reject(new Error("Invalid OpenCode permission API response"));
-      }
-    });
-  });
-}
-
-/** 2.0.26 exposes permission.create over HTTP, but not assert in the plugin. */
-export async function assertProcessPermission(
-  ctx: any,
-  context: any,
-  command: string,
-  request = localApi,
-): Promise<void> {
-  const input = {
-    sessionID: context.sessionID,
-    agent: context.agent,
-    source: { type: "tool", messageID: context.messageID, id: context.id },
-    action: "shell",
-    resources: [command],
-  };
-  if (typeof ctx.permission?.assert === "function") {
-    await ctx.permission.assert(input);
-    return;
-  }
-  context.signal?.throwIfAborted();
-  const info = await request(["get", "/api/info"], context.signal);
-  if (info.pid !== process.pid)
-    throw new Error(
-      "Permission API belongs to another server; command refused",
-    );
-  if (typeof ctx.event?.subscribe !== "function")
-    throw new Error("Permission event stream unavailable; command refused");
-
-  const id = `per_${randomUUID()}`;
-  const controller = new AbortController();
-  const signal = context.signal
-    ? AbortSignal.any([controller.signal, context.signal])
-    : controller.signal;
-  // Listen before creating the request so a fast human response is not lost.
-  const decision = (async () => {
-    try {
-      for await (const event of ctx.event.subscribe({ signal })) {
-        if (
-          event.type === "permission.replied" &&
-          event.data?.sessionID === context.sessionID &&
-          event.data.requestID === id
-        )
-          return { reply: event.data.reply };
-      }
-      return {
-        error: new Error("Permission event stream closed; command refused"),
-      };
-    } catch (error) {
-      return { error };
-    }
-  })();
-  try {
-    const { sessionID, ...payload } = input;
-    const response = await request(
-      [
-        "post",
-        `/api/session/${encodeURIComponent(sessionID)}/permission`,
-        "--data",
-        JSON.stringify({ ...payload, id }),
-      ],
-      signal,
-    );
-    const result = response.data ?? response;
-    if (result.id !== id)
-      throw new Error("Permission request identity mismatch");
-    if (result.effect === "allow") return;
-    if (result.effect !== "ask") throw new Error("Shell permission denied");
-    const outcome = await decision;
-    signal.throwIfAborted();
-    if (outcome.error) throw outcome.error;
-    if (outcome.reply !== "once" && outcome.reply !== "always")
-      throw new Error("Shell permission rejected");
-  } finally {
-    controller.abort();
-    await decision;
-  }
-}
-
-/** Operator-only transitions require a fresh interactive answer, never a saved allow. */
-export async function assertOperatorDecision(
-  ctx: any,
-  context: any,
-  resource: string,
-  request = localApi,
-): Promise<void> {
-  if (typeof ctx.permission?.explicit === "function") {
-    const reply = await ctx.permission.explicit({ context, resource });
-    if (reply !== "once")
-      throw new Error("An explicit operator decision is required");
-    return;
-  }
-  context.signal?.throwIfAborted();
-  const info = await request(["get", "/api/info"], context.signal);
-  if (info.pid !== process.pid)
-    throw new Error(
-      "Permission API belongs to another server; decision refused",
-    );
-  if (typeof ctx.event?.subscribe !== "function")
-    throw new Error("Permission event stream unavailable; decision refused");
-  const id = `per_${randomUUID()}`;
-  const controller = new AbortController();
-  const signal = context.signal
-    ? AbortSignal.any([controller.signal, context.signal])
-    : controller.signal;
-  const decision = (async () => {
-    try {
-      for await (const event of ctx.event.subscribe({ signal })) {
-        if (
-          event.type === "permission.replied" &&
-          event.data?.sessionID === context.sessionID &&
-          event.data.requestID === id
-        )
-          return { reply: event.data.reply };
-      }
-      return {
-        error: new Error("Permission event stream closed; decision refused"),
-      };
-    } catch (error) {
-      return { error };
-    }
-  })();
-  try {
-    const response = await request(
-      [
-        "post",
-        `/api/session/${encodeURIComponent(context.sessionID)}/permission`,
-        "--data",
-        JSON.stringify({
-          id,
-          agent: context.agent,
-          source: {
-            type: "tool",
-            messageID: context.messageID,
-            id: context.id,
-          },
-          action: "harness_operator",
-          resources: [resource],
-        }),
-      ],
-      signal,
-    );
-    const result = response.data ?? response;
-    if (result.id !== id)
-      throw new Error("Permission request identity mismatch");
-    // The base policy allows unknown actions. That is not a human decision.
-    if (result.effect !== "ask")
-      throw new Error(
-        "harness_operator must be configured as ask; decision refused",
-      );
-    const outcome = await decision;
-    signal.throwIfAborted();
-    if (outcome.error) throw outcome.error;
-    if (outcome.reply !== "once")
-      throw new Error("The operator must approve this transition once");
-  } finally {
-    controller.abort();
-    await decision;
-  }
-}
-
-/** A command of the host, with its output. */
-function runCommand(
-  command: string,
-  args: string[],
-  timeout = 10000,
-  env?: Record<string, string>,
-  allowFailure = false,
-): string {
-  const result = spawnSync(command, args, {
-    encoding: "utf8",
-    timeout,
-    env: env ? { ...process.env, ...env } : process.env,
-  });
-  if (result.error)
-    throw new Error(`${command} failed: ${result.error.message}`);
-  if (result.status !== 0 && !allowFailure)
-    throw new Error(
-      `${command} failed: ${String(result.stderr || result.stdout || "").slice(
-        0,
-        300,
-      )}`,
-    );
-  return result.stdout ?? "";
-}
-
-/**
- * Render a recorded trace the way a report can print it.
- *
- * On the operator's display the trace is shown in their own terminal, with
- * their theme, then the window is captured and closed. Without a display, or
- * when the terminal is switched off, a printed rendering is produced instead.
- * Neither path runs the command again.
- */
-function renderTrace(
-  text: string,
-  dest: string,
-  title: string,
-  command: string,
-  cwd: string,
-): "qterminal" | "printed" {
-  const display = process.env.DISPLAY?.trim();
-  const mode = (process.env.HARNESS_CAPTURE_TERMINAL ?? "auto").trim();
-  const terminal = ["/usr/bin/qterminal", "/usr/local/bin/qterminal"].find(
-    (file) => fs.existsSync(file),
-  );
-  if (mode !== "off" && display && terminal) {
-    const source = path.join(path.dirname(dest), `.trace-${randomUUID()}.txt`);
-    fs.writeFileSync(source, `$ ${command}\n\n${text}\n`, { mode: 0o600 });
-    try {
-      runCommand(
-        "sh",
-        [
-          path.join(coreRoot(), "scripts", "capture_terminal.sh"),
-          display,
-          cwd,
-          title,
-          source,
-          dest,
-        ],
-        45000,
-      );
-      if (fs.existsSync(dest) && fs.statSync(dest).size > 100)
-        return "qterminal";
-    } catch {
-      /* the printed rendering below is the fallback */
-    } finally {
-      fs.rmSync(source, { force: true });
-    }
-  }
-  const source = path.join(path.dirname(dest), `.trace-${randomUUID()}.txt`);
-  fs.writeFileSync(source, text, { mode: 0o600 });
-  try {
-    runCommand(
-      "python3",
-      [
-        path.join(coreRoot(), "scripts", "render_trace.py"),
-        source,
-        dest,
-        title,
-        command,
-      ],
-      30000,
-    );
-  } finally {
-    fs.rmSync(source, { force: true });
-  }
-  return "printed";
-}
-
-function commandArguments(value: unknown): string[] {
-  if (
-    !Array.isArray(value) ||
-    !value.length ||
-    value.length > 256 ||
-    value.some(
-      (part) =>
-        typeof part !== "string" ||
-        part.length > 32768 ||
-        /[\0\r\n]/.test(part),
-    )
-  )
-    throw new Error("argv must contain 1..256 valid command arguments");
-  return value;
-}
-
-function waitForTerminalCommand(session: string, marker: string): void {
-  for (let attempt = 0; attempt < 300; attempt++) {
-    const pane = runCommand(
-      "tmux",
-      ["capture-pane", "-p", "-t", session],
-      10000,
-    );
-    if (pane.split("\n").some((line) => line.trim() === `${marker}:0`)) return;
-    spawnSync("sleep", ["0.1"]);
-  }
-  throw new Error("the evidence command did not finish within 30 seconds");
-}
-
-/**
- * The harness core lives outside this file, and this file may be loaded from a
- * copy, a link or a package directory. The core is therefore reached by an
- * absolute path rather than a relative one, so the loader never decides where
- * the proof comes from.
- *
- * The locations are read when the plugin starts, not when it is loaded: a
- * module loaded once can then serve two stores, which is what the tests need.
- */
-const coreRoot = () =>
-  process.env.HARNESS_CORE?.trim() ||
-  // The plugin may be reached through the host's symlink: resolve the file
-  // itself so the core is the directory that owns opencode/plugin.ts, not
-  // wherever the host keeps its links.
-  path.dirname(
-    path.dirname(fs.realpathSync(fileURLToPath(import.meta.url))),
-  );
+export { assertOperatorDecision, assertProcessPermission } from "./permissions";
 
 /**
  * Where the shared state lives.
@@ -487,97 +176,6 @@ function succeeded(event: any): boolean {
  * function, and a definition that imports nothing can also be loaded and
  * exercised outside the host, which is how the proof is tested.
  */
-/**
- * The windows the display shows.
- *
- * The titles are read one by one and paired with the ids, because a title
- * search in the display tool does not accept a partial name.
- */
-function listWindows(display?: string): { id: string; title: string }[] {
-  const env = display ? { DISPLAY: display } : undefined;
-  const ids = runCommand(
-    "xdotool",
-    ["search", "--onlyvisible", "--name", "."],
-    10000,
-    env,
-    true,
-  )
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const windows: { id: string; title: string }[] = [];
-  for (const id of ids) {
-    let title = "";
-    try {
-      title = runCommand("xdotool", ["getwindowname", id], 5000, env).trim();
-    } catch {
-      continue;
-    }
-    windows.push({ id, title });
-  }
-  return windows;
-}
-
-/** The id of the root window: the desktop itself. */
-function rootWindowId(display?: string): string {
-  const out = runCommand(
-    "xwininfo",
-    ["-root"],
-    10000,
-    display ? { DISPLAY: display } : undefined,
-  );
-  const match = /Window id:\s*(0x[0-9a-f]+)/i.exec(out);
-  return match ? match[1] : "";
-}
-
-/** The size of a window, as the display tool reports it. */
-function windowGeometry(
-  id: string,
-  display?: string,
-): { width: number; height: number } {
-  const out = runCommand(
-    "xwininfo",
-    ["-id", id],
-    10000,
-    display ? { DISPLAY: display } : undefined,
-  );
-  const width = Number(/Width:\s*(\d+)/.exec(out)?.[1]);
-  const height = Number(/Height:\s*(\d+)/.exec(out)?.[1]);
-  return { width, height };
-}
-
-/**
- * The picture of one window.
- *
- * The capture is taken of that window and of nothing else, so the desktop
- * never appears in it.
- */
-function captureWindow(
-  id: string,
-  dest: string,
-  display?: string,
-): { width: number; height: number; bytes: number } {
-  runCommand(
-    "import",
-    ["-window", id, dest],
-    20000,
-    display ? { DISPLAY: display } : undefined,
-  );
-  const stat = fs.statSync(dest);
-  if (!stat.isFile() || stat.size < 32)
-    throw new Error("the capture file is empty");
-  const size = runCommand("identify", ["-format", "%w %h", dest], 10000).trim();
-  const [width, height] = size.split(" ").map((value) => Number(value));
-  return { width, height, bytes: stat.size };
-}
-
-/** A path or argument, quoted for the shell only when it needs it. */
-function quoteArgument(value: string): string {
-  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(value)
-    ? value
-    : `'${String(value).replace(/'/g, `'\\''`)}'`;
-}
-
 export default {
   id: "harness-core.proof",
   async setup(ctx: any) {
@@ -1653,10 +1251,13 @@ export default {
     const { addWorkflowTools } = await import(
       path.join(coreRoot(), "opencode", "workflow-tools.ts")
     );
+    const { addLedgerTools } = await import(
+      path.join(coreRoot(), "opencode", "ledger-tools.ts")
+    );
     await ctx.tool.transform((editor: any) => {
       editor.add({
         name: "cyber_toolbox",
-        description: "Discover actual host/CLI/managed capabilities; ensure installs missing tools automatically; knowledge-search reads the configured reference database without making findings; propose and validate scripts, activate instantly, and roll back. Native shell permissions still apply.",
+        description: "Discover actual host/CLI/managed capabilities; ensure installs a catalogued tool only after an operator once-decision; knowledge-search reads the configured reference database without making findings; propose and validate scripts, activate instantly, and roll back. Native shell permissions still apply. Launching a command never installs one.",
         input: {
           type: "object",
           properties: {
@@ -1731,6 +1332,11 @@ export default {
               ? input.names.slice(0, 10).map(String)
               : typeof input.name === "string" ? [input.name] : [];
             if (!names.length) throw new Error("Provide name or names to ensure");
+            await assertOperatorDecision(
+              ctx,
+              context,
+              "ensure-tool:" + names.join(","),
+            );
             const results = ensureMany(names);
             for (const r of results) {
               knowledge.audit(scope, "tools.ensure", {
@@ -2040,371 +1646,20 @@ export default {
         },
       });
 
-      editor.add({
-        name: "cyber_tasks",
-        description:
-          "Keep the running step list. A task closes only against a successful observation. A blocked task must give its reason. Use the cyber_memory action recent to obtain the observation ids that prove the work.",
-        input: {
-          type: "object",
-          properties: {
-            action: {
-              type: "string",
-              enum: [
-                "add",
-                "start",
-                "complete",
-                "block",
-                "remove",
-                "list",
-                "review",
-                "tree",
-                "markdown",
-                "export",
-                "assets",
-                "coverage",
-              ],
-              description:
-                "What to do with the task list. tree reads the hierarchy, markdown renders it, export writes couverture.md into the engagement, assets creates one branch per known entity, coverage creates a bounded deep profile.",
-            },
-            profile: {
-              type: "string",
-              enum: Object.keys(COVERAGE_PROFILES),
-              description: "Deep coverage profile: mobile, cloud, harness or gaps.",
-            },
-            title: { type: "string", description: "Task title, for add." },
-            id: {
-              type: "string",
-              description: "Task id, for start, complete, block and remove.",
-            },
-            reason: { type: "string", description: "Why the task is blocked." },
-            evidence: {
-              type: "array",
-              items: { type: "string" },
-              description: "Observation ids that close the task.",
-            },
-            dependsOn: {
-              type: "array",
-              items: { type: "string" },
-              description: "Tasks that must close first.",
-            },
-            parent: {
-              type: "string",
-              description: "The parent task, for add: a sub-step of a larger one.",
-            },
-          },
-          required: ["action"],
-          additionalProperties: false,
-        },
-        execute: async (input: any, context: any) => {
-          const scope = await scopeOf(context.sessionID);
-          const action = String(input.action);
-          if (action === "add") {
-            if (!input.title) throw new Error("add requires a title");
-            return {
-              content: JSON.stringify(
-                taskStore.add(scope, {
-                  title: input.title,
-                  dependsOn: input.dependsOn,
-                  parent: input.parent,
-                }),
-              ),
-            };
-          }
-          if (action === "list") {
-            return {
-              content: JSON.stringify({
-                tasks: taskStore.list(scope),
-                delegable: taskStore.delegable(scope),
-              }),
-            };
-          }
-          if (action === "tree")
-            return { content: JSON.stringify(taskStore.tree(scope)) };
-          if (action === "markdown")
-            return { content: taskStore.markdown(scope) };
-          if (action === "export") {
-            const mission = platform.active(scope),
-              root = mission ? platform.missionRoot(scope, mission.id) : undefined;
-            if (!root)
-              throw new Error(
-                "An engagement root is required to write the coverage map",
-              );
-            const file = path.join(root, "couverture.md");
-            fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-            fs.writeFileSync(file, taskStore.markdown(scope), { mode: 0o600 });
-            return { content: JSON.stringify({ path: file }) };
-          }
-          if (action === "assets") {
-            const assets = [
-              "host",
-              "domain",
-              "ip",
-              "url",
-              "service",
-              "technology",
-              "certificate",
-              "account",
-              "repo",
-              "org",
-              "person",
-            ]
-              .flatMap((type) => platform.entities(scope, { type, limit: 100 }))
-              .slice(0, 50);
-            const existing = new Set(
-              taskStore.list(scope).map((entry: any) => entry.title),
-            );
-            const created: string[] = [];
-            for (const asset of assets) {
-              const title = `${asset.type}:${asset.key}`.slice(0, 200);
-              if (existing.has(title)) continue;
-              const parent = taskStore.add(scope, { title });
-              created.push(parent.id);
-              for (const step of assetSteps(asset.type))
-                created.push(
-                  taskStore.add(scope, {
-                    title: `${title} — ${step}`,
-                    parent: parent.id,
-                  }).id,
-                );
-            }
-            return {
-              content: JSON.stringify({ assets: assets.length, created }),
-            };
-          }
-          if (action === "coverage") {
-            const profileName = String(input.profile ?? "");
-            const profile = coverageProfile(profileName);
-            const contract = coverageContract(profileName);
-            const root = taskStore.add(scope, { title: profile.title });
-            const created = [root.id];
-            for (const step of profile.steps)
-              created.push(
-                taskStore.add(scope, {
-                  title: step,
-                  parent: root.id,
-                }).id,
-              );
-            return {
-              content: JSON.stringify({
-                profile: profileName,
-                title: profile.title,
-                created,
-                steps: profile.steps.length,
-                contract,
-              }),
-            };
-          }
-          if (action === "review") {
-            const packet = taskStore.review(scope);
-            const ids = [
-              ...new Set(packet.closed.flatMap((entry: any) => entry.evidence)),
-            ];
-            return {
-              content: JSON.stringify({
-                ...packet,
-                observations: knowledge
-                  .evidence(scope, ids)
-                  .map((item: any) => ({
-                    id: item.id,
-                    tool: item.tool,
-                    success: item.success,
-                    output: item.output.slice(0, 2000),
-                  })),
-              }),
-            };
-          }
-          if (!input.id) throw new Error(`${action} requires a task id`);
-          if (action === "start")
-            return {
-              content: JSON.stringify(taskStore.start(scope, input.id)),
-            };
-          if (action === "remove") {
-            taskStore.remove(scope, input.id);
-            return {
-              content: JSON.stringify({
-                removed: input.id,
-                tasks: taskStore.list(scope),
-              }),
-            };
-          }
-          if (action === "block") {
-            if (!input.reason)
-              throw new Error("a blocked task requires a reason");
-            return {
-              content: JSON.stringify(
-                taskStore.block(scope, input.id, input.reason),
-              ),
-            };
-          }
-          if (!input.evidence?.length)
-            throw new Error(
-              "a completed task requires the observation ids that prove it",
-            );
-          const proven = knowledge.evidence(scope, input.evidence);
-          if (!proven.some((item: any) => item.success))
-            throw new Error(
-              "task evidence must include a successful observation",
-            );
-          return {
-            content: JSON.stringify(
-              taskStore.complete(scope, input.id, input.evidence),
-            ),
-          };
-        },
-      });
-
-      editor.add({
-        name: "cyber_investigation",
-        description:
-          "Drive the investigation itself: declare hypotheses and test them, track which surfaces are tested or blocked, and read the directives the harness derives from your observations. A hypothesis confirms only against a successful observation; a refuted one is not revisited. The harness injects mandatory directives when you loop, stagnate, or conclude before covering the surface.",
-        input: {
-          type: "object",
-          properties: {
-            action: {
-              type: "string",
-              enum: ["hypothesis", "surface", "status"],
-              description:
-                "hypothesis manages the hypothesis register, surface manages coverage, status reads the assembled state and its directives.",
-            },
-            op: {
-              type: "string",
-              enum: [
-                "propose",
-                "test",
-                "evidence",
-                "refute",
-                "list",
-                "add",
-                "start",
-                "complete",
-                "block",
-              ],
-              description:
-                "For hypothesis: propose/test/evidence/refute/list. For surface: add/start/complete/block/list.",
-            },
-            id: {
-              type: "string",
-              description: "Hypothesis or surface id. Omit on propose/add to generate one.",
-            },
-            text: { type: "string", description: "The hypothesis statement, for propose." },
-            label: { type: "string", description: "The surface label, for add." },
-            reason: { type: "string", description: "Why a surface is blocked." },
-            observationId: {
-              type: "string",
-              description: "The observation that confirms or refutes a hypothesis.",
-            },
-            evidence: {
-              type: "array",
-              items: { type: "string" },
-              description: "Observation ids that prove a surface was tested.",
-            },
-          },
-          required: ["action"],
-          additionalProperties: false,
-        },
-        execute: async (input: any, context: any) => {
-          const scope = await scopeOf(context.sessionID);
-          const action = String(input.action);
-          const op = String(input.op ?? "");
-
-          if (action === "status") {
-            const nowMs = Date.now();
-            investigation.tick(scope, nowMs);
-            const explicitCov = investigation.coverageSummary(scope);
-            const tasks = taskStore.list(scope);
-            const coverage = explicitCov.total > 0
-              ? explicitCov
-              : taskCoverageSummary(tasks);
-            const state = assembleInvestigation({
-              observations: knowledge.observationsForSession(
-                context.sessionID,
-                scope,
-                30,
-              ),
-              tasks,
-              hypotheses: investigation.hypotheses(scope),
-              coverage,
-              nowMs,
-            });
-            return {
-              content: JSON.stringify({
-                coverage: state.coverage,
-                hypotheses: state.hypotheses,
-                stagnation: state.stagnation,
-                directives: directives(state),
-              }),
-            };
-          }
-
-          if (action === "hypothesis") {
-            if (op === "list")
-              return { content: JSON.stringify(investigation.hypotheses(scope)) };
-            if (op === "propose") {
-              if (!input.text) throw new Error("propose requires a hypothesis text");
-              return {
-                content: JSON.stringify(
-                  investigation.proposeHypothesis(scope, input.text, input.id),
-                ),
-              };
-            }
-            if (!input.id) throw new Error(`${op} requires a hypothesis id`);
-            if (op === "test")
-              return {
-                content: JSON.stringify(investigation.testHypothesis(scope, input.id)),
-              };
-            if (op === "evidence" || op === "refute") {
-              if (!input.observationId)
-                throw new Error(`${op} requires an observationId`);
-              const [obs] = knowledge.evidence(scope, [input.observationId]);
-              if (!obs) throw new Error("the observation does not exist in this scope");
-              if (op === "evidence" && !obs.success)
-                throw new Error("a hypothesis confirms only against a successful observation");
-              return {
-                content: JSON.stringify(
-                  op === "evidence"
-                    ? investigation.evidenceHypothesis(scope, input.id, input.observationId)
-                    : investigation.refuteHypothesis(scope, input.id, input.observationId),
-                ),
-              };
-            }
-            throw new Error(`unknown hypothesis op ${op}`);
-          }
-
-          if (action === "surface") {
-            if (op === "list") {
-              const ec = investigation.coverageSummary(scope);
-              return { content: JSON.stringify(ec.total > 0 ? ec : taskCoverageSummary(taskStore.list(scope))) };
-            }
-            if (op === "add") {
-              if (!input.label) throw new Error("add requires a surface label");
-              const id = input.id ?? `surface-${Date.now().toString(36)}`;
-              investigation.addSurface(scope, id, input.label);
-              return { content: JSON.stringify({ added: id }) };
-            }
-            if (!input.id) throw new Error(`${op} requires a surface id`);
-            if (op === "start") {
-              investigation.startSurface(scope, input.id);
-              return { content: JSON.stringify({ started: input.id }) };
-            }
-            if (op === "block") {
-              if (!input.reason) throw new Error("a blocked surface requires a reason");
-              investigation.blockSurface(scope, input.id, input.reason);
-              return { content: JSON.stringify({ blocked: input.id }) };
-            }
-            if (op === "complete") {
-              if (!input.evidence?.length)
-                throw new Error("a tested surface requires observation ids");
-              const proven = knowledge.evidence(scope, input.evidence);
-              if (!proven.some((item: any) => item.success))
-                throw new Error("surface evidence must include a successful observation");
-              investigation.completeSurface(scope, input.id, input.evidence);
-              return { content: JSON.stringify({ tested: input.id }) };
-            }
-            throw new Error(`unknown surface op ${op}`);
-          }
-
-          throw new Error(`unknown investigation action ${action}`);
-        },
+      addLedgerTools(editor, {
+        scopeOf,
+        taskStore,
+        platform,
+        knowledge,
+        investigation,
+        assetSteps,
+        coverageProfile,
+        coverageContract,
+        COVERAGE_PROFILES,
+        hash,
+        assembleInvestigation,
+        taskCoverageSummary,
+        directives,
       });
 
       editor.add({
@@ -3206,28 +2461,6 @@ export default {
             };
           if (input.action === "run") {
             const argv = commandArguments(input.argv);
-            // Auto-install: if the binary is absent and in the catalog, install it.
-            const binary = argv[0].includes("/") || argv[0].includes("\\") ? undefined : argv[0];
-            if (binary) {
-              // The lookup is the core's, so it answers the same way on every
-              // platform (`which` does not exist on Windows).
-              const { ensure: ensureTool, isPresent } = await import(
-                path.join(coreRoot(), "src", "installable.ts")
-              );
-              if (!isPresent(binary)) {
-                const installResult = ensureTool(binary);
-                if (installResult.installed && !installResult.wasPresent) {
-                  knowledge.audit(scope, "tools.auto-installed", {
-                    sessionID: context.sessionID,
-                    name: binary,
-                    method: installResult.method,
-                  });
-                }
-                if (!installResult.installed && installResult.error)
-                  throw new Error(`${binary} is not installed and auto-install failed: ${installResult.error}`);
-              }
-            }
-            const command = argv.map(quoteArgument).join(" ");
             const seconds = input.timeout ?? DEFAULT_DEADLINE_MS / 1000;
             if (
               !Number.isFinite(seconds) ||
@@ -3235,6 +2468,8 @@ export default {
               seconds * 1000 > MAX_DEADLINE_MS
             )
               throw new Error("Invalid timeout (0..600 seconds)");
+
+            const command = argv.map(quoteArgument).join(" ");
             await assertProcessPermission(ctx, context, command);
             context.signal?.throwIfAborted();
             const session = await ctx.session.get({
@@ -3286,7 +2521,9 @@ export default {
             await assertProcessPermission(
               ctx,
               context,
-              `kill -TERM -- -${record.pid}`,
+              process.platform === "win32"
+                ? `taskkill /PID ${record.pid}`
+                : `kill -TERM -- -${record.pid}`,
             );
             const stopped = processes.stop(scope, input.id);
             return {

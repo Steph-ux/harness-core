@@ -84,6 +84,25 @@ module.exports = async ({ assert, jiti }) => {
       "the branch closes once its sub-steps are done",
     );
 
+    const held = tasks.add(scope, { title: "held" });
+    const heldChild = tasks.add(scope, {
+      title: "held-child",
+      parent: held.id,
+    });
+    tasks.block(scope, heldChild.id, "WAF blocks probes");
+    assert.equal(
+      tasks.complete(scope, held.id, ["obs-held"]).status,
+      "completed",
+      "a branch closes when remaining sub-steps are blocked with a reason",
+    );
+    const stillOpen = tasks.add(scope, { title: "open-parent" });
+    tasks.add(scope, { title: "pending-child", parent: stillOpen.id });
+    assert.throws(
+      () => tasks.complete(scope, stillOpen.id, ["obs-open"]),
+      /subtasks/,
+      "a pending sub-step still blocks the branch",
+    );
+
     tasks.start(scope, leaf.id);
     tasks.complete(scope, leaf.id, ["obs-tree-1"]);
     tasks.block(scope, surface.id, "scope not approved");
@@ -191,6 +210,19 @@ module.exports = async ({ assert, jiti }) => {
           .children.length,
         14,
         "mobile coverage creates one task per control",
+      );
+      const again = JSON.parse(
+        (await tool.execute({ action: "coverage", profile: "mobile" }, context))
+          .content,
+      );
+      assert.equal(again.created.length, 0, "coverage planting is idempotent");
+      assert.equal(
+        tasks
+          .tree(scope)
+          .filter((node) => node.title === "Mobile application deep coverage")
+          .length,
+        1,
+        "a second coverage call does not duplicate the profile",
       );
       await assert.rejects(
         () => tool.execute({ action: "coverage", profile: "unknown" }, context),
