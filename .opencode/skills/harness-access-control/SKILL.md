@@ -1,50 +1,50 @@
 ---
 name: harness-access-control
-description: "Test an approved role or method boundary by replaying one authorized request with a lower-privilege identity."
+description: "Prove BFLA/function-level and field-level access control with privileged baseline, low-priv replay, unauth replay, and a re-read; 200 HTML is not access."
 ---
 
-# Access control — BOLA/BFLA deep
+# Access control — BOLA/BFLA, two identities, re-read
 
-Source: `testing-for-broken-access-control` (2024-2026: BFLA, function-level, mass assignment via OpenAPI diff).
+Source: OWASP API1/API5, ASVS V4. A role name in a JWT is not enforcement.
 
 ## Gate
 
-Every command goes through `cyber_process` with `argv`. Do not build a shell string.
-The two identities (low-priv test user + higher-role test user) and the target object/method must be named in the approved scope. Approved-scope read first (`cyber_mission status`).
+Every command goes through `cyber_process` with `argv`. Do not build a shell string. Two approved identities (low + higher) and the target method/object named in scope. No real customer. No destructive DELETE to fill a matrix. Restore every accepted write.
 
 ## Steps
 
-1. Inventory: pull 3-5 state-changing routes from `endpoints.json`/OpenAPI in `<evidence-dir>` (from `harness-source-deep` crawl). Focus `POST/PUT/PATCH/DELETE` touching `price|role|status|owner|id`. Record observation.
-2. Privileged baseline (allowed role) → positive control. Record via `cyber_process` `argv`.
-3. Low-priv replay: same `method+path+body`, credential swapped. One request via `cyber_process` `argv`. Record.
-4. Unauth replay: no `Authorization`. Record.
-5. Decide: `200` with identical fields or state change visible on re-read `GET` = candidate. `200` with login HTML / empty / error is not. Mass assignment variant: `PUT ... {"role":"admin"}` — one field only.
-6. Promote via `harness-vuln-triage` → `cyber_finding` with `evidence`=3 ids, `sources`=OpenAPI chunk, `checks`={privileged:positive-control, low-priv:reproduction, unauth:negative-control}. Add `cyber_capture` if UI-visible.
+### 1. Inventory state-changing routes
 
-### Boundary matrix
+From OpenAPI / `endpoints.json` already in evidence, pick 3–5 `POST/PUT/PATCH/DELETE` that touch `price|role|status|owner|id`. One observation for the inventory. `cyber_source` the contract chunk.
 
-Test the same operation across unauthenticated, low-privilege, peer-tenant and
-authorized-admin identities. Cover object-level, function-level and field-level
-boundaries separately. Include direct path, query, body, header and method
-override references where the API exposes them. A role name in a JWT or UI is
-not evidence of enforcement; the server response and a re-read are.
+### 2. Privileged baseline
 
-### Controls and safe writes
+Higher identity, one approved action:
 
-Use an owned test object and a benign reversible marker. The privileged request
-is the positive control; an unrelated object, an absent permission, and an
-unauthenticated replay are negative controls. Restore every accepted write and
-record the restoration as its own observation. Never use a real customer,
-privilege escalation outside the two approved identities, or a destructive
-DELETE merely to complete the matrix.
+```
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <token-high>","-X","PUT","--data-binary","@body.json","<url>"]
+```
 
-### Proof contract
+Positive control. Record status, schema, one stable field. Hash body.
 
-An access-control finding requires the authorized result, the lower-privilege
-replay, and a post-request read from the affected identity. If the lower role
-receives a generic 200 envelope, login page, stale cache, or empty result, keep
-it as a control—not a finding—and record the ambiguity.
+### 3. Low-priv replay
+
+Same method+path+body, credential swapped. One request. Record.
+
+### 4. Unauth replay
+
+No `Authorization`. Negative control. `401`/`403` expected. Login HTML `200` is **not** access.
+
+### 5. Decide
+
+`200` with identical private fields, or a state change visible on **GET re-read**, = candidate. Empty `{}` / error envelope = control. Mass assignment: **one** field (`role`/`ownerId`), then GET, then restore.
+
+Object-level vs function-level vs field-level: say which. Peer-tenant is `harness-idor` if only the id changed.
+
+### 6. Finding contract
+
+`cyber_finding` evidence = privileged + low-priv + unauth (+ re-read). Checks: privileged positive, unauth negative, low-priv reproduction. `contains` is the leaked field or persisted marker, not `200`. Capture UI only if linked to the re-read observation.
 
 ## Done
 
-Finding cites 3 observations + source chunk. Differing 200 page is not a finding.
+Finding cites three observations + source chunk. A different 200 page is not a finding.

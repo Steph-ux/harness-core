@@ -1,52 +1,52 @@
 ---
 name: harness-oauth2
-description: "Test an approved OAuth2 or OIDC flow for redirect, state, and audience failures without using a production user."
+description: "Test an approved OAuth2/OIDC client: legit code exchange, unregistered redirect, state strip, PKCE downgrade, audience mismatch; never a production user."
 ---
 
 # OAuth2/OIDC — redirect, state, PKCE, audience
 
-Source: `testing-oauth2-implementation-flaws` (2024: `state` fixation, `redirect_uri` open redirector, `code` replay).
+Source: RFC 6749/8252, OIDC core. Missing `state` is a finding only if the stripped callback still creates a session.
 
 ## Gate
 
-Every command goes through `cyber_process` with `argv`. Do not build a shell string.
-Approved `client_id`, `redirect_uri`, test account only. No device-code flow vs real user. One mutation per callback.
+Every command goes through `cyber_process` with `argv`. Do not build a shell string. Approved `client_id`, `redirect_uri`, test account only. No device-code against a real user. One mutation per callback. Redact codes/tokens in the ledger (SHA256 only).
 
 ## Steps
 
-1. Record authorize URL, `client_id`, `redirect_uri`, `scope`, `response_type`, `state`+`nonce`+`PKCE` presence. `cyber_source` authorize URL chunk.
-2. Legit `code→token` exchange with test user → positive control.
-3. `redirect_uri` not registered (`https://attacker.example/cb`) via `cyber_process` `argv`. `302` to unregistered = signal; `400 invalid_redirect_uri` = negative control.
-4. Callback `state` removed/swapped — if client still creates session, record both. `PKCE` downgrade (strip `code_challenge`) same.
-5. `aud`/`azp` confusion: `client A` token replayed on `api B` that should reject `aud!=B`. Acceptance = candidate → `harness-vuln-triage`.
-6. `cyber_finding` with legit+altered-redirect+`state`-less observations, authorize chunk `sources`, `checks` legit:positive, bad-redirect:negative, stripped:reproduction.
+### 1. Record the authorize URL
 
-### Flow matrix
+`client_id`, `redirect_uri`, `scope`, `response_type`, presence of `state`, `nonce`, PKCE. `cyber_source` the URL chunk (no code).
 
-Record authorization-code, PKCE method, state, nonce, redirect URI, client id,
-scope, issuer and token audience. Test one callback mutation at a time:
-unregistered redirect, equivalent-encoding redirect, missing or swapped state,
-replayed code, wrong client id, missing PKCE verifier, wrong nonce, and token
-audience mismatch. Use only an approved test client and account; do not test
-implicit or device-code flows against a production user.
+### 2. Positive control
 
-### Controls and replay
+Legit `code→token` with the test user:
 
-The untouched authorization flow is the positive control. An unregistered
-redirect must be rejected without sending a code; an altered state must not
-create a session; and a redeemed code must fail on replay. Capture the browser
-or HTTP callback only when it contains no token or personal data. A redirect
-to an error page, a token issued for the wrong resource, or a client-side
-warning is not proof of account takeover.
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","-d","grant_type=authorization_code","<token-endpoint>"]
+```
 
-### Proof contract
+Protected-resource request after that is the session proof.
 
-Each OAuth finding needs the legitimate flow, the single mutated flow, the
-server/client decision, and (for session claims) a protected-resource request
-showing the resulting session. Preserve authorization URL and response shape
-as sources, redact codes/tokens, and leave unsupported grant types explicitly
-`not-tested`.
+### 3. Unregistered redirect
+
+```
+cyber_process argv=["curl","-sS","-D","-","-o","NUL","<authorize>?client_id=<id>&redirect_uri=https://attacker.example/cb&response_type=code"]
+```
+
+`400 invalid_redirect_uri` = negative control. `302` to unregistered with a `code` = signal.
+
+### 4. State / PKCE
+
+Callback with `state` removed or swapped. If the client still creates a session, record both. PKCE downgrade: strip `code_challenge`. Redeemed code replay must fail.
+
+### 5. Audience
+
+Client-A token on api-B. Acceptance = candidate → `harness-jwt` / triage. Implicit and device-code grants stay `not-tested` unless named.
+
+### 6. Finding contract
+
+`cyber_finding` with legit flow, one mutated flow, server/client decision, and (for session claims) a resource request. Sources: authorize URL shape. Checks: legit positive, bad-redirect negative, stripped reproduction.
 
 ## Done
 
-Each flaw cites legit + altered flow. Missing `state` is weakness only when stripped callback still creates session.
+Each flaw cites legit + altered flow. Missing `state` is weakness only when the stripped callback still creates a session.

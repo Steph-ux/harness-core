@@ -1,55 +1,50 @@
 ---
 name: harness-graphql
-description: "Assess an approved GraphQL endpoint by comparing introspection, an allowed field, and a field the test identity must not read."
+description: "Assess an approved GraphQL endpoint: introspection, allowed field, forbidden field, one bounded depth and one batch; HTTP 200 with data:null is not bypass."
 ---
 
 # GraphQL — introspection, BOLA, depth/batching
 
-Source: `performing-graphql-security-assessment` (2024: `__schema` disabled → BOLA via persisted queries).
+Source: GraphQL security. Disabled `__schema` is a control, not a vuln. One batch only (DoS).
 
 ## Gate
 
-Every command goes through `cyber_process` with `argv`. Do not build a shell string.
-Endpoint in scope. Depth/batching/mutation: one extra each unless scope allows more. Batch is DoS vector — one batch only.
+Every command goes through `cyber_process` with `argv`. Do not build a shell string. Endpoint in scope. One extra depth query and one batch unless the scope allows more. No unbounded aliases. Mutations only on an owned test object, then restore.
 
 ## Steps
 
-1. Introspection `cyber_process` `argv`:
-```graphql
-{ __schema { types { name fields { name } } } }
+### 1. Introspection
+
 ```
-Refusal = control not vuln. If disabled, harvest from `katana -jc` / sourcemap `endpoints.json`.
+cyber_process argv=["curl","-sS","-H","Content-Type: application/json","--data-binary","{\"query\":\"{__schema{types{name}}}\"}","<graphql-url>"]
+```
 
-2. Pick allowed vs forbidden field (e.g. `me{email}` vs `user(id:"<other-id>"){email}`).
-3. Allowed → positive control. Forbidden with same identity → record. Data returned = candidate; `{"errors":…, "data":null}` is not.
-4. One depth (`{a{a{a{a{id}}}}}`) + one batch (`[{"query":"…"},…]`) — one each. Timeout after is signal; measure `diff-control --seuil-ms`.
-5. `harness-vuln-triage` → `cyber_finding` with introspection+allowed+forbidden+depth observations, schema/CURL `cyber_source` chunk, `checks` allowed:positive, forbidden:reproduction, unauth-introspection:negative.
+Refusal = control. If disabled, harvest from client/sourcemap `endpoints.json`.
 
-### Query coverage
+### 2. Allowed vs forbidden
 
-Inventory queries, mutations, subscriptions, aliases, fragments, persisted
-query ids, directives and batching from the schema or collected client traffic.
-Select one allowed field, one same-tenant object, one other-tenant object and
-one admin-only field. Test variables and inline arguments separately. Compare
-`data`, `errors`, nullability and extensions; an HTTP 200 with `data:null` is
-not authorization bypass.
+Pick `me{email}` vs `user(id:"<other>"){email}` (or the schema's equivalent). Allowed → positive control. Forbidden with same identity: data returned = candidate; `{"errors":...,"data":null}` is not.
 
-### Resource controls
+### 3. Depth and batch — one each
 
-Use one bounded depth query and one bounded batch, with a known-valid shallow
-query as the timing/control baseline. Do not load-test or send unbounded
-aliases. Test introspection both authenticated and unauthenticated; disabled
-introspection is a control, not a vulnerability. For mutations use an owned
-test object and a reversible marker, then re-read and restore it.
+Depth `{a{a{a{a{id}}}}}` and one JSON array of two queries. Timeout: measure vs a shallow baseline (`diff-control`). A single slow request is not a finding.
 
-### Proof contract
+### 4. Negative control
 
-A GraphQL finding cites the schema/client source, allowed positive control,
-forbidden or cross-tenant reproduction, and the negative control. Persisted
-query access is proven by the returned field or state change, not by a query
-hash being accepted. Depth or batching is a finding only with bounded impact
-evidence and a safe control, never from a single slow request.
+Unauth introspection (if auth is required) must fail. A known-invalid field must error. Do not load-test.
+
+### 5. Finding contract
+
+`cyber_finding` with introspection, allowed, forbidden, optional depth/batch. Schema/CURL chunk as `cyber_source`. Checks: allowed positive, forbidden reproduction, unauth/invalid negative. Persisted-query access is proven by the **returned field**, not by a hash being accepted.
+
+## Proof contract
+
+A GraphQL finding cites schema/client source, allowed positive control, forbidden or cross-tenant reproduction, and the invalid-field or unauth control.
+
+HTTP 200 with `data:null` is not bypass. Depth/batching needs bounded impact, never one slow request. Persisted-query access is the returned field, not a hash being accepted.
 
 ## Done
 
-Cites introspection, allowed, forbidden, single depth/batching. Disabled introspection not a finding.
+Cites introspection, allowed, forbidden, single depth/batch.
+
+Disabled introspection is not a finding. Untested mutations stay `not-tested`.
