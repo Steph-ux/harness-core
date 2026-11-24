@@ -4,6 +4,21 @@ One entry per decision that is expensive to reverse. Each states what was
 decided, why, and what it costs. New entries go at the top.
 
 
+## 2026-11-24 — A traced command is proven by its result file, not by Linux
+
+**Decision.** `spawnTraced` runs on Windows (and elsewhere) when `argv` is
+given. The supervisor still writes a nonce-bound result and hashes every
+trace byte. Process-group kill, descendant-outlived detection and `/proc`
+identity remain Linux-only; off Linux the supervisor signals the child it
+spawned, and a recovered PID without a result stays `unknown`.
+**Why.** The operator's daily machine is Windows. Refusing to supervise
+there meant the strongest proof never ran where the work happens. A launch
+is still not a success: the result file is.
+**Cost.** Descendants that leave the child are not owned on Windows. A
+command that needs `/bin/sh -c` must pass `argv`. File modes are not
+enforced on NTFS.
+
+
 ## 2026-11-24 — A branch closes when its sub-steps are addressed
 
 **Decision.** A parent task may complete when every child is `completed` or

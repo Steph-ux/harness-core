@@ -89,11 +89,19 @@ module.exports = async ({ assert, jiti, modules, skip }) => {
     const moved = path.join(workspace, "moved");
     fs.mkdirSync(moved);
     fixture.sessions.set("ses_process", moved);
-    // The supervisor owns a process group and reads a durable terminal
-    // result: it runs on Linux only. Everything above it is checked
-    // everywhere.
-    if (process.platform !== "linux")
-      skip("traced command supervision is Linux-only");
+    if (process.platform !== "linux") {
+      const probe = path.join(workspace, "need-argv.log");
+      assert.throws(
+        () =>
+          spawnTraced("echo", {
+            cwd: workspace,
+            logPath: probe,
+            deadlineMs: 1000,
+          }),
+        /need argv/,
+        "a traced command without argv is refused off Linux",
+      );
+    }
     const record = await call({
       action: "run",
       argv: [process.execPath, "-e", "console.log(process.cwd()); console.log('api_key=not-a-real-secret'); setTimeout(()=>{}, 10000)"],
@@ -114,7 +122,8 @@ module.exports = async ({ assert, jiti, modules, skip }) => {
       "operational harness tools leave observations",
     );
     proof.close();
-    assert.equal(fs.statSync(record.logPath).mode & 0o777, 0o600);
+    if (process.platform === "linux")
+      assert.equal(fs.statSync(record.logPath).mode & 0o777, 0o600);
     const recovered = new ProcessRegistry(state);
     assert.equal(recovered.get(record.scope, record.id).pid, record.pid);
     await assert.rejects(() => call({ action: "read", id: record.id }, "ses_other"), /Unknown process/);
@@ -124,6 +133,10 @@ module.exports = async ({ assert, jiti, modules, skip }) => {
     assert.ok(event.system.some((block) => block.text.includes(record.id)), "running commands travel in the capsule");
     await call({ action: "stop", id: record.id });
     await until(() => processStatus(recovered.get(record.scope, record.id)) === "stopped");
+
+    // Process-group ownership, /proc identity and POSIX shells stay Linux-only.
+    if (process.platform !== "linux")
+      skip("process-group supervision, /proc identity and POSIX shells are Linux-only");
 
     // An entirely separate host exits before its command's deadline.
     const launcher = path.join(workspace, "launcher.cjs");
@@ -337,6 +350,10 @@ module.exports = async ({ assert, jiti, modules, skip }) => {
       try{registry.stop(record.scope,record.id)}catch{}
     }
     await unloadPlugins();
-    fs.rmSync(workspace, { recursive: true, force: true });
+    try {
+      fs.rmSync(workspace, { recursive: true, force: true });
+    } catch (error) {
+      if (process.platform !== "win32") throw error;
+    }
   }
 };

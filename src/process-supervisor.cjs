@@ -18,17 +18,33 @@ let stopped = false,
   finishing = false,
   child,
   hardKill;
-const killGroup = (signal) => {
+const posixGroup = process.platform === "linux";
+const killTree = (signal) => {
+  if (!child?.pid) return;
+  if (posixGroup) {
+    try {
+      process.kill(-child.pid, signal);
+    } catch {}
+    return;
+  }
   try {
-    process.kill(-child.pid, signal);
+    process.kill(child.pid, signal);
   } catch {}
+  if (process.platform === "win32" && signal === "SIGKILL") {
+    try {
+      spawn("taskkill", ["/F", "/T", "/PID", String(child.pid)], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+    } catch {}
+  }
 };
 const stop = (timeout = false) => {
   if (finishing || stopped || timedOut) return;
   timedOut = timeout;
   stopped = !timeout;
-  killGroup("SIGTERM");
-  hardKill = setTimeout(() => killGroup("SIGKILL"), 1000);
+  killTree("SIGTERM");
+  hardKill = setTimeout(() => killTree("SIGKILL"), 1000);
 };
 try {
   child = spawn(job.argv[0], job.argv.slice(1), {
@@ -36,6 +52,7 @@ try {
     env: process.env,
     detached: true,
     stdio: ["ignore", fd, fd],
+    windowsHide: true,
   });
   write({
     status: "running",
@@ -54,14 +71,14 @@ try {
   const finish = (code, signal, error) => {
     if (finishing) return;
     let descendantsOutlived = false;
-    if (!timedOut && !stopped && child.pid) {
+    if (posixGroup && !timedOut && !stopped && child.pid) {
       try {
         process.kill(-child.pid, 0);
         descendantsOutlived = true;
       } catch {}
       if (descendantsOutlived) {
-        killGroup("SIGTERM");
-        hardKill = setTimeout(() => killGroup("SIGKILL"), 1000);
+        killTree("SIGTERM");
+        hardKill = setTimeout(() => killTree("SIGKILL"), 1000);
       }
     }
     finishing = true;
@@ -70,7 +87,7 @@ try {
     const finalize = () => {
       if (hardKill) {
         clearTimeout(hardKill);
-        killGroup("SIGKILL");
+        killTree("SIGKILL");
       }
       if (error)
         fs.writeSync(fd, `Execution failed: ${error.code || "spawn-error"}\n`);

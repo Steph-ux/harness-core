@@ -2457,6 +2457,13 @@ export default {
             };
           if (input.action === "run") {
             const argv = commandArguments(input.argv);
+            const seconds = input.timeout ?? DEFAULT_DEADLINE_MS / 1000;
+            if (
+              !Number.isFinite(seconds) ||
+              seconds <= 0 ||
+              seconds * 1000 > MAX_DEADLINE_MS
+            )
+              throw new Error("Invalid timeout (0..600 seconds)");
             // Auto-install: if the binary is absent and in the catalog, install it.
             const binary = argv[0].includes("/") || argv[0].includes("\\") ? undefined : argv[0];
             if (binary) {
@@ -2479,13 +2486,6 @@ export default {
               }
             }
             const command = argv.map(quoteArgument).join(" ");
-            const seconds = input.timeout ?? DEFAULT_DEADLINE_MS / 1000;
-            if (
-              !Number.isFinite(seconds) ||
-              seconds <= 0 ||
-              seconds * 1000 > MAX_DEADLINE_MS
-            )
-              throw new Error("Invalid timeout (0..600 seconds)");
             await assertProcessPermission(ctx, context, command);
             context.signal?.throwIfAborted();
             const session = await ctx.session.get({
@@ -2537,7 +2537,9 @@ export default {
             await assertProcessPermission(
               ctx,
               context,
-              `kill -TERM -- -${record.pid}`,
+              process.platform === "win32"
+                ? `taskkill /PID ${record.pid}`
+                : `kill -TERM -- -${record.pid}`,
             );
             const stopped = processes.stop(scope, input.id);
             return {
