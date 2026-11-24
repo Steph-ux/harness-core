@@ -61,6 +61,20 @@ cyber_process argv=["curl","-sS","-D","-","-X","POST","--data-binary","@mut.json
 
 Gateway `SUCCESSFUL` callback is not settlement. Unique `referenceId` each try.
 
+### Invariant first
+
+Write `total = unit × qty`, forward-only status, owner-only, independent payment verify. `cyber_source` the client JS that computes price.
+
+Race is optional: two POSTs ~50ms + final GET. One slow request is not a race. Restore/purge under cleanup. Payment bound 1 XOF / 0.01.
+
+### Stop
+
+Real customer, reusing `referenceId`, treating gateway callback as settlement.
+
+### Evidence ids
+
+Baseline, one mutation, independent read, recompute/400 negative control. Capture linked to final read if UI.
+
 ## Done
 
 Finding cites three observations. Submit `200` alone is never a finding.

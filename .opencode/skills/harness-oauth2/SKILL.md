@@ -68,6 +68,14 @@ cyber_process argv=["curl","-sS","-D","-","-G","<authorize>","--data-urlencode",
 
 Legit token exchange, mutated authorize/callback, resource request if session claimed. SHA256 of codes only. A 302 to an error page is not takeover.
 
+### Grants
+
+Authorization-code + PKCE is the default path. Implicit and device-code stay `not-tested` unless named. No production user on device-code.
+
+### Stop
+
+Redirect to a random Internet host with a real code, capturing tokens in screenshots, mixing three mutations in one callback.
+
 ## Done
 
 Each flaw cites legit + altered flow. Missing `state` is weakness only when the stripped callback still creates a session.

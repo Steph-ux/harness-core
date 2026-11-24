@@ -55,6 +55,25 @@ cyber_process argv=["trufflehog","filesystem","<evidence-dir>","--json","--no-ve
 
 Dedup `(file, rule, SHA256(secret))`. Fixture paths are the negative control. One-shot auth only if approved. Raw secret never in the ledger.
 
+### Classification
+
+| Class | Finding? |
+|---|---|
+| fixture/examples/*.md | no — negative control |
+| high-entropy junk | no |
+| live key + identity obs | yes |
+| live key + not-attempted | yes with limitation |
+
+Do not `pip install` during the scan. Do not print the secret. One identity call max if approved (`sts get-caller-identity`). Stop on success. Never rotate/revoke from the scanner.
+
+### Stop
+
+Live customer repo outside evidence, dumping the secret into the finding title, enumerating after a hit.
+
+### Evidence ids
+
+Gitleaks and/or Trufflehog, fixture-path control, SHA256, auth or `not-attempted`, file chunk without secret bytes.
+
 ## Done
 
 Each secret finding has a scan observation, `SHA256(secret)`, a source chunk, and auth or explicit `not-attempted`.

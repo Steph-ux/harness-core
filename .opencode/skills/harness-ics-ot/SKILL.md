@@ -72,6 +72,8 @@ Coil write, PLC stop/start, firmware, safety-network scan, radio jamming.
 
 Protocol identity, at most one poll, unpolled-point control. A write is a method violation. Banner ≠ CVE until `cyber_cve` matches the exact version.
 
+Process-safety owner named in scope or stop.
+
 ## Done
 
 Evidence holds protocol identity, at most one approved poll, and a control. Any write attempt is a method violation, not a test.

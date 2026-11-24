@@ -71,6 +71,10 @@ Production ESXi/cluster, random virtio fuzz, second VM not in scope, no snapshot
 
 Build string, interface listing, one probe, missing-interface negative control, restore note. Escape needs host-side file/process plus the guest command. A host panic without a reproduced guest command is not a finding.
 
+Restore the snapshot before filing.
+
+A second VM not in scope must not be used as a "control guest".
+
 ## Done
 
 Evidence holds build string, one interface, one probe, snapshot restore. Production cluster untouched.

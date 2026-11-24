@@ -73,6 +73,8 @@ Malware attachment, personal pretext, recipient off-list, third-party kit, conti
 
 Approval chunk, canary-store proof, three counts, control misses, destruction. Finding is the **rate**, never a name. One click without its control stays a candidate.
 
+Recipient list is stored as a hash, never as a roster in the finding.
+
 ## Done
 
 Evidence holds approval, canary-store proof, three counts, control misses, destruction proof. No name, no plaintext password.

@@ -72,6 +72,8 @@ Dial, SMS, OTP, `*` expansion, premium API without cost approval.
 
 PhoneInfoga, second source, unused-number control, listing chunk. Hash tokens. Never raw MSISDN in a promoted global skill.
 
+Missing phoneinfoga → `not-tested`, do not scrape HTML instead.
+
 ## Done
 
 Evidence holds PhoneInfoga output. Confirmed cites two observations + source + control. No call, no SMS, no OTP, no wildcard.

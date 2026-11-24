@@ -66,6 +66,14 @@ Do not send 100 aliases. One batch of two queries is the DoS ceiling. A single s
 
 Introspection, allowed, forbidden, optional depth/batch. `contains` is the leaked field in `data`, not HTTP 200. `data:null` is the negative control.
 
+### Mutations
+
+Owned test object, reversible marker, re-read, restore. Persisted query: proof is the returned field, not the hash being accepted.
+
+### Stop
+
+100 aliases, unbounded batch, load-test, treating `data:null` as bypass.
+
 ## Done
 
 Cites introspection, allowed, forbidden, single depth/batch. Disabled introspection is not a finding. Untested mutations stay `not-tested`.

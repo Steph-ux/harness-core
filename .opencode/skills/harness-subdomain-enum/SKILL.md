@@ -61,6 +61,26 @@ This method does **not** create `cyber_finding`. Takeover/exposure → DNS/web/t
 
 Two sources must agree before `confirmed`. A CT-only name is not live.
 
+### Merge rules
+
+Trailing dots, IDN/punycode, case fold before unique. Only `*.apex`. CNAME to a cloud provider is a pivot lead, not ownership — do not register it.
+
+Missing bbot/amass/subfinder → `not-tested` for that source, continue. Two remaining sources can still confirm.
+
+```
+cyber_process argv=["dnsx","-l","<evidence-dir>/candidates.txt","-resp","-o","<evidence-dir>/dnsx.json"]
+```
+
+This method does not file `cyber_finding`. Takeover/exposure needs live obs from DNS/web/triage.
+
+### Stop
+
+dnsbrute, naabu, ffuf, probing off-apex, treating CT-only as live.
+
+### Evidence ids
+
+Each passive tool, candidates.txt, dnsx. Out-of-scope, NXDOMAIN, one-source names kept as controls.
+
 ## Done
 
 Subdomain list cites three tool observations + dnsx. One-source or non-apex names stay candidates.

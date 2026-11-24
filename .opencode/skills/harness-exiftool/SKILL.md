@@ -60,6 +60,23 @@ cyber_process argv=["exiftool","-json","-n","<file>"]
 
 Clean-fixture negative control. No `-overwrite_original`.
 
+### Hash then parse
+
+```
+cyber_process argv=["sha256sum","<file>"]
+cyber_process argv=["file","<file>"]
+```
+
+Prefer a copy if mtime might change. Distinguish filesystem mtime from embedded CreateDate. Thumbnails listed, not dumped unless scoped. Clean fixture of the same type is the negative control.
+
+### Stop
+
+Remote fetch, `-overwrite_original`, publishing precise GPS, extracting embedded binaries without scope.
+
+### Evidence ids
+
+Hash, JSON extract, clean-fixture control, second source if GPS/author/software is the claim.
+
 ## Done
 
 Evidence holds hash + JSON. No field alone is a finding.

@@ -70,6 +70,10 @@ Real beneficiary, external payment, customer record, reusing `referenceId`.
 
 Baseline step, mutated submit, independent read, control. `cyber_finding` after `harness-vuln-triage`. Capture linked to the final read if UI.
 
+### Persistence
+
+GET after mutate is mandatory. Client-disabled button is not a server flaw. Idempotent replay that does not double-write is a negative control.
+
 ## Done
 
 Each logic CVE cites the baseline flow, the single-field mutation, and the later read that proves persistence. No finding from the submit response alone; no finding without the control.

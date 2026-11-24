@@ -70,6 +70,10 @@ Mainnet state change, draining a live pool, mixing four scanners as one observat
 
 Source hash, slither, view-call, patched/benign control, function chunk. Compiler version mismatch vs explorer bytecode → stop.
 
+Mainnet `send` is a method violation even if the ABI looks like a view.
+
+Fork/testnet only for exploits. Do not drain a live pool.
+
 ## Done
 
 Evidence holds pin, one analyzer, one view-call, control. No mainnet state change.

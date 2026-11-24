@@ -66,6 +66,14 @@ SSO/OIDC session: after B's replay, a resource request proves the session. Token
 
 A success, B replay, no-token or out-of-role control. Name both identities and the single permission in the finding title. Login HTML 200 is not access.
 
+### Cloud vs SSO
+
+`s3:GetObject` / `iam:PassRole` still two identities, one action. No `*:*` simulator dump. AD forest → `harness-ad-enum`. Token guts → `harness-jwt`.
+
+### Stop
+
+Password spray, policy write, role assignment, third identity.
+
 ## Done
 
 The finding names both identities and the permission that differed. An untested provider stays `not-tested`. No third identity, no spray.

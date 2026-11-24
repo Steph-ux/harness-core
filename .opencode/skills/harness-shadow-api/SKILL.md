@@ -61,6 +61,20 @@ cyber_process argv=["curl","-sS","-D","-","-o","NUL","-X","HEAD","<approved-url>
 
 No POST/PUT/DELETE merely to prove the route.
 
+### Auth and type
+
+Keep authentication and content-type on the observed record. Health/static assets are not shadows. Stale archive URLs are not shadows.
+
+Impact (IDOR, data, state) is `harness-idor` / `harness-access-control` / `harness-business-logic` with **new** observations. This method only proves undocumented existence.
+
+### Stop
+
+Wordlist off-host, POST/PUT/DELETE merely to prove the route, claiming BOLA from a HEAD 200.
+
+### Evidence ids
+
+Contract source, observed-list, live HEAD/GET, sibling 404 negative control.
+
 ## Done
 
 Each shadow cites contract, crawl, live probe, sibling control. A 200 alone is never a finding.

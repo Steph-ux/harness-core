@@ -60,6 +60,20 @@ cyber_process argv=["curl","-sS","-o","<evidence-dir>/app.js","<approved-js-url>
 
 Quote `file:line` from the map. Benign nearby function is the negative control.
 
+### Map recovery
+
+If `.map` exists on the same host, fetch and hash it. Minified names are hypotheses until the map gives `file:line`. Endpoints extracted to `endpoints.json` are not live until `harness-api-testing`.
+
+Sanitizer on the path (DOMPurify) is a control; bypass is `harness-xss`. Secrets in JS → `harness-secret-scan`.
+
+### Stop
+
+Random CDNs, claiming XSS from a string match, mixing four sink classes in one finding.
+
+### Evidence ids
+
+Bundle hash, map if any, one taint path `file:line`, benign-function negative control.
+
 ## Done
 
 Evidence holds bundle hash, one sink `file:line`, negative control. String match without taint path is not a finding.

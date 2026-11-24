@@ -56,6 +56,24 @@ Do not run a compliance scanner and paste its score. If a tool is used (`lynis`,
 
 A scanner score is not a control. Neighbouring out-of-scope controls must not appear as passed (negative control).
 
+### Mapping
+
+CIS / NIST CSF / ISO 27001 / PCI / SOC 2: the list is **your** scope table as `cyber_source`, not a dump of the standard. Each id has a one-line expected artifact.
+
+Failed control → `cyber_finding` only if reproduction + negative control already exist (`harness-vuln-triage`). Otherwise it stays a coverage gap. Compliance wording is not a CVSS vector.
+
+### Stop
+
+Inventing a finding from a missing policy, scoring maturity, copying the whole ISO annex into the ledger as evidence.
+
+### Evidence ids
+
+Scope table chunk, one obs or `not-tested` per control, neighbouring out-of-scope control must not be passed.
+
+The report snapshot carries the table beside finding ids. No passed row without an observation.
+
+Lynis/inspec output still maps to one control id, never a pasted score.
+
 ## Done
 
 Every in-scope control is passed, failed, or `not-tested`. No control is passed without an observation id. The framework name is in the mission scope, not inferred.

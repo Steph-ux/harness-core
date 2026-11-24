@@ -60,6 +60,24 @@ cyber_process argv=["nmap","-sV","-Pn","-p","5060,5061","<approved-host>"]
 
 Unused extension must 404/403.
 
+### TLS
+
+5061 vs 5060: missing TLS on 5060 with a captured **test** REGISTER is a candidate. Version string → `cyber_cve` on exact Asterisk/FreeSWITCH version.
+
+```
+cyber_process argv=["sipsak","-S","-s","sip:<test>@<host>"]
+```
+
+Missing sipsak → OPTIONS via nmap script if present, else banner-only `not-tested` for REGISTER. RTP: hash a collected pcap, do not tap a live call. Real-user audio is out.
+
+### Stop
+
+INVITE to PSTN, REGISTER flood, extension brute 1000-9999, RTP inject.
+
+### Evidence ids
+
+Banner, one test REGISTER/OPTIONS, unused-extension negative control.
+
 ## Done
 
 Evidence holds banner, one test REGISTER/OPTIONS, unused-extension control. No toll fraud.

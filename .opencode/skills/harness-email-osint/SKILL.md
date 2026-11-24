@@ -56,6 +56,24 @@ cyber_process argv=["holehe","<email>","--only-used"]
 
 Provider-registration alone is not ownership. Unused-address negative control required. No mail, no reset, no login.
 
+### Normalize
+
+Plus-tags and Gmail dots are the same mailbox — record the normalization, do not invent a second identity.
+
+```
+cyber_process argv=["theHarvester","-d","<domain>","-b","all","-l","100","-f","<evidence-dir>/theharvester"]
+```
+
+Domain harvest is a second source only if **this** address appears. New usernames → `harness-maigret` after scope. No mail, no reset, no login.
+
+### Stop
+
+Contacting the target, premium API without cost approval, treating one Holehe hit as ownership.
+
+### Evidence ids
+
+Holehe, second source, unused-address negative control, source chunk.
+
 ## Done
 
 Evidence holds Holehe and the second source. Confirmed cites two observations + chunk + control.

@@ -56,6 +56,24 @@ cyber_process argv=["h8mail","-t","<email>","-o","<evidence-dir>/h8mail.json"]
 
 Missing tool → `not-tested`. Do not log in with a found password unless the operator approved a one-shot identity check (`harness-secret-scan`). Unused-address control must not share the same dump rows.
 
+### Pairing
+
+One dump hit is a candidate. Confirmed = dump + (public name | approved username | second corpus).
+
+Do not log in with a found password unless the operator approved a one-shot identity check. Then stop. Unused-address negative control must not share the same rows.
+
+### Stop
+
+Credential stuffing, contacting the person, paying a dump site without approval, putting a plaintext password in the ledger.
+
+### Evidence ids
+
+Breach tool, second source, unused-address control, optional auth. Hash any token.
+
+One dump row without a second attribute stays a candidate, never a confirmed owner.
+
+Do not paste a full dump into the finding. Redact to the minimum row.
+
 ## Done
 
 Evidence holds the breach outputs (JSON/HTML). Confirmed findings cite the breach tool and a second source; tested credentials cite the auth observation.

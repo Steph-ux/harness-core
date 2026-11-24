@@ -71,6 +71,10 @@ TX, jam, dish retune, undocumented TC.
 
 Capture/API hash, one decode or GET, out-of-list control. An uplink is never the proof. Ground-API IDOR is `harness-idor`, not this method.
 
+Missing satdump → `not-tested` for decode, do not retune a dish.
+
+Approved frequency list only. No spoofed TC.
+
 ## Done
 
 Evidence holds capture/API hash, one decode or GET, and a control. No TX.

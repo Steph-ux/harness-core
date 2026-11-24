@@ -71,6 +71,14 @@ Third-party jwt.io, `jku` to a random host, retrieving real `/etc/passwd`, spray
 
 Record observation ids for original, flip, and the winning probe. Missing any → candidate. `contains` is the accept/reject body marker, never the JWT itself. Reproduction must be a new request-id after the original claim.
 
+### Token handling
+
+Ledger stores SHA256 only. Compact serialization never in titles. `jku` only to an OOB you control. Expired and nbf are separate rows.
+
+### Stop
+
+jwt.io, random Internet JWKS, reading real `/etc/passwd`, HS256 spray on production.
+
 ## Done
 
 Finding cites original + tampered responses. Decoded `alg` alone is not a finding.

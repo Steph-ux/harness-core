@@ -59,6 +59,24 @@ cyber_process argv=["maigret","<username>","--no-autoupdate","--no-recursion","-
 
 Unused-username control must not share the same found-set.
 
+### Second pass
+
+More sites only after operator approval, still no `--permute`. Extra usernames found here are new scope items, not automatic follow-ups.
+
+```
+cyber_process argv=["sherlock","<username>","--timeout","15","--print-found","--output","<evidence-dir>/sherlock.txt"]
+```
+
+A 200 login page is `claimed`, not `found`. Unused-username negative control required. No DMs, no rate-limit bypass.
+
+### Stop
+
+Permute, all-sites first pass, contacting accounts, storing tokens.
+
+### Evidence ids
+
+Maigret and/or Sherlock, second attribute, unused-username control, HTML/JSON chunk for found URLs only.
+
 ## Done
 
 Evidence holds Maigret JSON and/or Sherlock text. Confirmed cites two observations + chunk + control.

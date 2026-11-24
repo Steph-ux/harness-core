@@ -61,6 +61,25 @@ Patched-lab negative control: apply the one-line fix (or next vendor version), r
 
 `cyber_finding` with inventory, semgrep/gf, lab payload, original-value control, patched-lab miss, lab `cyber_source` (function `file:line` or Dockerfile). Include a minimal patch. No live host is the proof target. Not novel until patched control holds.
 
+### Lab isolation
+
+Network-isolated container/VM. Same public version as inventory. Hash image/commit. One sink class (SSRF / deser / auth bypass / file write). Canary file only in `/tmp/cve-canary-<id>.txt` in the lab.
+
+```
+cyber_process argv=["docker","pull","<public-image>:<tag>"]
+cyber_process argv=["semgrep","--config","p/<lang>","<lab-src>"]
+```
+
+Original-value control and patched-lab miss required. Live engagement host is never the fuzz target.
+
+### Stop
+
+Fuzzing production, publishing a working exploit, proprietary source outside boundaries.
+
+### Evidence ids
+
+Inventory, lab identity, white-box, lab payload, original-value control, patched miss, `file:line` chunk.
+
 ## Done
 
 Evidence holds inventory, lab identity, white-box hits, one successful lab payload, original-value control, patched-lab miss. No finding from an advisory alone.

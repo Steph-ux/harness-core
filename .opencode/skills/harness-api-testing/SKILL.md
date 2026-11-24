@@ -65,6 +65,24 @@ A class not in the spec stays `not-tested`. Pagination, method override and dupl
 
 Inventory, unauth, low-priv, optional BOLA/canary. Spec chunk as `cyber_source`. Untested route classes stay `not-tested`.
 
+### Input canary
+
+One tainted param, one transport (JSON/form/header). Marker unique. `SLEEP` only if `harness-sqli` is loaded. Method override / duplicate `id` only if the endpoint supports them — one extra probe.
+
+```
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <low>","<url>"]
+```
+
+BOLA detail is `harness-idor`. Shadow routes are `harness-shadow-api`. Triage every candidate.
+
+### Stop
+
+Real-customer mutation, mixing five classes in one observation, promoting OpenAPI "might be IDOR".
+
+### Evidence ids
+
+Inventory, unauth negative control, low-priv positive, optional BOLA/canary, spec chunk.
+
 ## Done
 
 Every claimed route has unauth+auth observations. A finding cites the spec chunk + two controls + reproduction.

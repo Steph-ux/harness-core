@@ -73,6 +73,8 @@ Browsing a CT name before scope+dnsx. This method does not file `cyber_finding` 
 
 Each CT source, merge, dnsx. Finding only via owning method with live obs. A log row is never a `cyber_finding` by itself.
 
+Wildcard members are not a license to brute in this method.
+
 ## Done
 
 Ledger separates in-scope vs out-of-scope, each tied to a CT observation. Reused in attack-surface merge.

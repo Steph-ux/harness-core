@@ -70,6 +70,10 @@ Production password spray, RACF change, job submit, second LPAR.
 
 Banner, one inquiry, denied-transaction control. CVE via `cyber_cve` on exact PTF only. No customer PII on a 3270 screenshot.
 
+A second LPAR not in scope must not be contacted.
+
+LISTCAT/DSPLIB only for a named HLQ. No PAYROLL dump. No `SUBMIT`.
+
 ## Done
 
 Evidence holds banner, at most one inquiry, and a control. No JCL, no production write.
