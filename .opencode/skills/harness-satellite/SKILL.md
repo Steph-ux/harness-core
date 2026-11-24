@@ -47,6 +47,30 @@ A frequency or spacecraft **not** on the approved list must not be decoded or re
 
 Unauthenticated ground API or credentials in a collected config need the hash/GET observation and the out-of-list frequency or 404 control. An uplink is never the proof.
 
+### Receive-only budget
+
+| Path | Max |
+|---|---|
+| IQ/pcap hash | 1 capture |
+| Decode pipeline | 1 if tool present |
+| Ground HTTP GET | 1 documented TM path |
+| Uplink / jam / spoof TC | 0 |
+
+```
+cyber_process argv=["sha256sum","<capture.iq>"]
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <test>","<approved-tm-url>"]
+```
+
+Frequency or spacecraft not on the list must not be decoded (negative control). Other-nation intercept is out even if the SDR sees it.
+
+### Stop
+
+TX, jam, dish retune, undocumented TC.
+
+### Evidence ids
+
+Capture/API hash, one decode or GET, out-of-list control. An uplink is never the proof. Ground-API IDOR is `harness-idor`, not this method.
+
 ## Done
 
 Evidence holds capture/API hash, one decode or GET, and a control. No TX.

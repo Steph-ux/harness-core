@@ -50,6 +50,30 @@ Unmodified config/DB must not show the mutated state. A second machine without t
 
 Secrets in config → `harness-secret-scan`. Native bugs → `harness-ghidra`.
 
+### Stack table
+
+| Stack | Inventory | Next |
+|---|---|---|
+| Electron | asar list | source-deep / secret-scan |
+| .NET | ilspycmd if present | ghidra if native |
+| Java | jar tf | source-deep |
+| Win32 | strings + localhost ports | ghidra |
+
+```
+cyber_process argv=["sha256sum","<client.exe>"]
+cyber_process argv=["sqlite3","<lab-db>","SELECT count(*) FROM <table>"]
+```
+
+One mutation (config, IPC, or update XML). Unmodified copy is the negative control. Server IDOR behind the client → `harness-idor`.
+
+### Stop
+
+License crack, fuzz-to-crash on a terminal server, production binary patch.
+
+### Evidence ids
+
+Hash, inventory, one mutation, unmodified control.
+
 ## Done
 
 Evidence holds binary hash, local surface list, one mutation + control. No production crash, no crack.

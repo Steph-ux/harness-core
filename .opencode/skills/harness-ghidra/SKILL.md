@@ -50,6 +50,32 @@ A **known-benign** function in the same binary (string compare, init) must not s
 
 `cyber_finding` evidence = hash + import log + search + decompile + xrefs + benign control. `cyber_source` = decompiler chunk at `file? no — address`. Checks: xrefs reproduction, benign-function negative-control. Do not follow network IOCs from strings.
 
+### Address budget
+
+| Query | Need |
+|---|---|
+| program info | name+base+SHA256 |
+| strings | two needles |
+| imports | listed |
+| decompile | cited 0x |
+| xrefs | to real sink |
+| benign fn | negative control |
+
+```
+cyber_process argv=["sha256sum","<binary>"]
+cyber_process argv=["support/analyzeHeadless","<project>","<name>","-import","<binary>","-analysisTimeoutPerFile","300"]
+```
+
+No address = hypothesis. Missing Ghidra → `not-tested`. Do not execute the sample.
+
+### Stop
+
+Emulate, patch, fetch samples, follow C2 from strings.
+
+### Evidence ids
+
+Hash, import log, search, decompile, xrefs, benign-function control.
+
 ## Done
 
 Every claim cites a Ghidra observation and a `0x...` address. No claim without a tool-returned address.

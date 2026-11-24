@@ -47,6 +47,29 @@ A finding from Slither that does not hold on a **view replay** (or on a patched 
 
 `cyber_finding` with source hash, slither obs, view-call, patched-fork or benign-function control, `cyber_source` function chunk. Reentrancy/oracle claims need the fork trace, not the detector name. Secret keys in `.env` → `harness-secret-scan`.
 
+### Analyzer budget
+
+| Tool | Use | Not |
+|---|---|---|
+| slither | one config, json out | four scanners in one obs |
+| echidna | lab/fork only | mainnet fuzz |
+| cast call | view ABI | send/write |
+
+```
+cyber_process argv=["slither","<path>","--json","<evidence-dir>/slither.json"]
+cyber_process argv=["cast","call","<address>","owner()(address)","--rpc-url","<approved-rpc>"]
+```
+
+Patched fork or benign function is the negative control. Reentrancy needs the fork trace, not the detector name. Keys in `.env` → `harness-secret-scan`.
+
+### Stop
+
+Mainnet state change, draining a live pool, mixing four scanners as one observation.
+
+### Evidence ids
+
+Source hash, slither, view-call, patched/benign control, function chunk. Compiler version mismatch vs explorer bytecode → stop.
+
 ## Done
 
 Evidence holds pin, one analyzer, one view-call, control. No mainnet state change.

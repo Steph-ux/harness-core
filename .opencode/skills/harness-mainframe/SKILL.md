@@ -47,6 +47,29 @@ A transaction or HLQ **not** in the named list must not be opened. A second LPAR
 
 Unauthenticated TN3270 or a named HLQ over cleartext FTP needs the banner/inquiry observation and the denied-transaction control. A job submit is never the proof.
 
+### Surface table
+
+| Port/service | Action | Forbidden |
+|---|---|---|
+| TN3270/992 | banner + one inquiry | SUBMIT JCL |
+| TN5250 | one DSPLIB named HLQ | STRQSH write |
+| FTP 21 | list named HLQ only | GET payroll |
+| 3200+ SAP | not this method | n/a |
+
+```
+cyber_process argv=["nmap","-sV","-Pn","-p","23,992,322","<approved-host>"]
+```
+
+Default users SAP*/DDIC are out unless a **non-prod** client is named. Denied transaction is the negative control.
+
+### Stop
+
+Production password spray, RACF change, job submit, second LPAR.
+
+### Evidence ids
+
+Banner, one inquiry, denied-transaction control. CVE via `cyber_cve` on exact PTF only. No customer PII on a 3270 screenshot.
+
 ## Done
 
 Evidence holds banner, at most one inquiry, and a control. No JCL, no production write.

@@ -51,6 +51,29 @@ SAP Security Note / CVE: `cyber_cve lookup` on the **exact** kernel/ICM version.
 
 `cyber_finding` with identity scan, one ICM/RFC observation, negative control (wrong client/closed port), source chunk (note or ICF path). Write operations are out.
 
+### Instance table
+
+| Port | Role | This method |
+|---|---|---|
+| 8000/44300 | ICM HTTP(S) | one ICF GET |
+| 3300/3600 | gateway/RFC | banner only |
+| 3200 | dispatcher | identity |
+| 50013 | message server | identity |
+
+```
+cyber_process argv=["nmap","-sV","-Pn","-p","3200,3300,3600,8000,44300,50000,50013","<approved-host>"]
+```
+
+Wrong client / closed instance = negative control. `SAP*`/`DDIC` only on named non-prod. No `tp import`, no user create.
+
+### Stop
+
+Production write, RFC_READ_TABLE without named RFC+row limit, default-password spray.
+
+### Evidence ids
+
+Scan, one ICM/RFC read, wrong-client control. Notes via `cyber_cve` on exact kernel version.
+
 ## Done
 
 Evidence holds SID/client identity, one read-only surface observation, and a control. Unprobed instance numbers stay `not-tested`.

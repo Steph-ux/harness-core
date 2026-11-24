@@ -49,6 +49,29 @@ A **known-unused** number in the same country, and a **near-match** (one digit o
 
 Hash any token. Never raw MSISDN in a global skill. Extracted emails/names stay leads — each needs its own scope before `harness-email-osint` / `harness-maigret`.
 
+### Claim types (separate)
+
+| Claim | Needs |
+|---|---|
+| carrier/country/line | PhoneInfoga obs |
+| public listing | source chunk |
+| same person | second attribute |
+| credential | not this method |
+
+```
+cyber_process argv=["phoneinfoga","scan","-n","+<cc><nsn>","-o","<evidence-dir>/phoneinfoga.txt"]
+```
+
+Known-unused number in the same country is the negative control. Derived emails stay leads until scoped.
+
+### Stop
+
+Dial, SMS, OTP, `*` expansion, premium API without cost approval.
+
+### Evidence ids
+
+PhoneInfoga, second source, unused-number control, listing chunk. Hash tokens. Never raw MSISDN in a promoted global skill.
+
 ## Done
 
 Evidence holds PhoneInfoga output. Confirmed cites two observations + source + control. No call, no SMS, no OTP, no wildcard.

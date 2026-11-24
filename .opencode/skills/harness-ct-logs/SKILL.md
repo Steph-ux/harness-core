@@ -48,6 +48,31 @@ Takeover hypothesis → current DNS + provider evidence (`harness-dns-enum` / `h
 
 CT creates **asset candidates**, not `cyber_finding`. Certificate/takeover/exposure claims go to the owning method with live observation, source chunk, and controls.
 
+### Name fate
+
+| CT name | Next |
+|---|---|
+| under apex | candidates.txt |
+| wildcard only | control, not brute |
+| expired cert | control |
+| NXDOMAIN | control, not live |
+| out of apex | drop |
+
+```
+cyber_process argv=["bbot","-t","<apex>","-m","crt","certspotter","-rf","passive","--no-deps","-y","--json","-o","<evidence-dir>"]
+cyber_process argv=["dnsx","-silent","-resp","-l","<candidates.txt>"]
+```
+
+Dedup by certificate fingerprint. Logged ≠ alive ≠ authorized. Takeover → `harness-dns-enum`.
+
+### Stop
+
+Browsing a CT name before scope+dnsx. This method does not file `cyber_finding` for a log row alone.
+
+### Evidence ids
+
+Each CT source, merge, dnsx. Finding only via owning method with live obs. A log row is never a `cyber_finding` by itself.
+
 ## Done
 
 Ledger separates in-scope vs out-of-scope, each tied to a CT observation. Reused in attack-surface merge.

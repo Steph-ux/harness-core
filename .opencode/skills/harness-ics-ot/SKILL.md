@@ -47,6 +47,31 @@ A register/node **not** in the named list must not be polled. A second PLC not i
 
 Wireless/radio on the plant → `harness-wireless` with OT gate, not this method.
 
+### Protocol table (identify, then one poll)
+
+| Protocol | Identify | One read |
+|---|---|---|
+| Modbus/TCP | pcap / mbpoll | named unit+register |
+| DNP3 | tshark filter | named point |
+| EtherNet/IP | tshark enip | named tag |
+| OPC-UA | documented node | Browse one node |
+| S7 | banner only | no write |
+
+```
+cyber_process argv=["tshark","-r","<pcap>","-Y","modbus or dnp3 or enip","-T","fields","-e","frame.protocols"]
+cyber_process argv=["mbpoll","-1","-a","<unit>","-r","<reg>","<approved-plc>"]
+```
+
+Timeout → stop, no retry loop. Unnamed register must not be polled (negative control).
+
+### Stop
+
+Coil write, PLC stop/start, firmware, safety-network scan, radio jamming.
+
+### Evidence ids
+
+Protocol identity, at most one poll, unpolled-point control. A write is a method violation. Banner ≠ CVE until `cyber_cve` matches the exact version.
+
 ## Done
 
 Evidence holds protocol identity, at most one approved poll, and a control. Any write attempt is a method violation, not a test.

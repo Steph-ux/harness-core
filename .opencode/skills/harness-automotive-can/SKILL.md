@@ -49,6 +49,31 @@ An arbitration ID **not** in the DBC/list must not be sent. A second ECU not on 
 
 `cyber_finding` for: unauthenticated diagnostic session, default seed, cleartext DID with PII — with log/read observation and unsent-ID control. Never a finding that required an actuator command. Wireless TPMS/BLE → `harness-wireless`.
 
+### DID budget
+
+| Action | Allowed |
+|---|---|
+| candump bounded | bench only |
+| one UDS read DID | if named (e.g. 0xF190) |
+| security-access | disconnected ECU + approval |
+| cangen random | never on a vehicle |
+| brake/steer/throttle | never |
+
+```
+cyber_process argv=["sha256sum","<candump.log>"]
+cyber_process argv=["isotp-send","-s","<tx>","-d","<rx>","can0","22","F1","90"]
+```
+
+Arbitration ID not in the DBC must not be sent (negative control). TPMS/BLE → `harness-wireless`.
+
+### Stop
+
+Road vehicle, actuator frames, random ID flood.
+
+### Evidence ids
+
+Capture hash, at most one DID, unsent-ID control.
+
 ## Done
 
 Evidence holds capture hash, at most one DID read, control. No road vehicle, no actuator.

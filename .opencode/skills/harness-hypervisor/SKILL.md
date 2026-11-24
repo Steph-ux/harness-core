@@ -47,6 +47,30 @@ An interface **not** attached to this guest must not be present. A second VM not
 
 Escape needs host-side evidence plus the guest command observation. A host panic without a reproduced guest command is not a finding.
 
+### Interface matrix (one only)
+
+| Interface | Guest path | Benign probe |
+|---|---|---|
+| VSock | /dev/vhost-vsock | connect approved host port |
+| 9p / shared folder | mount list | ls one named share |
+| virtio-serial | /dev/vport* | write canary, read back |
+| VMCI | vmci device | query only |
+
+```
+cyber_process argv=["virsh","version"]
+cyber_process argv=["ls","-l","/dev/vhost-vsock"]
+```
+
+Missing tool → `not-tested`. Host panic: hash dump, restore snapshot, stop. Nested container issues are `harness-container`, not escape.
+
+### Stop
+
+Production ESXi/cluster, random virtio fuzz, second VM not in scope, no snapshot.
+
+### Evidence ids
+
+Build string, interface listing, one probe, missing-interface negative control, restore note. Escape needs host-side file/process plus the guest command. A host panic without a reproduced guest command is not a finding.
+
 ## Done
 
 Evidence holds build string, one interface, one probe, snapshot restore. Production cluster untouched.

@@ -51,6 +51,28 @@ Destruction command recorded; store empty observation. If a real secret appeared
 
 `cyber_finding` states the control that failed, the aggregate rate, approved remediation. No individual named. One click without its control stays a candidate.
 
+### Counts (three observations)
+
+| Metric | Is not |
+|---|---|
+| delivery | a click |
+| click | a secret |
+| canary submit | a named person |
+
+```
+cyber_process argv=["curl","-sS","-X","POST","--data-binary","@canary-test.json","<canary-url>"]
+```
+
+Store is hash+timestamp only. Empty password not counted. Control recipient never receives. Destroy before any `cyber_finding`. First real secret → halt, destroy, notify.
+
+### Stop
+
+Malware attachment, personal pretext, recipient off-list, third-party kit, continuing after a real secret.
+
+### Evidence ids
+
+Approval chunk, canary-store proof, three counts, control misses, destruction. Finding is the **rate**, never a name. One click without its control stays a candidate.
+
 ## Done
 
 Evidence holds approval, canary-store proof, three counts, control misses, destruction proof. No name, no plaintext password.
