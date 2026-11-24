@@ -44,6 +44,21 @@ A **known-unused** username (operator-listed) and a **near-match** must not prod
 
 Expand to more sites only in a **second** pass after the operator approves, still without permute.
 
+### Result classes
+
+| Class | Meaning |
+|---|---|
+| unavailable | timeout / 5xx |
+| claimed | 200 login/search page |
+| found | username is the account in title/body |
+| confirmed | found + second attribute |
+
+```
+cyber_process argv=["maigret","<username>","--no-autoupdate","--no-recursion","--top-sites","100","--timeout","15","-n","20","-J","simple","-fo","<evidence-dir>"]
+```
+
+Unused-username control must not share the same found-set.
+
 ## Done
 
 Evidence holds Maigret JSON and/or Sherlock text. Confirmed cites two observations + chunk + control.

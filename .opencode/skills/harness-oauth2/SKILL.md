@@ -47,6 +47,23 @@ Client-A token on api-B. Acceptance = candidate → `harness-jwt` / triage. Impl
 
 `cyber_finding` with legit flow, one mutated flow, server/client decision, and (for session claims) a resource request. Sources: authorize URL shape. Checks: legit positive, bad-redirect negative, stripped reproduction.
 
+### Mutation matrix
+
+| Mutation | Negative control | Finding only if |
+|---|---|---|
+| Unregistered `redirect_uri` | `invalid_redirect_uri` | `302` with `code` to attacker |
+| Missing `state` | session not created | session cookie issued |
+| Swapped `state` | mismatch error | session for the other flow |
+| Code replay | second exchange 400 | two tokens |
+| Strip PKCE | verifier required | token without verifier |
+| Wrong `aud` | api-B 401 | api-B 200 |
+
+Implicit and device-code: `not-tested` unless named. Redact codes.
+
+```
+cyber_process argv=["curl","-sS","-D","-","-G","<authorize>","--data-urlencode","redirect_uri=https://attacker.example/cb"]
+```
+
 ## Done
 
 Each flaw cites legit + altered flow. Missing `state` is weakness only when the stripped callback still creates a session.

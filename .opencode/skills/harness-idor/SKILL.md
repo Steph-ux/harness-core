@@ -49,6 +49,27 @@ Unauthenticated GET of A's object must fail. If unauth sees B's fields, that is 
 
 Public-by-design objects, cache hits, and redacted responses are not IDOR.
 
+### Reference types (one extra if the first is clean)
+
+| Type | Example | Untested if |
+|---|---|---|
+| numeric | `/orders/12` | only UUID in API |
+| UUID | `/orders/550e…` | sequential only |
+| slug | `/u/alice` | n/a |
+| nested | `/orgs/1/invoices/9` | no nesting |
+| export | `/export/job/3` | no export |
+| channel | websocket id | no WS |
+
+### Argv
+
+```
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <A>","<url>/api/<res>/<A-id>"]
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <A>","<url>/api/<res>/00000000-0000-0000-0000-000000000000"]
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <A>","<url>/api/<res>/<B-id>"]
+```
+
+Restore write canaries. No customer id enumeration.
+
 ## Done
 
 Finding cites three GETs (own, missing, cross) plus re-read if write. `200` without B's fields is not a finding.

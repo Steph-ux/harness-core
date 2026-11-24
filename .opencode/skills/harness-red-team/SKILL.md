@@ -54,11 +54,28 @@ approved host that never received the mechanism, the un-obfuscated artifact
 against the step-5 query, and the approved destination before the transfer. A
 callback without a matching host identity is a lab error, not a channel.
 
+### Stage table
+
+| Stage | Observation | Control | Teardown |
+|---|---|---|---|
+| Baseline | tasks/services/egress | second host untouched | n/a |
+| Foothold | canary in evidence-dir | identity not extra priv | delete canary |
+| Persistence | presence cmd | second host | removal cmd + gone |
+| C2 | one callback ts+host | callback without host id = lab error | stop beacon |
+| Evasion | query misses marker | un-obfuscated still hits | revert change |
+| Exfil | dest hash match | dest empty before | delete canary dest |
+
+One artifact at a time. Second artifact before teardown = stop.
+
+```
+cyber_process argv=["<presence-cmd>"]
+cyber_process argv=["<removal-cmd>"]
+```
+
+Detection twin → `harness-detection` after teardown. A `cyber_finding` needs the stage observation, the baseline negative control and the teardown proof.
+
 ## Done
 
 Evidence holds the authorization reference, the baseline, one observation per
-stage with its control, and the teardown verification. Every stage is `carded`,
-`not-tested` with its missing condition, or `stopped` with the reason. A finding
-is `cyber_finding` with the stage observation, the baseline control and the
-teardown proof; a channel, a survival or a detection bypass without its control
-stays a candidate. The detection twin is handed to `harness-detection`.
+stage with its control, and the teardown verification. A channel, survival or
+bypass without its control stays a candidate.

@@ -45,6 +45,20 @@ Object-level vs function-level vs field-level: say which. Peer-tenant is `harnes
 
 `cyber_finding` evidence = privileged + low-priv + unauth (+ re-read). Checks: privileged positive, unauth negative, low-priv reproduction. `contains` is the leaked field or persisted marker, not `200`. Capture UI only if linked to the re-read observation.
 
+### Identity matrix
+
+| Identity | Expected |
+|---|---|
+| unauth | 401/403 |
+| low-priv | 200 own / 403 admin fn |
+| high-priv | 200 + re-read |
+
+```
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <low>","-X","PUT","--data-binary","@body.json","<url>"]
+```
+
+Peer-tenant id swap → `harness-idor`. Restore every write.
+
 ## Done
 
 Finding cites three observations + source chunk. A different 200 page is not a finding.

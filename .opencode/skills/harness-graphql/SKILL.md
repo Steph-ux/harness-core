@@ -43,8 +43,25 @@ A GraphQL finding cites schema/client source, allowed positive control, forbidde
 
 HTTP 200 with `data:null` is not bypass. Depth/batching needs bounded impact, never one slow request. Persisted-query access is the returned field, not a hash being accepted.
 
+### Query shapes
+
+```
+cyber_process argv=["curl","-sS","-H","Content-Type: application/json","--data-binary","{\"query\":\"{ me { email } }\"}","<url>"]
+cyber_process argv=["curl","-sS","-H","Content-Type: application/json","--data-binary","{\"query\":\"{ user(id:\\\"<other>\\\") { email } }\"}","<url>"]
+```
+
+Compare `data` vs `errors` vs `null`. Aliases/fragments: one extra if the simple field is clean.
+
+| Check | Positive | Negative |
+|---|---|---|
+| Introspection | schema types | unauth reject if auth required |
+| Allowed field | `me.email` | n/a |
+| Forbidden | other-user email | `data:null` + errors |
+| Depth | bounded 4 | shallow baseline timing |
+| Batch | 2 queries | 1 query |
+
+Do not send 100 aliases.
+
 ## Done
 
-Cites introspection, allowed, forbidden, single depth/batch.
-
-Disabled introspection is not a finding. Untested mutations stay `not-tested`.
+Cites introspection, allowed, forbidden, single depth/batch. Disabled introspection is not a finding. Untested mutations stay `not-tested`.

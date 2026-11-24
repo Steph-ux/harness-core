@@ -45,6 +45,28 @@ Service-A token on api-B. Wrong-audience acceptance = candidate. Expired / nbf s
 
 `cyber_finding` with original, flipped, none/kid/jku observations, header chunk, checks: flipped negative, none/kid reproduction. Claims on a jwt.io screenshot are not evidence.
 
+### Probe matrix (one row per observation)
+
+| Probe | Expect | If accepted |
+|---|---|---|
+| Original | 200 + expected shape | positive control |
+| 1-byte sig flip | 401/403 | negative control failed → none/kid next |
+| `alg:none` empty sig | 401 | finding if 200 |
+| `kid` `../../etc/passwd` | 401, no file read | finding only with OOB+accept |
+| `jku` to your JWKS | OOB fetch + 401 unless confused | finding if OOB **and** 200 |
+| `aud` of service-A on api-B | 401 | candidate if 200 |
+| expired `exp` | 401 | candidate if 200 |
+
+SHA256 of the token in every observation. Never the compact serialization.
+
+```
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <redact>","<url>"]
+```
+
+### Stop
+
+Third-party jwt.io, `jku` to a random host, retrieving real `/etc/passwd`, spraying `HS256` secrets against production.
+
 ## Done
 
 Finding cites original + tampered responses. Decoded `alg` alone is not a finding.

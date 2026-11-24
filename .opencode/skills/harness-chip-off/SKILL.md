@@ -44,6 +44,21 @@ Keys or config in the dump need the hash, parser observation, blank-dump control
 
 Physical presence of a header is not a vulnerability. Production extraction requires written approval and that dump hash. Do not claim a production phone unless the approval and the dump hash say so.
 
+### Parse matrix
+
+| Artifact | Tool | Next method |
+|---|---|---|
+| squashfs / ubifs | binwalk / ubireader | iot |
+| ELF/PE in dump | file + ghidra | ghidra |
+| key material | grep path only | secret-scan |
+| lockfile | hash pin | supply-chain |
+
+```
+cyber_process argv=["binwalk","-e","-M","<nand.bin>"]
+```
+
+No write-back, no glitcher on a live fleet.
+
 ## Done
 
 Evidence holds dump hash, parse listing, control. No iron, no reflash.

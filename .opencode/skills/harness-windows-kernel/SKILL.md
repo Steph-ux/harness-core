@@ -44,6 +44,20 @@ An IOCTL code **not** in the dispatch table, or the same IOCTL with a truncated 
 
 `cyber_finding` with hash, Ghidra dispatch observation, one runtime IOCTL or explicit `not-tested`, negative control, source chunk (decompile at address). No public exploit against a live estate. Privilege-escalation claims need the lab token/process proof, not "should be SYSTEM".
 
+### Lab budget
+
+| Step | Max |
+|---|---|
+| IOCTL codes sent | 1 documented |
+| BSODs | 1 then restore, stop |
+| Production hosts | 0 |
+
+```
+cyber_process argv=["sha256sum","<driver.sys>"]
+```
+
+BYOVD on the operator's host is a method violation.
+
 ## Done
 
 Evidence holds driver hash, dispatch map, at most one runtime IOCTL, snapshot restore note. Production not touched.

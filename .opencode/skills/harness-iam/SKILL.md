@@ -49,6 +49,19 @@ must fail (401/403 or empty authorized error). A 200 error page, a login HTML, o
 
 Restore nothing that was not changed (this method is read-only). Horizontal vs vertical: say which. Cloud IAM (`iam:PassRole`, `*:*`) is still two identities and one action — do not dump the whole policy simulator.
 
+### Permission matrix (one action)
+
+| Actor | Object in role | Object out of role | No token |
+|---|---|---|---|
+| A higher | 200 + fields | 403 | 401 |
+| B lower | 200 own only | 403 | 401 |
+
+Horizontal = B reads A's object. Vertical = B calls A's admin action. Say which.
+
+Cloud: still two identities, one action (`s3:GetObject`, `iam:PassRole`). No `*:*` dump.
+
+SSO/OIDC session: after B's replay, a resource request proves the session. Token internals → `harness-jwt`.
+
 ## Done
 
 The finding names both identities and the permission that differed. An untested provider stays `not-tested`. No third identity, no spray.

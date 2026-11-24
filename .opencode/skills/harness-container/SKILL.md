@@ -68,6 +68,19 @@ Same finding text on both is refused.
 
 Link `technology:container:<digest>` in the entity graph. CVEs on the image go through `cyber_cve` / `harness-supply-chain`, not this method's privilege claims.
 
+### Candidate table
+
+| Signal | Second read | Control |
+|---|---|---|
+| privileged | same in live pod json | drop-ALL pod |
+| hostPath / docker.sock | volumeMounts snippet | volume absent |
+| SA token default | automount true | automount false |
+| runAsUser 0 | securityContext | non-root |
+| public pull | crane/skopeo 200 anon | 401 without creds |
+| `:latest` in prod | digest pin missing | tagged digest |
+
+Escape, `nsenter`, `docker run --privileged` are out. Image CVEs → `harness-supply-chain`.
+
 ## Done
 
 Evidence holds the hash, the read-only inventory, and the negative control. An unscanned image stays `not-tested` with the missing tool named.

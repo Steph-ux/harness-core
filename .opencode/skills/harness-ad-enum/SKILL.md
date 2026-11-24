@@ -52,6 +52,24 @@ A write is never the proof.
 
 `cyber_finding` with collection observation, second-DC or denied-query control, source chunks. Ticket material stays restricted in the ledger (hash/location only).
 
+### What stays hashed
+
+TGS/AS-REP material: path + SHA256 in the ledger, never the `$krb5tgs$` blob in a finding title. Cracking is a separate approval.
+
+### Graph rows
+
+Users, groups, computers, trusts, SPNs, unconstrained delegation, GPOs, ACLs. Presence ≠ live credential. Disabled/stale separated.
+
+```
+cyber_process argv=["ldapsearch","-x","-H","ldaps://<dc2>","-D","<identity>","-b","<base>","(objectClass=user)","dn"]
+```
+
+Second DC is the confirmation observation, not a second forest.
+
+### Stop
+
+Password spray, `Add-ADGroupMember`, GPO edit, DCSync unless the letter names it, tickets for accounts not in the test set.
+
 ## Done
 
 Evidence holds LDAP/BloodHound observations and the principal list. A Kerberoastable or trust finding cites two DC observations or a denied-query control.
