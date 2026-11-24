@@ -1,48 +1,57 @@
 ---
 name: harness-ad-enum
-description: "Enumerate Active Directory safely from an approved domain-joined foothold, read-only, without destructive writes."
+description: "Enumerate an approved Active Directory forest read-only from a named foothold: LDAP/BloodHound, optional scoped Kerberoast, two-DC confirmation, no writes."
 ---
 
 # AD enumeration
 
-Source: `active-directory-enumeration`, `bloodhound-collection`.
+Source: LDAP, BloodHound CE, Kerberos. Writes, sprays, and ACL changes are out.
 
 ## Gate
 
-An approved domain, domain-joined foothold, and test identity must be named in the scope. Every command goes through `cyber_process` with `argv`. Do not build a shell string. Read-only only: no password writes, no ACL changes, no GPO pushes. The permanent authorizations apply (dump read, CVE exploit) but never beyond the approved forest.
+An approved domain, domain-joined foothold, and test identity must be named in the scope. Every command goes through `cyber_process` with `argv`. Do not build a shell string. Read-only: no password writes, no ACL changes, no GPO pushes, no unconstrained ticket requests. Stay in the approved forest.
 
 ## Steps
 
-1. Record domain, foothold, and test identity. Note the DC(s) already in evidence.
-2. LDAP read-only sweep from the foothold (approved credential only):
+### 1. Name the forest
 
-```text
-ldapsearch -x -H ldap://<dc> -D <identity> -w <pass> -b <base> "(objectClass=user)" dn | head -n 200
-ldapsearch -x -H ldap://<dc> -b <base> "(objectClass=computer)" dn | head -n 200
+Record domain, foothold, test identity, and DC(s) already in evidence.
+
+### 2. LDAP read-only (approved bind only)
+
+```
+cyber_process argv=["ldapsearch","-x","-H","ldaps://<dc>","-D","<identity>","-b","<base>","(objectClass=user)","dn"]
+cyber_process argv=["ldapsearch","-x","-H","ldaps://<dc>","-D","<identity>","-b","<base>","(objectClass=computer)","dn"]
 ```
 
-Or BloodHound collection read-only (when `bloodhound-ce` / `SharpHound` is on PATH and the scope allows it): `bloodhound-ce -c All --zip <evidence-dir>/bh.zip`. Record one observation per collection.
+Cap the output (head via the tool's own size, not a piped shell). Prefer LDAPS. Record one observation per query.
 
-3. Enumerate groups, trusts, SPNs (Kerberoastable), and AS-REP roastable accounts from the LDAPS output already collected. Do not request TGTs unless the scope explicitly allows authentication probing.
-4. One Kerberoast/AS-REP request only when the scope allows auth: record the ticket observation. The ticket hash is stored, never the plaintext secret branch.
-5. ACL/GPO findings are candidates until a read-only ACL dump (`Get-Acl` / `ldapsearch` ACL attributes) and a second observation on a different DC agree. No write is ever the proof.
+BloodHound, if in PATH **and** scope allows collection:
 
-Every finding is `cyber_finding` with its `evidence` observation ids, `sources` chunk ids (via `cyber_source`), and `checks` (collection / second-DC control / auth negative-control when applicable).
+```
+cyber_process argv=["bloodhound-ce","-c","All","--zip","<evidence-dir>/bh.zip"]
+```
 
-### Graph coverage
+### 3. Graph without roasting yet
 
-Build the read-only graph of users, groups, computers, trusts, SPNs, delegation,
-GPOs, ACLs, sessions and local-admin edges. Separate stale, disabled and active
-principals; directory presence does not prove an active credential. Correlate
-BloodHound edges with LDAP attributes and, when approved, a second DC.
+From the LDAP/BH output: groups, trusts, SPNs (Kerberoastable **candidates**), AS-REP roastable **candidates**, delegation, GPOs. Directory presence ≠ active credential. Separate disabled/stale.
 
-### Controls and secret handling
+### 4. Auth probing only if the scope says so
 
-Use a known-disabled account, a non-delegated service account and a denied LDAP
-query as controls. Do not spray, crack, modify passwords, request unapproved
-tickets, change ACLs or execute lateral commands. Ticket material and hashes
-remain restricted; the ledger records hashes/locations, never plaintext secrets.
+One Kerberoast or AS-REP request **only** when authentication probing is explicit. Store the **hash**, never plaintext. Cracking is out of this method unless separately approved.
+
+### 5. Negative control and second DC
+
+- known-disabled account
+- denied LDAP query
+- second DC must agree before an ACL/GPO finding
+
+A write is never the proof.
+
+### 6. Finding contract
+
+`cyber_finding` with collection observation, second-DC or denied-query control, source chunks. Ticket material stays restricted in the ledger (hash/location only).
 
 ## Done
 
-Evidence holds the LDAP/BloodHound observations and the deduplicated principal list. A Kerberoastable or trust finding cites two DC observations.
+Evidence holds LDAP/BloodHound observations and the principal list. A Kerberoastable or trust finding cites two DC observations or a denied-query control.

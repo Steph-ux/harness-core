@@ -1,45 +1,46 @@
 ---
 name: harness-email-osint
-description: "Correlate an approved email address with Holehe and theHarvester, recording the source and the result."
+description: "Correlate an approved email with Holehe and a second source; never send mail, never reset a password, never treat one hit as ownership."
 ---
 
 # Email OSINT — two-source, no contact
 
-Source: Holehe 1.61, theHarvester 5.0.0, `osint-deep` (2025: hunter breach correlation).
+Source: Holehe, theHarvester. Hunter/breach correlation only from approved corpora.
 
 ## Gate
 
-Every command goes through `cyber_process` with `argv`. Do not build a shell string. The email is named in the approved scope. Do not send an email, do not contact the target, do not pay for premium APIs unless explicitly approved.
+Every command goes through `cyber_process` with `argv`. Do not build a shell string. The email is named in the approved scope. Do not send an email, do not contact the target, do not trigger password reset, do not log in, do not pay for premium APIs unless explicitly approved.
 
 ## Steps
 
-1. Run as `cyber_process` `argv`:
-```text
-holehe <email> --only-used
-theHarvester -d <domain> -b all -l 100 -f <evidence-dir>/theharvester.html
-# optional: Mes-outils/_lib waymore-style second source already in evidence
+### 1. First tool
+
 ```
-Each is its own observation in `<evidence-dir>`.
+cyber_process argv=["holehe","<email>","--only-used"]
+```
 
-2. A found account / leak reference is a candidate. Record the source breach/site and hash any sensitive token.
-3. Confirm with a second independent source already allowed by `osint-deep`: same email + known name/username/phone or a second breach corpus. One hit is not confirmation.
-4. Extracted usernames stay leads — each new search needs its own scope coverage before `harness-maigret`.
-5. `cyber_finding` only with at least two observations (tool + second source) and a `cyber_source` chunk for the breach listing. Unconfirmed stays candidate. No plaintext secret in the ledger.
+Own observation. `--only-used` only — no site spam.
 
-### Correlation matrix
+### 2. Domain harvest (if the domain is in scope)
 
-Normalize the address and record provider, domain, source date and result type.
-Require two independent attributes before confirming ownership: email + public
-name, email + approved username, or email + approved breach/domain source. A
-provider-registration hit alone does not prove account ownership or compromise.
+```
+cyber_process argv=["theHarvester","-d","<domain>","-b","all","-l","100","-f","<evidence-dir>/theharvester"]
+```
 
-### Controls and privacy
+Separate observation. Limit 100. The email under test must appear or this is not a second source for **that** address.
 
-Use a syntactically valid but known-unused address and a near-match as
-`negative-control` cases. Do not send mail, trigger password reset, log in, scrape private
-profiles, or retain passwords. New identifiers discovered during the run stay
-leads until separately approved and scoped.
+### 3. Confirm with a second independent attribute
+
+Same email + public name, or same email + approved username, or same email + approved breach source (`harness-breach-osint`). A provider-registration hit alone does not prove ownership or compromise.
+
+### 4. Negative control
+
+A syntactically valid **known-unused** address and a **near-match** must not yield the same "confirmed owner" graph. Record both.
+
+### 5. Finding contract
+
+`cyber_finding` only with ≥2 observations (tool + second source), a `cyber_source` chunk, and the unused-address control. Unconfirmed stays candidate. No plaintext secret. New usernames stay leads until `harness-maigret` is scoped.
 
 ## Done
 
-Evidence holds the Holehe + theHarvester reports. Confirmed findings cite two observations + a source chunk.
+Evidence holds Holehe and the second source. Confirmed findings cite two observations + a source chunk + control.

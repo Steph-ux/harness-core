@@ -1,47 +1,45 @@
 ---
 name: harness-exiftool
-description: "Extract metadata from a file already collected in an engagement, recording the file hash and the result."
+description: "Hash a file already in evidence, extract ExifTool JSON read-only, and require a second observation before GPS or author becomes a finding."
 ---
 
 # ExifTool — hash then meta, never fetch
 
-Source: ExifTool 13.59 (2024: `creator: GPS** / `producer: CVE` leaks in delivered docs).
+Source: ExifTool. GPS/author in delivered docs are privacy leads, not identity proof.
 
 ## Gate
 
-Every command goes through `cyber_process` with `argv`. Do not build a shell string.
-File must already be in `<evidence-dir>`. Do not fetch remote.
+Every command goes through `cyber_process` with `argv`. Do not build a shell string. File must already be in the evidence directory. Do not fetch remote. Do not `exiftool -overwrite_original`. Do not publish precise personal locations.
 
 ## Steps
 
-1. Hash first:
-```text
-sha256sum <file>
+### 1. Hash first
+
 ```
-Record as file-identity observation.
-
-2. Then:
-```text
-exiftool -json -n <file> > <evidence-dir>/exiftool-<basename>.json
+cyber_process argv=["sha256sum","<file>"]
 ```
-Own observation.
 
-3. Read `CreateDate`, `GPS*`, `Author`, `Creator`, `Producer`, `Software`. Candidate until relevance shown (GPS in engagement geography, author = in-scope principal, software CVE via `trivy fs`).
-4. No write: `exiftool -overwrite_original` forbidden. `cyber_finding` needs hash + JSON `cyber_source` chunk + second observation (trivy CVE or second doc same author).
+File-identity observation. Process a **copy** if the parser might touch mtime; never the only original.
 
-### Metadata matrix
+### 2. Extract JSON
 
-Record file type, size, hash, timestamps, GPS, author/creator, producer,
-software, embedded thumbnails, comments, XMP/IPTC and revision data. Distinguish
-filesystem timestamps from embedded timestamps. A GPS coordinate or author is a
-privacy lead, not proof of identity, location or compromise without an
-independent source.
+```
+cyber_process argv=["exiftool","-json","-n","<file>"]
+```
 
-### Negative controls and privacy
+Redirect is the harness trace, not a shell `>`. Own observation. Read CreateDate, GPS*, Author, Creator, Producer, Software, XMP/IPTC.
 
-Process a known-clean fixture and a copy hash as controls. Never alter the
-source, extract embedded files without scope, or publish precise personal
-locations. Redact GPS, author and serial values unless necessary to the finding.
+### 3. Relevance
+
+GPS is a candidate until it sits in engagement geography **and** a second source agrees. Author is a candidate until an in-scope principal matches. Software version → `cyber_cve` / `harness-supply-chain`, not this method.
+
+### 4. Negative control
+
+A known-clean fixture of the same type, and the copy's hash, must not invent GPS/author. Same author string on a public template is not "the operator".
+
+### 5. Finding contract
+
+`cyber_finding` needs hash + JSON `cyber_source` chunk + second observation (trivy CVE or second doc same author) + clean-fixture control. Redact GPS/author/serial unless necessary.
 
 ## Done
 

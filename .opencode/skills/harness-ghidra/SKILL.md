@@ -1,42 +1,43 @@
 ---
 name: harness-ghidra
-description: "Inspect a local binary already open in Ghidra and record only functions, strings, and cross-references that the tool output shows."
+description: "Inspect a local binary already in evidence with headless Ghidra: hash, program info, address-cited decompile and xrefs; never execute the sample."
 ---
 
 # Ghidra — headless first, address-cited only
 
-Source: `reverse-engineering-malware-with-ghidra`. Use Ghidra MCP or `analyzeHeadless`. Do not fetch samples. Do not execute.
+Source: Ghidra headless / analyzeHeadless. Do not fetch samples. Do not execute.
 
 ## Gate
 
-Every command goes through `cyber_process` with `argv`. Do not build a shell string.
-**Headless first.** Prefer `ghidra-mcp --headless --binary <file> --project /tmp/cve-lab-*` (PyGhidra) or `support/analyzeHeadless <project> <name> -import <binary>`. GUI `http://127.0.0.1:8080/` only when operator opened a program. Confirm via `get_program_info` (name+base+hash) before any address. Binary must belong to engagement.
+Every command goes through `cyber_process` with `argv`. Do not build a shell string. **Headless first.** GUI only when the operator already opened a program. Binary must belong to the engagement. If Ghidra/Java is unavailable: `not-tested`, do not substitute an unverified decompiler.
 
 ## Steps
 
-1. `get_program_info` → positive control (`name+base+SHA256`). If headless, also record `analyzeHeadless` import log.
-2. Search behavior: `list_strings --contains <needle>`, `list_imports`, `list_functions --regex <re>`. Quote `0x...` returned — no address = hypothesis.
-3. `decompile --address 0x...` / `disassemble` at that address. String ≠ sink — confirm `list_cross_references --address 0x...` to `system/exec/strcpy/decrypt/socket/connect`.
-4. Record tool-call observation ids. Each capability/persistence/network conclusion needs cited instruction+string+xrefs. `set_bookmark` is navigation only.
-5. `cyber_finding` with `evidence`=info+search+decompile+xrefs, `sources`=decompiler chunk via `cyber_source`, `checks`=xrefs reproduction. Absence ≠ not present — try two needles.
+### 1. Hash then import
 
-### Analysis matrix
+```
+cyber_process argv=["sha256sum","<binary>"]
+cyber_process argv=["support/analyzeHeadless","<project>","<name>","-import","<binary>","-analysisTimeoutPerFile","300"]
+```
 
-Record architecture, format, compiler hints, entry points, imports/exports,
-strings, permissions, network APIs, crypto APIs, process/file APIs and error
-paths. Trace a claim from a returned address to decompilation, disassembly and
-cross-references; function names and guessed symbols are hypotheses until the
-tool returns the address. Inspect both a likely-positive and a known-benign
-function as a negative control.
+Positive control: `get_program_info` (name + base + SHA256). Wrong hash → stop.
 
-### Safety and reproducibility
+### 2. Search behavior
 
-Hash the binary before import and keep the project isolated. Do not execute,
-emulate, patch, fetch missing samples or follow network indicators. Use one
-address-based query at a time, cite tool output and record the analysis version.
-If Ghidra/Java is unavailable, report the binary as `not-tested` rather than
-substituting an unverified decompiler.
+`list_strings --contains <needle>`, `list_imports`, `list_functions --regex <re>`. Quote `0x...` the tool returned. No address = hypothesis, not a finding.
+
+### 3. Decompile at that address
+
+`decompile --address 0x...` / `disassemble`. A string is not a sink. Confirm `list_cross_references --address 0x...` to `system`/`exec`/`strcpy`/`recv`/`connect`. Function names are hypotheses until the tool returns the address.
+
+### 4. Negative control
+
+Inspect a **known-benign** function in the same binary (e.g. a string compare with no xrefs to exec). It must not support the same sink claim.
+
+### 5. Finding contract
+
+`cyber_finding` with evidence = info + search + decompile + xrefs, `cyber_source` decompiler chunk, checks = xrefs reproduction + benign-function control. Absence of a string ≠ "not present" — try two needles. Do not emulate, patch, or follow network IOCs.
 
 ## Done
 
-Every claim cites Ghidra observation + `0x...` address. No claim without tool-returned address.
+Every claim cites a Ghidra observation and a `0x...` address. No claim without a tool-returned address.

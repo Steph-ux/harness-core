@@ -1,41 +1,57 @@
 ---
 name: harness-dns-enum
-description: "Collect DNS records and test zone transfer only for an approved nameserver and zone."
+description: "Collect DNS records for an approved zone and attempt one bounded AXFR per approved nameserver; refused transfers are controls, not findings."
 ---
 
 # DNS — records then one AXFR per approved NS
 
-Source: `performing-dns-enumeration-and-zone-transfer` (2025: AXFR still live on mis-delegated NS).
+Source: RFC 5936, delegated NS, dnsx. AXFR still appears on mis-delegated servers.
 
 ## Gate
 
-Every command goes through `cyber_process` with `argv`. Do not build a shell string. Query only the approved zone and its delegated NS. Any other server is a stop.
+Every command goes through `cyber_process` with `argv`. Do not build a shell string. Query only the approved zone and its delegated NS. Any other server is a stop. Do not change DNS. Do not query names learned from AXFR until they pass scope filtering.
 
 ## Steps
 
-1. From `bbot` DNS events already in evidence, list `NS/A/AAAA/CNAME/MX/TXT/CAA` for the approved zone; if absent, run the passive `subdomain-enum` preset and read its DNS events.
-2. For each approved NS, one AXFR attempt, bounded:
-```text
-dig AXFR <zone> @<approved-ns> +time=5 +tries=1
-# argv: dig, AXFR, <zone>, @<ns>, +time=5, +tries=1
+### 1. Inventory records
+
+From DNS events already in evidence, or:
+
 ```
-Record each as its own observation.
+cyber_process argv=["dnsx","-silent","-a","-aaaa","-cname","-mx","-txt","-ns","-caa","-resp","-l","<zone-file>"]
+```
 
-3. `Transfer failed` / `REFUSED` / timeout = negative controls, not findings.
-4. Success = zone records returned. Store the record set, ingest via `cyber_source`, and do not query transferred names until each name is inside the approved scope. `cyber_finding` needs the AXFR observation + the source chunk + a second NS or a `dnsx -resp` confirmation observation.
+List NS/A/AAAA/CNAME/MX/TXT/CAA/SOA for the approved zone. Record resolver, timestamp, TTL.
 
-### Record correlation
+### 2. One AXFR per approved NS
 
-Compare NS, SOA serial, A/AAAA/CNAME, MX, TXT, CAA and DNSSEC indicators with
-the approved inventory. Preserve resolver, timestamp and TTL. A delegation or
-takeover hypothesis requires current DNS plus an independent confirmation.
+```
+cyber_process argv=["dig","AXFR","<zone>","@<approved-ns>","+time=5","+tries=1"]
+```
 
-### Safety controls
+Each NS is its own observation. Five-second timeout, one retry maximum.
 
-Use one AXFR attempt per approved NS, five-second timeout and one retry maximum.
-The wrong-zone query, a non-delegated NS, and a refused transfer are negative
-controls. Never alter DNS or query names learned from AXFR until scope filtering
-is complete.
+### 3. Negative controls
+
+`Transfer failed` / `REFUSED` / timeout = **negative controls**, not findings. Also query:
+- the **wrong zone** on the same NS
+- a **non-delegated** NS
+
+Those must not return the in-scope zone.
+
+### 4. Success path
+
+Success = zone records returned. Ingest via `cyber_source`. Do not probe transferred hostnames until each name is inside the approved apex. Confirm with a second NS or `dnsx -resp`.
+
+Takeover / dangling NS is a **hypothesis** until current DNS plus an independent confirmation (`harness-subdomain-enum`).
+
+### 5. Finding contract
+
+`cyber_finding` needs:
+- AXFR observation that returned records
+- source chunk of the record set
+- second NS or dnsx confirmation
+- refused/wrong-zone observation as negative control
 
 ## Done
 

@@ -1,47 +1,49 @@
 ---
 name: harness-vuln-triage
-description: "Decide whether a scanner hit or HTTP 200 is a confirmed finding by requiring a reproducible observation and a negative control."
+description: "Decide whether a scanner hit or HTTP 200 is a confirmed finding: claimed effect in the body, fresh reproduction, negative control, or it stays a lead."
 ---
 
 # Triage — 200 ≠ finding
 
-Source: `performing-web-application-vulnerability-triage` (2024: error page `200` is #1 FP).
+Source: error pages that return 200 are the #1 false positive. Scanner severity is not CVSS.
 
 ## Gate
 
-One reproduction only (single `dalfox`/`trivy`/`nuclei` probe counts as one when target already in scope) of an already approved request. Every command via `cyber_process` `argv` when repro needed.
+One reproduction of an already approved request. Every command via `cyber_process` `argv` when a repro is needed. Do not promote nuclei/dalfox/trivy severity by itself. Do not use response time alone.
 
 ## Steps
 
-1. One-sentence claim + offered observation ids. `cyber_memory evidence` them — body must show claimed data/state change, not only status (`gate` rule 7).
-2. Name negative control: `unauth 401/403`, `wrong id 404`, `tampered JWT 401`, `recomputed price 400`. None recorded → candidate, no finding.
-3. Repro once `cyber_process` `argv`, fresh `request-id` only. Same relevant field must appear. New observation id.
-4. If visual (stored XSS rendering, receipt total, state banner), `cyber_capture` linked to reproduction observation. No id = refused.
-5. `cyber_finding` only when `original+control+reproduction` agree, with `checks`={original:reproduction, control:negative-control, baseline:positive-control} each `observationId`+`contains` (leaked field/persisted state, not status) + `purpose`, plus `sources` chunks via `cyber_source`. Otherwise limitation + stop.
+### 1. One-sentence claim
 
-### Decision matrix
+Plus offered observation ids. `cyber_memory` / evidence them — the body must show the claimed data or state change, **not only status**.
 
-Classify the report as confirmed, candidate, false positive, or not-tested.
-Confirmed requires the claimed effect in the body, state, callback or capture;
-candidate means the signal exists but a control or runtime proof is missing;
-false positive means the control explains it; not-tested means scope or tooling
-blocked the reproduction. Never promote a scanner severity, status code or
-response time by itself.
+### 2. Name the negative control before the repro
 
-### Reproduction quality
+Examples: unauth 401/403, wrong id 404, tampered JWT 401, recomputed price 400. None recorded → **candidate**, no finding.
 
-Use one fresh correlation id and preserve the exact request shape, status,
-content type, body hash and relevant field. Compare the positive baseline and
-negative control under the same authentication and environment. Redact tokens,
-cookies, secrets and unrelated personal data before recording `contains`.
+### 3. Reproduce once
 
-### Reporting contract
+```
+cyber_process argv=["curl","-sS","-D","-","-H","X-Request-Id: <fresh>","<approved-url>"]
+```
 
-The finding links every observation id and source chunk, names the limitation,
-maps OWASP and MITRE only when the behavior supports it, and states what was
-not proven. A visual capture is supplementary; it never replaces the CLI or
-HTTP observation that demonstrates the effect.
+Fresh request-id only. Same relevant field must appear. New observation id. Preserve status, content-type, body hash.
+
+### 4. Visual if needed
+
+Stored XSS rendering, receipt total, state banner: `cyber_capture` **linked** to the reproduction observation. No id = refused. Capture never replaces the HTTP/CLI observation.
+
+### 5. Classify
+
+- **confirmed** — claimed effect in body/state/callback/capture + control differs
+- **candidate** — signal exists, control or runtime proof missing
+- **false positive** — control explains it
+- **not-tested** — scope or tooling blocked repro
+
+### 6. Finding contract
+
+`cyber_finding` only when original + control + reproduction agree, with `checks` each `observationId` + `contains` (leaked field / persisted state, not status) + `purpose`, plus `sources` via `cyber_source`. Map OWASP/MITRE only when the behavior supports it. Name what was **not** proven.
 
 ## Done
 
-Ledger is either finding (3 citations+captures) or explicit candidate with missing control named.
+Ledger is either a finding (three citations) or an explicit candidate with the missing control named.
