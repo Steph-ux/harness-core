@@ -1,15 +1,15 @@
 ---
 name: harness-maigret
-description: "Correlate one approved username with Maigret or Sherlock on a bounded site set; a 200 is not a profile; confirm with a second attribute."
+description: "Bounded Maigret/Sherlock on one approved username: top-sites only, classify 200 vs profile, second attribute, unused-username control. Never permute or contact."
 ---
 
 # Maigret+Sherlock — bounded, two-source
 
-Source: Maigret, Sherlock. First pass is top-sites only.
+Source: Maigret, Sherlock. First pass is top-sites 100. A login page is not a profile.
 
 ## Gate
 
-Every command goes through `cyber_process` with `argv`. Do not build a shell string. Username in approved scope. No `--permute`, `--all-sites`, `--enrich`, `--with-domains` on the first pass. Do not contact accounts. Do not bypass rate limits.
+Every command goes through `cyber_process` with `argv`. Do not build a shell string. Username in approved scope. No `--permute`, `--all-sites`, `--enrich`, `--with-domains` on the first pass. Do not contact accounts, do not bypass rate limits, do not scrape DMs.
 
 ## Steps
 
@@ -20,25 +20,29 @@ cyber_process argv=["maigret","<username>","--no-autoupdate","--no-recursion","-
 cyber_process argv=["sherlock","<username>","--timeout","15","--print-found","--output","<evidence-dir>/sherlock.txt"]
 ```
 
-Each is its own observation.
+Each own observation. Missing binary → `not-tested`.
 
 ### 2. Classify each URL
 
-unavailable / claimed / found / confirmed. Check final URL, body marker, profile title. A 200 or a generic login page is **not** a profile. The searched username must appear as the account, not as a search result.
+unavailable / claimed / found / confirmed.
 
-`cyber_source` the JSON/HTML chunk for found URLs only.
+A **found** profile needs: final URL after redirects, HTTP body marker, profile title. The searched username must be the **account**, not a search hit. Generic `/login` 200 = claimed at most.
 
-### 3. Second attribute
+`cyber_source` JSON/HTML for found URLs only.
 
-Same username + email/name/photo hash from an independent `osint-deep` source. One hit is not confirmation. Each discovered extra username/email is a **new** scope item.
+### 3. Second independent attribute
+
+Same username + email, public name, or photo hash from `harness-email-osint` / `harness-breach-osint`. One site hit is not confirmation. Extra usernames discovered here are **new scope items**.
 
 ### 4. Negative control
 
-A **known-unused** username and a **near-match** must not produce the same "found" set. Record both.
+A **known-unused** username (operator-listed) and a **near-match** must not produce the same found-set. Record both. If the unused name "exists" on the same 40 sites, the tool is matching search pages — not profiles.
 
 ### 5. Finding contract
 
-`cyber_finding` only with Maigret/Sherlock observation + second source + source chunk + unused-username control. Store URLs and public markers, not private messages or tokens.
+`cyber_finding` only with Maigret/Sherlock observation + second source + source chunk + unused-username control. Store URLs and public markers. No tokens, no private messages.
+
+Expand to more sites only in a **second** pass after the operator approves, still without permute.
 
 ## Done
 

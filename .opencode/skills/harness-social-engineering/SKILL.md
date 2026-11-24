@@ -1,47 +1,56 @@
 ---
 name: harness-social-engineering
-description: "Run an authorized phishing or pretext simulation against an approved recipient list with canary credentials only, aggregate metrics, and stop at the first real credential."
+description: "Authorized phishing/pretext simulation on an approved recipient-list hash: canary endpoint stores only sha256+timestamp, aggregate rates, stop at first real secret, never name an individual."
 ---
 
 # Social engineering — authorized simulation, canary only
 
-Source: `social-engineering-assessment`, `phishing-simulation`. This method
-replaces the previous `not-covered` entry. It evaluates a human control, not a
-person: the deliverable is a rate and a gap, never an individual.
+Source: phishing simulation as a **control test**, not an attack on a person. Deliverable is a rate and a gap.
 
 ## Gate
 
-Written authorization from the organization, an approved recipient list, and
-an informed HR/legal owner are required. Every command goes through
-`cyber_process` with `argv`. Do not build a shell string. No external third
-party, no malware attachment, no availability impact, no pretext built from
-personal data of a named individual. The credential endpoint stores only a
-hash and a timestamp, never the submitted secret.
+Written authorization, approved recipient list, informed HR/legal owner. Every command goes through `cyber_process` with `argv`. Do not build a shell string. No external third-party kit, no malware attachment, no availability impact, no pretext from personal data of a named individual. The capture endpoint stores **only** `sha256(password)` + timestamp, never the secret.
 
-Stop at the first real credential submitted: destroy the capture, notify the
-owner, and do not continue the campaign. Stop on any recipient outside the
-list, or any use of material obtained outside the approved list.
+**Stop** at the first real credential: destroy capture, notify owner, halt campaign. **Stop** if any recipient is outside the list.
 
-## Steps (each step writes into `<evidence-dir>` and is its own observation)
+## Steps
 
-1. Record the approval reference, the recipient list hash, the campaign window
-   and the control recipient. Completion: one source chunk names all four.
-2. Build the canary endpoint so a submission records `sha256(password)` plus a
-   timestamp and nothing else. Prove it with a test submission and show the
-   stored record contains no plaintext.
-3. Send one campaign, one pretext class, no personalization from outside the
-   list. Record the send count per recipient hash.
-4. Measure delivery, click and canary submission as three separate counts.
-   Each is its own observation; an open is not a click.
-5. Negative controls: the control recipient never receives the message, a test
-   address outside the window is discarded, and a submission with an empty
-   password is not counted. These show the endpoint and the filter work.
-6. Destroy the canary captures with the destruction command recorded in step 2,
-   and show the store is empty.
+### 1. Freeze approval
+
+Record approval reference, **hash of the recipient list**, campaign window, control recipient (must not receive). One `cyber_source` chunk names all four.
+
+### 2. Canary endpoint proof
+
+Build so a submission records hash+timestamp only. Prove with a test submission:
+
+```
+cyber_process argv=["curl","-sS","-X","POST","--data-binary","@canary-test.json","<canary-url>"]
+```
+
+Observation must show the store has no plaintext. Empty-password submission is not counted (negative control).
+
+### 3. One campaign, one pretext class
+
+No personalization from outside the list. Record send count **per recipient hash**, not per name.
+
+### 4. Three separate counts
+
+Delivery, click, canary submission — three observations. An open is not a click. A click is not a secret.
+
+### 5. Negative controls
+
+- control recipient never receives
+- address outside the window is discarded
+- empty password not counted
+
+### 6. Destroy
+
+Destruction command recorded; store empty observation. If a real secret appeared, it was destroyed in the stop path — the finding is the **control failure rate**, not the secret.
+
+### 7. Finding contract
+
+`cyber_finding` states the control that failed, the aggregate rate, approved remediation. No individual named. One click without its control stays a candidate.
 
 ## Done
 
-Evidence holds the approval reference, the canary store proof, the three
-aggregate counts, the control misses and the destruction proof. No individual
-is named. A `cyber_finding` states the control that failed, the rate, and the
-approved remediation path; one click without its control stays a candidate.
+Evidence holds approval, canary-store proof, three counts, control misses, destruction proof. No name, no plaintext password.

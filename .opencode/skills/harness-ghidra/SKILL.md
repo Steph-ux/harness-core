@@ -1,15 +1,15 @@
 ---
 name: harness-ghidra
-description: "Inspect a local binary already in evidence with headless Ghidra: hash, program info, address-cited decompile and xrefs; never execute the sample."
+description: "Headless Ghidra on a hashed engagement binary: program info, two-needle string/import search, address-cited decompile and xrefs to a real sink, benign-function control. Never execute."
 ---
 
 # Ghidra — headless first, address-cited only
 
-Source: Ghidra headless / analyzeHeadless. Do not fetch samples. Do not execute.
+Source: analyzeHeadless / Ghidra MCP. Strings without xrefs are hypotheses.
 
 ## Gate
 
-Every command goes through `cyber_process` with `argv`. Do not build a shell string. **Headless first.** GUI only when the operator already opened a program. Binary must belong to the engagement. If Ghidra/Java is unavailable: `not-tested`, do not substitute an unverified decompiler.
+Every command goes through `cyber_process` with `argv`. Do not build a shell string. Headless first. GUI only if the operator already opened the program. Binary must belong to the engagement. Missing Ghidra/Java → `not-tested`. Do not execute, emulate, patch, unpack malware "to see", or fetch samples.
 
 ## Steps
 
@@ -17,26 +17,38 @@ Every command goes through `cyber_process` with `argv`. Do not build a shell str
 
 ```
 cyber_process argv=["sha256sum","<binary>"]
+cyber_process argv=["file","<binary>"]
 cyber_process argv=["support/analyzeHeadless","<project>","<name>","-import","<binary>","-analysisTimeoutPerFile","300"]
 ```
 
-Positive control: `get_program_info` (name + base + SHA256). Wrong hash → stop.
+Positive control: program info (name, image base, SHA256). Wrong hash → stop.
 
-### 2. Search behavior
+### 2. Record the matrix
 
-`list_strings --contains <needle>`, `list_imports`, `list_functions --regex <re>`. Quote `0x...` the tool returned. No address = hypothesis, not a finding.
+Architecture, format, compiler hints, entry, imports/exports. Each from tool output, not guess.
 
-### 3. Decompile at that address
+### 3. Search with two needles
 
-`decompile --address 0x...` / `disassemble`. A string is not a sink. Confirm `list_cross_references --address 0x...` to `system`/`exec`/`strcpy`/`recv`/`connect`. Function names are hypotheses until the tool returns the address.
+```
+list_strings --contains <needle-a>
+list_strings --contains <needle-b>
+list_imports
+list_functions --regex <re>
+```
 
-### 4. Negative control
+Quote every `0x...` the tool returned. No address = hypothesis. Absence of needle-a ≠ "not present" until needle-b also misses.
 
-Inspect a **known-benign** function in the same binary (e.g. a string compare with no xrefs to exec). It must not support the same sink claim.
+### 4. Decompile the cited address
 
-### 5. Finding contract
+`decompile` / `disassemble` at `0x...`. A string is not a sink. Confirm xrefs to `system` / `exec` / `strcpy` / `recv` / `connect` / crypto APIs. Function names in the decompiler are hypotheses until the address is returned.
 
-`cyber_finding` with evidence = info + search + decompile + xrefs, `cyber_source` decompiler chunk, checks = xrefs reproduction + benign-function control. Absence of a string ≠ "not present" — try two needles. Do not emulate, patch, or follow network IOCs.
+### 5. Negative control
+
+A **known-benign** function in the same binary (string compare, init) must not support the same sink claim. Same xref set on the benign function rejects the claim.
+
+### 6. Finding contract
+
+`cyber_finding` evidence = hash + import log + search + decompile + xrefs + benign control. `cyber_source` = decompiler chunk at `file? no — address`. Checks: xrefs reproduction, benign-function negative-control. Do not follow network IOCs from strings.
 
 ## Done
 
