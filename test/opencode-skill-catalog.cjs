@@ -2,20 +2,19 @@
  * The router names a set of methods; each one has to be a real procedure.
  *
  * The catalogue is a contract, not a list that depends on what one machine
- * happens to have installed. The declarations live in `routing.ts`; when the
- * host's skill directory is present, every declared method is checked for the
- * shape the ledger accepts: frontmatter, a gate, steps, a done condition, and
+ * happens to have installed. The declarations live in `routing.ts`; every
+ * declared method in the bundled directory is checked for the shape the ledger
+ * accepts: frontmatter, a gate, steps, a done condition, and
  * the `cyber_process` + `argv` discipline. The broad profiles (mobile, cloud)
  * must carry their coverage checklist verbatim, so the profile the harness
  * seeds and the skill the operator reads cannot drift apart.
  */
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 
 const CORE = path.resolve(__dirname, "..");
 
-module.exports = async ({ assert, jiti, skip }) => {
+module.exports = async ({ assert, jiti }) => {
   const { EXTERNAL_METHODS, SHIPPED_METHODS, ROUTES } = jiti(
     path.join(CORE, "src", "routing.ts"),
   );
@@ -45,13 +44,11 @@ module.exports = async ({ assert, jiti, skip }) => {
     "the external catalogue has no duplicate",
   );
 
-  // The host's own catalogue. Absent on a clean clone, so the depth check is
-  // skipped rather than failed there.
+  // Check the shipped bytes on a clean clone too, not a stale host installation.
   const skillsDir =
     process.env.HARNESS_SKILLS_DIR ||
-    path.join(os.homedir(), ".config", "opencode", "skills");
-  if (!fs.existsSync(skillsDir))
-    skip("host skill catalogue is not installed");
+    path.join(CORE, ".opencode", "skills");
+  assert.ok(fs.existsSync(skillsDir), "the skill catalogue exists");
 
   const read = (name) => {
     const file = path.join(skillsDir, name, "SKILL.md");
