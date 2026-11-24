@@ -154,6 +154,16 @@ module.exports = async ({ assert, jiti }) => {
     /successful observation/,
     "a task cannot close on a failed observation",
   );
+  await assert.rejects(
+    () =>
+      call("cyber_tasks", {
+        action: "complete",
+        id: task.id,
+        evidence: [id, observationId("ses_test_0001", "call-0003")],
+      }),
+    /successful observation/,
+    "a task cannot close when any cited observation failed",
+  );
   assert.equal(
     taskStore.get(scope, task.id).status,
     "pending",

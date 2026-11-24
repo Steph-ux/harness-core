@@ -45,10 +45,18 @@ module.exports = async ({ assert, jiti }) => {
   const testing = parse(await call({ action: "hypothesis", op: "test", id: "H1" }));
   assert.equal(testing.state, "testing", "the tool starts testing");
 
-  // A successful observation confirms; a failed one cannot.
+  // A successful observation is a reproduction, not a confirmation.
   store.upsertSession({ id: "ses_inv_loop", scope, cwd: workspace, status: "active", updatedAt: new Date().toISOString() });
   const goodObs = store.recordObservation({
     id: "obs-inv-good", sessionId: "ses_inv_loop", scope, tool: "sqlmap",
+    input: {}, output: "injectable", success: true, timestamp: new Date().toISOString(),
+  });
+  const controlObs = store.recordObservation({
+    id: "obs-inv-ctrl", sessionId: "ses_inv_loop", scope, tool: "sqlmap",
+    input: {}, output: "not injectable", success: true, timestamp: new Date().toISOString(),
+  });
+  const replayObs = store.recordObservation({
+    id: "obs-inv-replay", sessionId: "ses_inv_loop", scope, tool: "sqlmap",
     input: {}, output: "injectable", success: true, timestamp: new Date().toISOString(),
   });
   const badObs = store.recordObservation({
@@ -58,10 +66,27 @@ module.exports = async ({ assert, jiti }) => {
   await assert.rejects(
     call({ action: "hypothesis", op: "evidence", id: "H1", observationId: badObs.id }),
     /successful observation/,
-    "a failed observation cannot confirm a hypothesis",
+    "a failed observation cannot be a reproduction",
   );
-  const confirmed = parse(await call({ action: "hypothesis", op: "evidence", id: "H1", observationId: goodObs.id }));
-  assert.equal(confirmed.state, "confirmed", "a successful observation confirms through the tool");
+  const reproduced = parse(await call({ action: "hypothesis", op: "evidence", id: "H1", observationId: goodObs.id }));
+  assert.equal(reproduced.state, "testing", "a successful observation does not confirm through the tool");
+  await assert.rejects(
+    call({ action: "hypothesis", op: "control", id: "H1", observationId: goodObs.id }),
+    /cannot be the reproduction/,
+    "the tool refuses a control that is the reproduction",
+  );
+  await assert.rejects(
+    call({ action: "hypothesis", op: "control", id: "H1", observationId: replayObs.id }),
+    /different output/,
+    "the tool refuses a control that observes the same output",
+  );
+  await assert.rejects(
+    call({ action: "hypothesis", op: "control", id: "H1", observationId: badObs.id }),
+    /successful observation/,
+    "a failed observation cannot be a negative control",
+  );
+  const confirmed = parse(await call({ action: "hypothesis", op: "control", id: "H1", observationId: controlObs.id }));
+  assert.equal(confirmed.state, "confirmed", "reproduction plus a distinct control confirms through the tool");
 
   // Surface coverage through the tool, with the proof discipline.
   await call({ action: "surface", op: "add", id: "auth", label: "Authentication" });

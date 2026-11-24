@@ -46,12 +46,47 @@ module.exports = async ({ assert, jiti }) => {
 
   const testing = tracker.test("H1", "2024-01-01T00:01:00Z");
   assert.equal(testing.state, "testing", "testing starts from proposed");
-  const confirmed = tracker.addEvidence("H1", "obs-123", "2024-01-01T00:02:00Z");
-  assert.equal(confirmed.state, "confirmed", "evidence confirms a testing hypothesis");
-  assert.deepEqual(confirmed.evidence, ["obs-123"], "the proof travels with the hypothesis");
+  const reproduced = tracker.addEvidence(
+    "H1",
+    "obs-123",
+    "2024-01-01T00:02:00Z",
+    "out-claim",
+  );
+  assert.equal(
+    reproduced.state,
+    "testing",
+    "a successful observation does not confirm a hypothesis",
+  );
+  assert.deepEqual(reproduced.evidence, ["obs-123"], "the reproduction travels with the hypothesis");
 
   assert.throws(
-    () => tracker.addEvidence("H1", "obs-2", "2024-01-01T00:03:00Z"),
+    () =>
+      tracker.addControl("H1", "obs-123", "2024-01-01T00:02:30Z", "out-other"),
+    /cannot be the reproduction/,
+    "the same observation cannot be both the claim and its control",
+  );
+  assert.throws(
+    () =>
+      tracker.addControl("H1", "obs-replay", "2024-01-01T00:02:30Z", "out-claim"),
+    /different output/,
+    "a control that observes the same output as the reproduction is refused",
+  );
+
+  const confirmed = tracker.addControl(
+    "H1",
+    "obs-ctrl",
+    "2024-01-01T00:02:30Z",
+    "out-benign",
+  );
+  assert.equal(
+    confirmed.state,
+    "confirmed",
+    "reproduction plus a distinct control confirms a testing hypothesis",
+  );
+  assert.deepEqual(confirmed.control, ["obs-ctrl"], "the control travels with the hypothesis");
+
+  assert.throws(
+    () => tracker.addEvidence("H1", "obs-2", "2024-01-01T00:03:00Z", "out-2"),
     /already confirmed/,
     "a confirmed hypothesis is closed to new evidence",
   );
@@ -87,6 +122,8 @@ module.exports = async ({ assert, jiti }) => {
     text: "t",
     state: "testing",
     evidence: [],
+    control: [],
+    outputs: {},
     counterEvidence: [],
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
@@ -95,6 +132,27 @@ module.exports = async ({ assert, jiti }) => {
     advanceHypothesis({ ...base, counterEvidence: ["neg"] }, Date.parse(base.updatedAt)),
     "refuted",
     "counter-evidence refutes even a testing hypothesis",
+  );
+  assert.equal(
+    advanceHypothesis(
+      { ...base, evidence: ["obs-1"], outputs: { "obs-1": "out-1" } },
+      Date.parse(base.updatedAt),
+    ),
+    "testing",
+    "reproduction without a control stays testing",
+  );
+  assert.equal(
+    advanceHypothesis(
+      {
+        ...base,
+        evidence: ["obs-1"],
+        control: ["obs-2"],
+        outputs: { "obs-1": "out-1", "obs-2": "out-2" },
+      },
+      Date.parse(base.updatedAt),
+    ),
+    "confirmed",
+    "reproduction and a distinct control confirm",
   );
   assert.equal(
     advanceHypothesis({ ...base, state: "confirmed" }, Date.now()),
@@ -109,7 +167,9 @@ module.exports = async ({ assert, jiti }) => {
   t2.test("B", "2024-01-01T00:01:00Z");
   t2.propose("C", "done", "2024-01-01T00:00:00Z");
   t2.test("C", "2024-01-01T00:01:00Z");
-  t2.addEvidence("C", "obs-1", "2024-01-01T00:02:00Z");
+  t2.addEvidence("C", "obs-1", "2024-01-01T00:02:00Z", "out-1");
+  assert.equal(t2.active().length, 3, "evidence without a control stays active");
+  t2.addControl("C", "obs-ctrl", "2024-01-01T00:02:30Z", "out-ctrl");
   assert.equal(t2.active().length, 2, "active filters proposed and testing");
   assert.equal(t2.refuted().length, 0, "refuted is empty when none was refuted");
 
@@ -844,11 +904,17 @@ module.exports = async ({ assert, jiti }) => {
   assert.equal(store.hypotheses(scope).length, 1, "the hypothesis is persisted");
 
   store.testHypothesis(scope, "H-IDOR");
-  store.evidenceHypothesis(scope, "H-IDOR", "obs-9");
+  store.evidenceHypothesis(scope, "H-IDOR", "obs-9", "hash-claim");
+  assert.equal(
+    store.hypotheses(scope).find((x) => x.id === "H-IDOR").state,
+    "testing",
+    "evidence without a control does not confirm through the store",
+  );
+  store.controlHypothesis(scope, "H-IDOR", "obs-10", "hash-benign");
   assert.equal(
     store.hypotheses(scope).find((x) => x.id === "H-IDOR").state,
     "confirmed",
-    "evidence confirms through the store",
+    "reproduction plus a distinct control confirms through the store",
   );
 
   store.proposeHypothesis(scope, "open redirect", "H-REDIR");

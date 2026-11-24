@@ -38,6 +38,14 @@ export interface TaskNode extends Task {
   children: TaskNode[];
 }
 
+/** A sub-step is addressed when it closed with proof, or was blocked with a reason. */
+export function taskAddressed(task: Task): boolean {
+  return (
+    task.status === "completed" ||
+    (task.status === "blocked" && Boolean(task.reason?.trim()))
+  );
+}
+
 export class TaskStore {
   constructor(private stateRoot: string) {
     fs.mkdirSync(stateRoot, { recursive: true });
@@ -263,9 +271,10 @@ export class TaskStore {
       )
         throw new Error("Task dependency is not completed");
       // A branch is not done while a sub-step under it is still open.
+      // A blocked child with a reason is addressed: the step was looked at.
       if (
         status === "completed" &&
-        rows.some((r) => r.parentId === id && r.status !== "completed")
+        rows.some((r) => r.parentId === id && !taskAddressed(r))
       )
         throw new Error("A task closes only after its subtasks");
       row.status = status;

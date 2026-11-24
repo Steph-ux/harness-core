@@ -4,6 +4,40 @@ One entry per decision that is expensive to reverse. Each states what was
 decided, why, and what it costs. New entries go at the top.
 
 
+## 2026-11-24 — A branch closes when its sub-steps are addressed
+
+**Decision.** A parent task may complete when every child is `completed` or
+`blocked` with a reason. Pending and in-progress children still refuse.
+Every observation cited to complete a task must have succeeded — one success
+among failures is not proof. Planting a coverage profile is idempotent on the
+profile title, like `assets`.
+**Why.** A WAF-blocked HTTP step is work that was looked at, not an open
+branch. Counting it as unfinished made the tree unclosable without inventing
+evidence. A mixed evidence list let a failed run ride along with an unrelated
+success. A second `coverage` call duplicated the whole checklist.
+**Cost.** A blocked child without a reason still holds the parent. Closing a
+branch no longer means every leaf was proven, only that none was skipped.
+`dependsOn` still requires `completed`, not blocked: that edge is ordering,
+not coverage.
+
+
+## 2026-11-24 — A hypothesis is not confirmed by a successful observation
+
+**Decision.** `advanceHypothesis` confirms a testing hypothesis only when it
+has a reproduction and a negative control that observe different outputs. A
+successful observation bound as `evidence` stays `testing`. The same
+observation cannot be both, and a control that replays the same output is
+refused. Comparison is on the output fingerprint, not on the observation id.
+**Why.** A spawn that exits 0 is not a claim. The previous rule confirmed as
+soon as any successful observation was attached, so the ledger ratified
+fiction: the model could tick a box and the arbiter treated it as a finding.
+The finding gate already required a distinct control; the hypothesis register
+has to.
+**Cost.** Confirmation takes two observed runs. An old testing row with only
+evidence stays testing until a control is bound; a row already `confirmed`
+stays terminal.
+
+
 ## 2026-11-11 - A negative control observes a different output
 
 **Decision.** A finding cannot declare a negative control that observes the same

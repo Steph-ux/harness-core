@@ -65,7 +65,8 @@ answered (`lessons.extracted.model`).
   a hard link is refused, and so is a volume that is not the one it is named as.
 - **A negative control observes a different output.** It cannot observe what
   the reproduction observed, or the same output would be both the claim and
-  its refutation.
+  its refutation. A hypothesis confirms only with both; a successful
+  observation alone does not confirm it.
 - **Never edit `src/` or `opencode/plugin.ts` while an A/B bench is running:**
   each run reloads the module, so the arms would mix.
 
