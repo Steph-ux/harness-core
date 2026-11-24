@@ -1,4 +1,7 @@
 const path = require("node:path");
+const childProcess = require("node:child_process");
+const { mock } = require("node:test");
+const { syncBuiltinESMExports } = require("node:module");
 const CORE = path.resolve(__dirname, "..");
 module.exports = async ({ assert, jiti }) => {
   const { lookupInstall, listInstallable, ensure } = jiti(
@@ -22,23 +25,30 @@ module.exports = async ({ assert, jiti }) => {
   // Unknown tool.
   assert.equal(lookupInstall("definitely-not-a-tool-293847"), undefined);
 
-  // Ensure on a tool already present (node is always there).
-  // We test with "node" but it's not in the catalog, so ensure returns
-  // an error. Instead test with a tool that's guaranteed present: "ls".
-  // Actually, ensure checks the catalog first. For a present tool, it
-  // just checks `which` and returns wasPresent: true.
-  // The tricky part: ensure() calls `which` on the name. We can test
-  // with any tool known to be present.
-  const result = ensure("ls");
-  // "ls" is not in the catalog but which finds it, so wasPresent: true.
-  assert.equal(result.wasPresent, true);
-  assert.equal(result.installed, true);
-
-  // Ensure on unknown tool — not present, not in catalog.
-  const unknown = ensure("definitely-not-a-tool-293847");
-  assert.equal(unknown.wasPresent, false);
-  assert.equal(unknown.installed, false);
-  assert.match(unknown.error, /Unknown tool/);
+  // Unit checks of discovery, independent of Unix `which`/`ls` installation.
+  // Only discovery is allowed here; no package manager can actually run.
+  const whichCmd = process.platform === "win32" ? "where.exe" : "which";
+  const discovery = mock.method(childProcess, "spawnSync", (binary, argv, options) => {
+    assert.equal(binary, whichCmd, "unit tests cannot invoke an installer");
+    assert.equal(options.timeout, 5000);
+    return {
+      status: argv[0] === "fixture-present-tool" ? 0 : 1,
+      stdout: "", stderr: "",
+    };
+  });
+  syncBuiltinESMExports();
+  try {
+    const result = ensure("fixture-present-tool");
+    assert.equal(result.wasPresent, true);
+    assert.equal(result.installed, true);
+    const unknown = ensure("definitely-not-a-tool-293847");
+    assert.equal(unknown.wasPresent, false);
+    assert.equal(unknown.installed, false);
+    assert.match(unknown.error, /Unknown tool/);
+  } finally {
+    discovery.mock.restore();
+    syncBuiltinESMExports();
+  }
 
   // Every catalog entry has required fields.
   for (const entry of all) {

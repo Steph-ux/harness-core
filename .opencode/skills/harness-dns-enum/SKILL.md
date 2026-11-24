@@ -42,7 +42,10 @@ Those must not return the in-scope zone.
 
 ### 4. Success path
 
-Success = zone records returned. Ingest via `cyber_source`. Do not probe transferred hostnames until each name is inside the approved apex. Confirm with a second NS or `dnsx -resp`.
+Success = a complete transfer with matching opening/closing SOA for the requested
+zone and serial. Partial records are not completion. Ingest via `cyber_source`.
+Do not probe transferred names until each passes scope filtering.
+Confirm with a second approved NS or `dnsx -resp`.
 
 Takeover / dangling NS is a **hypothesis** until current DNS plus an independent confirmation (`harness-subdomain-enum`).
 
@@ -61,7 +64,7 @@ Takeover / dangling NS is a **hypothesis** until current DNS plus an independent
 | dnsx inventory | 1 |
 | AXFR per approved NS | 1, +time=5 +tries=1 |
 | wrong-zone on same NS | 1 control |
-| non-delegated NS | 1 control |
+| approved deny-transfer NS | 1 control |
 | brute | 0 this method |
 
 ```
@@ -102,6 +105,16 @@ Keep authoritative DNS, recursive cache and split-horizon views distinct.
 Do not register a dangling name or cloud resource to confirm a takeover here.
 Attach zone serial, server identity, completeness and denied-transfer observations.
 
+### Executed local regression
+
+`node test/opencode-skill-fixtures.cjs` sends AXFR queries over loopback TCP.
+It checks a complete two-message transfer, REFUSED, early EOF, mismatched closing
+SOA serial and a real socket deadline. Timeout stays not-tested, never denied.
+The client supports only uncompressed synthetic names; it is not a production DNS parser.
+The dig recipe's bounded flags are checked, but the dig binary is not executed.
+Resolver diversity, DNSSEC, TSIG and real zone policies remain unvalidated.
+
 ## Done
 
-Every approved NS has one recorded AXFR result. Only a transfer that returns records is a misconfiguration.
+Every approved NS has a recorded result or explicit not-tested reason.
+Only a complete unauthorized transfer contrary to the zone policy is an exposure finding.

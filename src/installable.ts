@@ -103,7 +103,8 @@ export function listInstallable(): InstallEntry[] {
 }
 
 function which(name: string): boolean {
-  const result = spawnSync("which", [name], {
+  const cmd = process.platform === "win32" ? "where.exe" : "which";
+  const result = spawnSync(cmd, [name], {
     timeout: 5000,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],

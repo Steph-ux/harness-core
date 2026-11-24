@@ -66,7 +66,7 @@ If the server validates file content:
 
 If the server validates then deletes:
 1. Upload a file that would be rejected
-2. Send rapid GET requests to the uploaded path during the validation window
+2. Use at most two locally coordinated approved requests during the validation window
 3. If the file is accessible before deletion, record as race condition
 
 ### 7. Execution verification
@@ -74,7 +74,9 @@ If the server validates then deletes:
 For any uploaded file that passes validation:
 - Request the file directly via its URL
 - Check Content-Type in response (is it `text/html`? `application/x-httpd-php`?)
-- If the file contains a canary (`<?php echo "CANARY";`), check if the canary appears executed in the response
+- Compare retrieved bytes with the full uploaded source. A literal `CANARY` inside
+  `<?php echo "CANARY";` is not proof that PHP evaluated it. Require a distinct
+  evaluated result plus a non-evaluating twin before claiming execution.
 - For XSS via SVG/HTML: check if script executes (OOB callback)
 
 ### 8. Negative controls
@@ -115,6 +117,15 @@ Record filename, bytes hash, multipart metadata, stored id and retrieval origin 
 Use sandboxed browser execution only for approved active-content cases.
 Do not overwrite real index files or request real `/etc/passwd` as upload proof.
 Track every uploaded test object through the mission's later approved cleanup.
+
+### Executed local regression
+
+`node test/opencode-skill-fixtures.cjs` executes the multipart curl recipe from
+this file against a loopback service. It checks legitimate upload/read, cross-owner
+disclosure on an intentionally leaky fixture, denial on its strict twin and bad magic.
+A source file served unchanged as `application/x-httpd-php` is a false execution signal.
+The fixture stores bytes in memory; it never interprets PHP or any uploaded code.
+PHP/browser execution, archive extraction, traversal and race behavior remain unvalidated.
 
 ## Done
 

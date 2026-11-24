@@ -3207,9 +3207,10 @@ export default {
           if (input.action === "run") {
             const argv = commandArguments(input.argv);
             // Auto-install: if the binary is absent and in the catalog, install it.
-            const binary = argv[0].includes("/") ? undefined : argv[0];
+            const binary = argv[0].includes("/") || argv[0].includes("\\") ? undefined : argv[0];
             if (binary) {
-              const whichResult = spawnSync("which", [binary], {
+              const whichCmd = process.platform === "win32" ? "where.exe" : "which";
+              const whichResult = spawnSync(whichCmd, [binary], {
                 timeout: 3000, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
               });
               if (whichResult.status !== 0) {

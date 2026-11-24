@@ -46,7 +46,10 @@ Service-A token on api-B. Wrong-audience acceptance = candidate. Expired / nbf s
 
 ### 7. Finding contract
 
-`cyber_finding` with original, flipped, none/kid/jku observations, header chunk, checks: flipped negative, none/kid reproduction. Claims on a jwt.io screenshot are not evidence.
+`cyber_finding` with original, mutation, protected-resource result and header chunk.
+The flip is a negative control only when it is actually rejected; an accepted
+flip is a reproduction signal, so use a separate rejecting twin for the control.
+Claims on a jwt.io screenshot are not evidence.
 
 ### Probe matrix (one row per observation)
 
@@ -105,6 +108,15 @@ The offline decoder above outputs only a fingerprint and header names; it does n
 Key-id traversal needs a lab-owned key fixture, never a real system file.
 An OOB fetch is relevant to JWKS/URL resolution, not required for every kid claim.
 Attach accepted resource effect, actual changed bytes, key/claim hypothesis and denial control.
+
+### Executed local regression
+
+`node test/opencode-skill-fixtures.cjs` executes the offline Node recipe from this
+file plus loopback HTTP checks: valid HS256, signature-byte rejection, unsigned
+fixture access vs strict denial, audience denial, soft-login 200 and padding-bit alias.
+The report binds these observations to this file's SHA256.
+This is a deterministic protocol fixture, not proof that an agent follows every step.
+JWKS/x5u, asymmetric-key confusion, expiry leeway and real deployments remain unvalidated.
 
 ## Done
 

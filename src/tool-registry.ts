@@ -69,7 +69,7 @@ const MAX_SCAN = 20000;
  */
 function isExecutable(name: string, stat: fs.Stats): boolean {
   if (process.platform !== "win32") return Boolean(stat.mode & 0o111);
-  return /\.(?:exe|com|bat|cmd|ps1)$/i.test(name) || !/\.[A-Za-z0-9]+$/.test(name);
+  return /\.(?:exe|com|bat|cmd|ps1|py|sh|bash|js|mjs|cjs|ts|rb|pl)$/i.test(name) || !/\.[A-Za-z0-9]+$/.test(name);
 }
 /** A file whose header can describe it. Binaries are not read. */
 const SCRIPT_HEADER = /\.(?:py|sh|bash|js|mjs|cjs|ts|rb|pl|ps1)$/i;

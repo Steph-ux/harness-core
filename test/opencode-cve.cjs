@@ -7,6 +7,9 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const childProcess = require("node:child_process");
+const { mock } = require("node:test");
+const { syncBuiltinESMExports } = require("node:module");
 const { makeContext, loadPlugin, unloadPlugins } = require("./opencode-fixture.cjs");
 
 const CORE = path.resolve(__dirname, "..");
@@ -57,12 +60,45 @@ module.exports = async ({ assert, jiti }) => {
   assert.equal(categorizeTech("Jenkins 2.401"), "service", "jenkins is a service");
   assert.equal(categorizeTech("Cisco IOS 15.1"), "service", "cisco is a service");
 
-  // searchsploit is on this Kali system: a known query returns results.
-  const ssResult = querySearchsploit("apache", "2.4.49");
-  assert.equal(ssResult.results[0]?.source, "searchsploit", "searchsploit results carry their source");
-  if (ssResult.results.length > 0) {
-    assert.match(ssResult.results[0].id, /^EDB-/, "searchsploit ids start with EDB-");
-    assert.ok(typeof ssResult.results[0].summary === "string", "searchsploit results have a summary");
+  // Test the adapter deterministically, without assuming a Kali host/database.
+  const execution = mock.method(childProcess, "execFileSync", (binary, argv, options) => {
+    assert.equal(binary, "searchsploit");
+    assert.deepEqual(argv, ["-j", "apache", "2.4.49"]);
+    assert.equal(options.timeout, 15000);
+    assert.equal(options.maxBuffer, 2 * 1024 * 1024);
+    return JSON.stringify({
+      RESULTS_EXPLOIT: [{
+        Title: "Synthetic test entry",
+        "EDB-ID": "123456",
+        Path: "/synthetic/entry.txt",
+        Codes: "CVE-2024-0001;not-a-cve",
+      }],
+    });
+  });
+  syncBuiltinESMExports();
+  try {
+    const ssResult = querySearchsploit("apache", "2.4.49");
+    assert.equal(ssResult.results[0]?.source, "searchsploit");
+    assert.equal(ssResult.results[0].id, "EDB-123456");
+    assert.equal(ssResult.results[0].summary, "Synthetic test entry");
+    assert.deepEqual(ssResult.results[0].aliases, ["CVE-2024-0001"]);
+    execution.mock.mockImplementation(() => JSON.stringify({ RESULTS_EXPLOIT: [] }));
+    assert.deepEqual(querySearchsploit("apache", "2.4.49"), { results: [] });
+    execution.mock.mockImplementation(() => {
+      const error = new Error("spawnSync searchsploit ENOENT");
+      error.code = "ENOENT";
+      throw error;
+    });
+    assert.deepEqual(querySearchsploit("apache", "2.4.49"), {
+      results: [], error: "searchsploit not installed",
+    });
+    execution.mock.mockImplementation(() => "invalid json");
+    const malformed = querySearchsploit("apache", "2.4.49");
+    assert.deepEqual(malformed.results, []);
+    assert.ok(malformed.error, "malformed output is not a clean empty lookup");
+  } finally {
+    execution.mock.restore();
+    syncBuiltinESMExports();
   }
 
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "harness-cve-"));
