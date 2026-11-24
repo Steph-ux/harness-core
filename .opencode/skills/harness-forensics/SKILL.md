@@ -61,6 +61,40 @@ must not show the same marker. Same PID/name on the clean image rejects the clai
 
 Chain to `harness-secret-scan` or `harness-ghidra` only for a **named** file already extracted, not the whole image.
 
+### Parser pick
+
+| Format | Tool | Missing |
+|---|---|---|
+| pcap | tshark | not-tested |
+| memory | vol3 + known ISF | not-tested |
+| disk | fls/icat read-only | not-tested |
+| EVTX | EvtxECmd | not-tested |
+
+```
+cyber_process argv=["sha256sum","<artifact>"]
+cyber_process argv=["tshark","-r","<pcap>","-q","-z","io,phs"]
+```
+
+One claim per observation (connection, process, path). Clean fixture or outside time window is the negative control. Do not execute the sample. Hash mismatch vs intake → stop.
+
+### Stop
+
+Live acquire without approval, RW mount, "run it in a VM".
+
+### Evidence ids
+
+Hash, parser line, clean-twin control, `cyber_source` artifact.
+
+### Reproduction recipe
+
+Hash must match intake before any parser. One parser, one question, quoted tool line. Clean fixture or outside window must not show the same marker. Filename is not execution. Redact PII the claim does not need. Chain to ghidra/secret-scan only for a named extracted file. Do not mount RW. Do not execute. If the hash diverges from intake, stop — wrong object.
+
+A DNS name in a pcap is not C2 until a second source agrees. A process name without the tool line is a hypothesis.
+
+Intake hash, parser, control: three ids. Missing parser → `not-tested`, not a guessed timeline.
+
+Do not carve the whole disk "in case". One path or one flow per finding.
+
 ## Done
 
 Evidence holds the hash and the parser output. No claim without a tool-returned line. An unparsed format stays `not-tested`.

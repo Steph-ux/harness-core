@@ -52,6 +52,24 @@ baseline, the mutated request, the negative control, and the postcondition read.
 If persistence or impact cannot be demonstrated, classify it as a candidate and
 leave the logic CVE unconfirmed.
 
+### Transition edges (one per attempt)
+
+skip | replay | reverse | cross-tenant | stale version | duplicate submit
+
+```
+cyber_process argv=["curl","-sS","-D","-","-X","POST","--data-binary","@mut.json","<url>"]
+```
+
+Persist via GET/ledger/receipt. Race: two requests ~50ms + one final read — not a load test. Money capped at 1 XOF / 0.01. Unique reference each try. Server ignore/recompute is the negative control.
+
+### Stop
+
+Real beneficiary, external payment, customer record, reusing `referenceId`.
+
+### Evidence ids
+
+Baseline step, mutated submit, independent read, control. `cyber_finding` after `harness-vuln-triage`. Capture linked to the final read if UI.
+
 ## Done
 
 Each logic CVE cites the baseline flow, the single-field mutation, and the later read that proves persistence. No finding from the submit response alone; no finding without the control.

@@ -52,6 +52,30 @@ One hop per pass. A second hop is a new method load with a new foothold name. SO
 
 Unexpected VLAN, credential prompt for a non-test identity, unnamed host, or a tool that writes (psexec, wmiexec) without a named authorization.
 
+### Service rows
+
+| Service | Unauth | Lowest-priv |
+|---|---|---|
+| HTTP | curl no cookie | test cookie |
+| SMB | anonymous | test user list |
+| LDAP | anonymous bind fail | test bind |
+| SSH | BatchMode fail | test key |
+
+```
+cyber_process argv=["nmap","-sV","--top-ports","1000","<approved-host>","-oN","<evidence-dir>/nmap.txt"]
+cyber_process argv=["curl","-sS","-D","-","http://<approved-host>/"]
+```
+
+Closed port and unreachable approved address are extra controls. One hop. Second hop = new foothold name.
+
+### Stop
+
+Internet-wide naabu, psexec without named auth, unnamed host, non-test identity.
+
+### Evidence ids
+
+Inventory, scan, unauth, auth. Scan alone is not a `cyber_finding`.
+
 ## Done
 
 Evidence holds bounded scans and two observations per claimed service (unauth + auth). A pivot is a finding only after the second host's evidence.

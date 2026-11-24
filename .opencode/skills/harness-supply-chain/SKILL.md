@@ -51,6 +51,35 @@ A vulnerable pin that no code imports stays a **candidate**. Do not open `harnes
 
 Transitive vs direct: say which. A GHSA without a matching version is not a finding.
 
+### Ecosystem budget (one lookup each)
+
+| Eco | Pin file | Lookup |
+|---|---|---|
+| npm | package-lock.json | cyber_cve / osv-scanner |
+| PyPI | poetry.lock / pip freeze | cyber_cve |
+| Go | go.sum | cyber_cve |
+| Debian | dpkg list | cyber_cve |
+| Maven | pom lock | cyber_cve |
+
+```
+cyber_process argv=["sha256sum","<lockfile>"]
+cyber_process argv=["trivy","fs","--scanners","vuln","<dir>"]
+```
+
+Range without a lockfile is `not-tested`. Do not `npm install` to grow a tree. Unflagged pin or absent name is the negative control. Transitive vs direct: say which. Reachability is `harness-source-deep`, not this pass.
+
+### Stop
+
+Installing the dep, write to a production registry, reporting a GHSA that does not match the pinned version.
+
+### Evidence ids
+
+Lockfile hash, one lookup per eco, unflagged-pin control, `affected-by` only after lookup.
+
+### Reproduction recipe
+
+Hash the pin file before parse. Lookup the exact version. Unflagged pin or absent name is the negative control. Do not install. Reachability is another method. GHSA without matching pin is not a finding.
+
 ## Done
 
 Each reported dependency has a pin, a lookup, and a control. An unscanned ecosystem stays `not-tested`. The lockfile hash is in evidence.

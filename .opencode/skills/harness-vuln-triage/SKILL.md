@@ -52,6 +52,29 @@ Scanner severity, HTTP 200, response time, WAF 403, reflected canary without exe
 
 The reproduction observation must be after the original claim observation. Reusing the scanner's request id is not a fresh repro.
 
+### Classification table
+
+| Class | Body/state | Control | Action |
+|---|---|---|---|
+| confirmed | claimed effect | differs | cyber_finding |
+| candidate | signal | missing | no finding |
+| false positive | explained | matches noise | close |
+| not-tested | blocked | n/a | name the gap |
+
+```
+cyber_process argv=["curl","-sS","-D","-","-H","X-Request-Id: <fresh>","<approved-url>"]
+```
+
+Reproduction after the original claim. Capture linked to repro if visual. `contains` is the field, not `200`.
+
+### Stop
+
+Promoting nuclei severity, timing-only, reusing scanner id as repro.
+
+### Evidence ids
+
+Original, named negative control, fresh reproduction.
+
 ## Done
 
 Ledger is a finding (three citations) or an explicit candidate with the missing control named.

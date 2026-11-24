@@ -59,6 +59,29 @@ cyber_process argv=["binwalk","-e","-M","<nand.bin>"]
 
 No write-back, no glitcher on a live fleet.
 
+### No-dump path
+
+If there is no image in evidence and no written approval for a sacrificial board, the method is `not-tested`. Do not desolder production.
+
+```
+cyber_process argv=["sha256sum","<nand.bin>"]
+cyber_process argv=["file","<nand.bin>"]
+```
+
+Blank/erased dump listed by the operator is the negative control. Same `$1$` hash as a public eval board is not this customer's device.
+
+### Stop
+
+Iron on production, reflash, glitcher on a live fleet, claiming a phone extract without dump hash.
+
+### Evidence ids
+
+Dump hash, parse, blank-dump control, chunk not the whole NAND.
+
+### Reproduction recipe
+
+No dump and no sacrificial approval → `not-tested`. Hash first. Parse read-only. Blank dump must not yield the same keys. Do not flash back. Production phone only with written approval + that hash.
+
 ## Done
 
 Evidence holds dump hash, parse listing, control. No iron, no reflash.

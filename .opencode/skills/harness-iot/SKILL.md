@@ -59,6 +59,28 @@ An interface **not** in scope, or a closed port on the same device, must not be 
 
 Hardcoded key in firmware: the finding is the **key material in the image**, not a claim you authenticated to the live fleet.
 
+### Unpack then one live probe
+
+```
+cyber_process argv=["sha256sum","<firmware.bin>"]
+cyber_process argv=["binwalk","-e","-M","<firmware.bin>"]
+cyber_process argv=["nmap","-sV","-Pn","-p","<port>","<approved-host>"]
+```
+
+Native blob → `harness-ghidra`. Secret string → `harness-secret-scan`. Lockfile → `harness-supply-chain`. Radio → `harness-wireless`. One banner/TLS/HTTP/MQTT/SNMP named OID. Closed/out-of-scope iface is the negative control. Version ≠ CVE until lookup.
+
+### Stop
+
+Jamming, deauth, firmware write, UART brute, live RCE, default-password spray on a fleet.
+
+### Evidence ids
+
+Firmware hash, unpack or interface, out-of-scope iface control, source chunk.
+
+### Reproduction recipe
+
+Hash firmware first. Unpack read-only. One live probe if an iface is named. Closed/out-of-scope iface is the control. Banner version waits for `cyber_cve`. No radio in this method.
+
 ## Done
 
 Evidence holds the firmware hash and the interface or unpack result. An unparsed format stays `not-tested`. No live exploit, no radio disruption.

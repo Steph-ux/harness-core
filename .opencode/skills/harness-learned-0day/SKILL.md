@@ -52,6 +52,28 @@ Strip host, URL, IP, email, hash, token from the proposed fact. If `cyber_method
 
 Two sessions, confidence ≥ 0.75. A lesson without positive and negative observations stays a candidate.
 
+### Session budget
+
+| Item | Max |
+|---|---|
+| abstract facts | 1 |
+| reusable skill | 1 per two sessions |
+| host/URL/IP in text | 0 |
+
+```
+cyber_process argv=["true"]
+```
+
+Use `cyber_lessons pending` then operator once before `run`. Evidence = semgrep + taint/endpoints + lab/persistence. Leakage scan before `cyber_method promote`. This method does not create a `cyber_finding` from a scanner; it capitalizes confirmed evidence. Negative control: lesson without both pos/neg observations stays candidate.
+
+### Stop
+
+Promoting with a hostname, skipping operator on lessons run, manufacturing validation.
+
+### Evidence ids
+
+Hunter artefacts already recorded, lesson outcome, memory list check.
+
 ## Done
 
 One hunter session yields at most one abstract fact and, every second success, one reusable skill. Raw target data, hostnames, and secrets are never preserved.

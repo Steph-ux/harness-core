@@ -59,6 +59,42 @@ cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <low>","-X
 
 Peer-tenant id swap → `harness-idor`. Restore every write.
 
+### Function vs object vs field
+
+| Level | Swap | Proof |
+|---|---|---|
+| object | id | harness-idor |
+| function | admin path | 200 + re-read |
+| field | role/ownerId | GET shows change |
+
+```
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <high>","<url>"]
+cyber_process argv=["curl","-sS","-D","-","-H","Authorization: Bearer <low>","<url>"]
+cyber_process argv=["curl","-sS","-D","-","<url>"]
+```
+
+Unauth is the negative control. Restore writes. OpenAPI chunk as source.
+
+### Stop
+
+Real customer, destructive DELETE, third identity, JWT role as sole proof.
+
+### Evidence ids
+
+Privileged, low-priv, unauth, re-read if write. `contains` is the field/marker.
+
+### Reproduction recipe
+
+Same method+path+body, only the credential changes. Persist via GET, not PUT 200. Restore the marker. Login HTML 200 is the negative control, not access. JWT role text is not enforcement. Mass assignment is one field then restore. Peer-tenant id swap is `harness-idor`. Admin function 200 for low-priv is BFLA.
+
+Generic 200 envelopes, stale caches and empty results stay controls. Privilege outside the two approved identities is out of this method.
+
+OpenAPI chunk is the source. Capture only if linked to the re-read observation.
+
+Low-priv 403 on an admin function is the expected control, not a failed test.
+
+Two identities only. No "temporary admin".
+
 ## Done
 
 Finding cites three observations + source chunk. A different 200 page is not a finding.

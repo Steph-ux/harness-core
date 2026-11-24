@@ -53,6 +53,35 @@ Takeover / dangling NS is a **hypothesis** until current DNS plus an independent
 - second NS or dnsx confirmation
 - refused/wrong-zone observation as negative control
 
+### Query budget
+
+| Query | Max |
+|---|---|
+| dnsx inventory | 1 |
+| AXFR per approved NS | 1, +time=5 +tries=1 |
+| wrong-zone on same NS | 1 control |
+| non-delegated NS | 1 control |
+| brute | 0 this method |
+
+```
+cyber_process argv=["dnsx","-silent","-a","-aaaa","-cname","-mx","-txt","-ns","-caa","-resp","-l","<zone-file>"]
+cyber_process argv=["dig","AXFR","<zone>","@<approved-ns>","+time=5","+tries=1"]
+```
+
+REFUSED/timeout = negative control, not a finding. Names from AXFR stay unprobed until scope filter. Takeover → second method.
+
+### Stop
+
+Changing DNS, querying off-apex, treating AXFR refuse as vuln.
+
+### Evidence ids
+
+Inventory, each AXFR, refuse/wrong-zone control, source chunk if transfer succeeded.
+
+### Reproduction recipe
+
+One AXFR per approved NS, 5s, one retry. REFUSED is a control. Success = records returned, then scope-filter before any probe. Wrong-zone on the same NS must not return the in-scope zone.
+
 ## Done
 
 Every approved NS has one recorded AXFR result. Only a transfer that returns records is a misconfiguration.

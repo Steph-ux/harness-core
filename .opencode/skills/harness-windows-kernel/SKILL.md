@@ -58,6 +58,25 @@ cyber_process argv=["sha256sum","<driver.sys>"]
 
 BYOVD on the operator's host is a method violation.
 
+### Lab sequence
+
+1. Snapshot. 2. Hash sys. 3. Ghidra dispatch `0x...`. 4. One documented IOCTL, benign buffer. 5. Restore.
+
+```
+cyber_process argv=["sha256sum","<driver.sys>"]
+cyber_process argv=["ioctl-probe","--device","<device>","--code","<ioctl>","--in","<benign.bin>"]
+```
+
+Missing probe binary → static only, runtime `not-tested`. One BSOD then stop. Undocumented IOCTL or truncated buffer is the negative control.
+
+### Stop
+
+Production, BYOVD on the operator PC, IOCTL spray, public exploit vs live estate.
+
+### Evidence ids
+
+Hash, dispatch, one runtime or not-tested, truncated-buffer control, decompile chunk. SYSTEM claims need lab token proof.
+
 ## Done
 
 Evidence holds driver hash, dispatch map, at most one runtime IOCTL, snapshot restore note. Production not touched.
