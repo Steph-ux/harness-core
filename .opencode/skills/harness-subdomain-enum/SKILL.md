@@ -1,53 +1,110 @@
 ---
 name: harness-subdomain-enum
-description: "Enumerate subdomains of an approved domain with the installed passive inventory (BBOT, Amass, subfinder, dnsx, ct-logs) and keep out-of-scope names out of the ledger."
+description: "Passive subdomain enum of an approved apex: three sources, merge, dnsx re-resolve, CT cross-check; no brute; one-source names stay candidates."
 ---
 
 # Subdomain — passive-only, dedup + re-resolve
 
-Source: `performing-subdomain-enumeration-with-subfinder` (2024: overlaps via `candidates.txt`).
+Source: BBOT, Amass, subfinder, dnsx. Brute is out of this pass.
 
 ## Gate
 
-Approved scope must include the apex and its subdomains, otherwise stop. Every command goes through `cyber_process` with `argv`. `BBOT --no-deps`. No `dnsbrute`/`dnsbrute_mutations`/`naabu`/`ffuf` in this pass.
+Approved scope must include the apex. Every command goes through `cyber_process` with `argv`. Do not build a shell string. `BBOT --no-deps`. No `dnsbrute`, `naabu`, `ffuf` here. Do not probe names absent from the apex.
 
 ## Steps
 
-1. Three passive sources, each its own observation:
-```text
-bbot -t <apex> -p subdomain-enum -rf passive -em dnsbrute dnsbrute_mutations --no-deps -y --json -o <evidence-dir>
-amass enum -d <apex> -passive -o <evidence-dir>/amass.txt
-subfinder -d <apex> -all -o <evidence-dir>/subfinder.txt
+### 1. Three passive sources
+
+Each its own observation:
+
 ```
-2. Merge → `candidates.txt` (unique, only `*.apex` parent kept; rest = out-of-scope, blacklisted, not requested).
-3. Re-resolve the kept names:
-```text
-dnsx -l <evidence-dir>/candidates.txt -resp -o <evidence-dir>/dnsx.json
+cyber_process argv=["bbot","-t","<apex>","-p","subdomain-enum","-rf","passive","-em","dnsbrute","dnsbrute_mutations","--no-deps","-y","--json","-o","<evidence-dir>"]
+cyber_process argv=["amass","enum","-d","<apex>","-passive","-o","<evidence-dir>/amass.txt"]
+cyber_process argv=["subfinder","-d","<apex>","-all","-o","<evidence-dir>/subfinder.txt"]
 ```
-Only `dnsx`-resolved names advance. Unresolved = stays candidate.
 
-4. Cross-check with CT already collected by `harness-attack-surface` A / `harness-ct-logs` (including `Mes-outils/01-enumeration/ct-union.py --only-uniq`). A name seen in CT but absent from `dnsx` is not live — not an asset.
-5. One observation per tool + one for `candidates.txt` + one for `dnsx.json`. Two independent passive sources must agree before calling a name confirmed.
+Missing tool → `not-tested` for that source, continue with the others.
 
-### Candidate states
+### 2. Merge
 
-Store each name as `candidate`, `in-scope`, `resolved`, `live`, or `not-tested`,
-with source and reason. Normalize trailing dots, wildcard labels, IDN/punycode
-and case before deduplication. A CNAME to a provider is a pivot lead only; do
-not register or claim the provider resource.
+Unique, only `*.apex`. Rest = out-of-scope. Normalize trailing dots, IDN/punycode, case. Observation for `candidates.txt`.
 
-### Negative controls and limits
+### 3. Re-resolve
 
-Retain an out-of-scope name, an NXDOMAIN name and a name seen in only one source
-as controls. Do not brute-force, resolve arbitrary CT names, or probe names
-absent from the approved apex. A passive hit is never proof of an active host.
+```
+cyber_process argv=["dnsx","-l","<evidence-dir>/candidates.txt","-resp","-o","<evidence-dir>/dnsx.json"]
+```
 
-### Finding contract
+Only dnsx-resolved names advance. NXDOMAIN stays candidate.
 
-Subdomain enumeration does not create a `cyber_finding`. A takeover, exposure
-or vulnerable service claim requires the live observation and controls from the
-owning DNS, web or triage method.
+### 4. CT cross-check
+
+Names in CT (`harness-ct-logs`) but absent from dnsx are **not live**. Do not register a dangling CNAME.
+
+### 5. Negative control
+
+Keep: one out-of-scope name, one NXDOMAIN, one name seen in only one source. Two independent passive sources must agree before `confirmed`.
+
+### 6. Finding contract
+
+This method does **not** create `cyber_finding`. Takeover/exposure → DNS/web/triage with live obs. A CNAME to a cloud provider is a pivot lead, not ownership.
+
+### Name states
+
+| State | Meaning |
+|---|---|
+| candidate | seen in ≥1 passive source |
+| in-scope | under approved apex after normalize |
+| resolved | dnsx answered |
+| live | httpx/tls later, not this method |
+| not-tested | tool missing or brute forbidden |
+
+Two sources must agree before `confirmed`. A CT-only name is not live.
+
+### Merge rules
+
+Trailing dots, IDN/punycode, case fold before unique. Only `*.apex`. CNAME to a cloud provider is a pivot lead, not ownership — do not register it.
+
+Missing bbot/amass/subfinder → `not-tested` for that source, continue. Two remaining sources can still confirm.
+
+```
+cyber_process argv=["dnsx","-l","<evidence-dir>/candidates.txt","-resp","-o","<evidence-dir>/dnsx.json"]
+```
+
+This method does not file `cyber_finding`. Takeover/exposure needs live obs from DNS/web/triage.
+
+### Stop
+
+dnsbrute, naabu, ffuf, probing off-apex, treating CT-only as live.
+
+### Evidence ids
+
+Each passive tool, candidates.txt, dnsx. Out-of-scope, NXDOMAIN, one-source names kept as controls.
+
+### Reproduction recipe
+
+Three passive sources, dnsx, two-source confirm. No brute. Not a finding method.
+
+## Verification scenarios
+
+Preserve per-source provenance before de-duplication.
+Use a label-boundary suffix check, not a substring match, for the approved apex.
+DNS resolution is an active verification phase even when discovery is passive.
+
+| Scenario | Evidence compared | Expected classification |
+|---|---|---|
+| Two tools reuse the same CT record | underlying source fingerprint | not independent corroboration |
+| Name ends in `example.test.evil.test` | parsed DNS labels | out-of-scope |
+| Random approved lab name also resolves | wildcard response and candidate response | wildcard ambiguity |
+| Name returns SERVFAIL | resolver and response code | indeterminate, not NXDOMAIN |
+| CNAME points outside the apex | owner name and target | retain link, no automatic permission to probe target |
+
+Mark a confirmed candidate independently from DNS-resolved and HTTP-live states.
+Check Amass/BBOT CLI version before invoking version-dependent passive flags.
+The dnsx examples emit text unless JSON output is explicitly selected and validated.
+Keep the actual output format in the artifact name and parser contract.
+Inventory completeness depends on available sources; tool absence is a coverage gap.
 
 ## Done
 
-Subdomain list cites the three tool observations + `dnsx.json`. One-source or non-apex names stay candidates.
+Subdomain list cites three tool observations + dnsx. One-source or non-apex names stay candidates.

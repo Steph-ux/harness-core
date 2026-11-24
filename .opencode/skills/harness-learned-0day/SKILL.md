@@ -46,6 +46,68 @@ This method does not promote a scanner result into a `cyber_finding`. It only
 capitalizes already confirmed evidence into an abstract lesson; the original
 project finding and its observations remain the source of truth.
 
+### Leakage scan before promote
+
+Strip host, URL, IP, email, hash, token from the proposed fact. If `cyber_method promote` would refuse identifiers, fix the text — do not file a `cyber_finding` from the lesson itself.
+
+Two sessions, confidence ≥ 0.75. A lesson without positive and negative observations stays a candidate.
+
+### Session budget
+
+| Item | Max |
+|---|---|
+| abstract facts | 1 |
+| reusable skill | 1 per two sessions |
+| host/URL/IP in text | 0 |
+
+```
+cyber_process argv=["sha256sum","<evidence-dir>/taint-inventory.json"]
+```
+
+Use `cyber_lessons pending` then operator once before `run`. Evidence = semgrep + taint/endpoints + lab/persistence. Leakage scan before `cyber_method promote`. This method does not create a `cyber_finding` from a scanner; it capitalizes confirmed evidence. Negative control: lesson without both pos/neg observations stays candidate.
+
+### Stop
+
+Promoting with a hostname, skipping operator on lessons run, manufacturing validation.
+
+### Evidence ids
+
+Hunter artefacts already recorded, lesson outcome, memory list check.
+
+### Promote gate
+
+`cyber_method promote` refuses host/URL/IP/email/hash/token. Fix the text. Two sessions, ≥0.75. Lesson without pos+neg observations stays candidate.
+
+```
+cyber_process argv=["sha256sum","<evidence-dir>/lab-reproduction.json"]
+```
+
+`cyber_lessons pending` then operator once before `run`. This method does not turn a scanner into a `cyber_finding`.
+
+### Stop
+
+Hostname in the fact, skipping operator, manufacturing validation.
+
+## Verification scenarios
+
+Hashing artifacts identifies inputs; it does not validate a reusable method.
+Reuse existing observations rather than generating placeholder successes.
+Inspect current tool schemas for lesson/session arguments before invoking extraction.
+
+| Scenario | Store observation | Expected outcome |
+|---|---|---|
+| One successful session proposes a reusable method | one distinct supporting session | remains candidate |
+| Same evidence id is repeated under two labels | evidence provenance | not independent support |
+| Two sessions include reproduction and different-output control | method status and computed confidence | eligible only if store gates pass |
+| Proposed global text contains a target URL | rejected promotion reason | negative control for leakage guard |
+| Local fact is valid but source was later invalidated | source status and lesson review | revise or deprecate, not silent reuse |
+
+Store the precondition, observation, failure mode and boundary of applicability.
+A lesson about a known defect is not evidence of a novel vulnerability or CVE assignment.
+Verify status through `cyber_method list`, not merely the proposal acknowledgement.
+Keep project evidence local when promoting an identifier-free global procedure.
+Report extraction failures and rejected reasons rather than fabricating validation markers.
+
 ## Done
 
 One hunter session yields at most one abstract fact and, every second success, one reusable skill. Raw target data, hostnames, and secrets are never preserved.

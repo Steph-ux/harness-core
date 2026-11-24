@@ -1,47 +1,105 @@
 ---
 name: harness-network-pivot
-description: "Pivot from an approved foothold using bounded port/service discovery and safe lateral checks without destructive actions."
+description: "From an approved foothold: inventory, bounded scan of the named segment, unauth then lowest-priv probe per in-scope service; one hop; no Internet-wide brute."
 ---
 
-# Network pivot
+# Network pivot — one hop, two probes per service
 
-Source: `performing-internal-network-enumeration`, `pivoting-techniques`.
+Source: internal enum. The foothold is named; RFC1918 of a stranger is not.
 
 ## Gate
 
-An approved foothold or VPN/jump host must be named in the scope. Every command goes through `cyber_process` with `argv`. Do not build a shell string. No brute across the whole Internet; stay inside the engagement `blacklist` / `boundaries`. Brute (naabu/nmap/ffuf) only when the scope explicitly allows it. Dumps and exploitation follow the permanent authorizations (`dump + CVE` sauf DoS/DDoS/availability).
+Approved foothold or VPN/jump in scope. Every command goes through `cyber_process` with `argv`. Do not build a shell string. Brute only if the scope says so. No dump/exploit beyond authorizations. No DoS. Stop on unnamed host or unexpected segmentation.
 
 ## Steps
 
-1. Inventory: from the foothold, list interfaces, routes, and DNS names already in evidence. Record one observation for the inventory command.
-2. Bounded discovery inside the approved segment only:
+### 1. Inventory
 
-```text
-naabu -host <segment-or-approved-host> -top-ports 1000 -o <evidence-dir>/naabu.txt
-nmap -sV --top-ports 1000 <approved-host> -oN <evidence-dir>/nmap.txt
+Interfaces, routes, DNS already in evidence — one observation from the foothold.
+
+### 2. Bounded discovery
+
+Approved segment only:
+
+```
+cyber_process argv=["naabu","-host","<segment-or-host>","-top-ports","1000","-o","<evidence-dir>/naabu.txt"]
+cyber_process argv=["nmap","-sV","--top-ports","1000","<approved-host>","-oN","<evidence-dir>/nmap.txt"]
 ```
 
-Or via BBOT when the foothold can reach the apex: `bbot -t <apex> -rf passive --no-deps -y --json -o <evidence-dir>` — passive first.
+Passive first (`bbot -rf passive`) when possible. No `-p-` of a whole customer 10/8.
 
-3. Repeat each discovered service once without a credential (or with the lowest-privilege credential already in scope). A 401/403 or `connection refused` is the negative control.
-4. One credentialed probe per service (smb, ldap, http, ssh) with the approved identity. Record the status and banner; do not spray.
-5. One lateral move only when the scope allows it (e.g. `smbclient`, `ldapsearch`, or `ssh` with the approved key). Record the source and destination observations; a successful move is a candidate until `harness-vuln-triage` confirms persistence and `cyber_capture` attests the session (linked to its observation id).
+### 3. Unauth probe
 
-Every finding is `cyber_finding` with its `evidence` observation ids, `sources` chunk ids (via `cyber_source`), and `checks`. No finding from a scan alone.
+Each **in-scope** service once without a credential. `401`/`403`/`refused` = negative control, not a finding.
 
-### Pivot graph
+### 4. Lowest-priv probe
 
-Represent the foothold, interface, route, destination, service, identity and
-result as entities and relations. Expand one hop at a time within the approved
-CIDR/host list. An open port is a candidate; prove access with the lowest-
-privilege credential and a harmless read-only query.
+Same service, approved identity (`smbclient`, `ldapsearch`, `curl`, `ssh -o BatchMode=yes`). Record banner/status. Do not spray. Do not use a non-test identity.
 
-### Controls and stopping rules
+### 5. One lateral hop if allowed
 
-Use an unreachable approved address, a closed port and an unauthenticated
-service response as controls. Stop on unexpected segmentation, a credential
-prompt for a non-test identity, a destructive command, or an unnamed host.
+Source + destination observations. Candidate until `harness-vuln-triage`. Desktop session → `cyber_capture` linked to that obs. Entities: foothold → route → host → service → identity.
+
+### 6. Finding contract
+
+`cyber_finding` with unauth + auth obs, source chunks. No finding from a scan alone. Unreachable approved address and closed port are extra controls.
+
+### Hop budget
+
+One hop per pass. A second hop is a new method load with a new foothold name. SOCKS/`proxychains` only if the jump host is the approved foothold. Internet-wide `naabu` is a method violation.
+
+### Stop
+
+Unexpected VLAN, credential prompt for a non-test identity, unnamed host, or a tool that writes (psexec, wmiexec) without a named authorization.
+
+### Service rows
+
+| Service | Unauth | Lowest-priv |
+|---|---|---|
+| HTTP | curl no cookie | test cookie |
+| SMB | anonymous | test user list |
+| LDAP | anonymous bind fail | test bind |
+| SSH | BatchMode fail | test key |
+
+```
+cyber_process argv=["nmap","-sV","--top-ports","1000","<approved-host>","-oN","<evidence-dir>/nmap.txt"]
+cyber_process argv=["curl","-sS","-D","-","http://<approved-host>/"]
+```
+
+Closed port and unreachable approved address are extra controls. One hop. Second hop = new foothold name.
+
+### Stop
+
+Internet-wide naabu, psexec without named auth, unnamed host, non-test identity.
+
+### Evidence ids
+
+Inventory, scan, unauth, auth. Scan alone is not a `cyber_finding`.
+
+### Reproduction recipe
+
+Bounded scan, unauth then lowest-priv, one hop. Closed port is a control.
+
+## Verification scenarios
+
+Record source host, source address, tunnel endpoint and destination for every probe.
+Confirm whether the scanner uses TCP connect, raw SYN or another transport.
+SOCKS wrappers do not automatically carry raw sockets, UDP or remote DNS.
+
+| Scenario | Observation | Expected classification |
+|---|---|---|
+| Operator workstation reaches a destination directly | local route and socket | no proof of a foothold pivot |
+| Named foothold reaches the approved synthetic service | source and destination connection logs | pivot reachability supported |
+| Adjacent approved service refuses the same connection | answered refusal | network negative control |
+| Proxy resolves a hostname locally instead of remotely | DNS and tunnel logs | topology assumption invalid |
+| SSH BatchMode succeeds using an unintended agent key | key fingerprint and identity | contaminated auth probe |
+
+Use explicit test identities and suppress ambient credentials for unauthenticated checks.
+An unreachable address is inconclusive, not proof that segmentation enforcement works.
+Reachability is not lateral code execution, and code execution is not privilege escalation.
+Attach source attribution, target identity, transport and actual denial evidence.
+Keep the next-hop network untested until it has a separate scope decision.
 
 ## Done
 
-The evidence directory holds the bounded scan outputs and the two observations per service (unauth + auth). A pivot is only a finding after the second host's evidence.
+Evidence holds bounded scans and two observations per claimed service (unauth + auth). A pivot is a finding only after the second host's evidence.

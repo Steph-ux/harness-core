@@ -1,46 +1,106 @@
 ---
 name: harness-maigret
-description: "Correlate one approved username with Maigret or Sherlock, using a bounded site set and a second source before calling a profile confirmed."
+description: "Bounded Maigret/Sherlock on one approved username: top-sites only, classify 200 vs profile, second attribute, unused-username control. Never permute or contact."
 ---
 
 # Maigret+Sherlock — bounded, two-source
 
-Source: Maigret 0.6.6, Sherlock 0.16.2 (top-sites 100 then expand, 2025).
+Source: Maigret, Sherlock. First pass is top-sites 100. A login page is not a profile.
 
 ## Gate
 
-Every command goes through `cyber_process` with `argv`. Do not build a shell string.
-Username in approved scope. No `--permute/--all-sites/--enrich/--with-domains` first pass.
+Every command goes through `cyber_process` with `argv`. Do not build a shell string. Username in approved scope. No `--permute`, `--all-sites`, `--enrich`, `--with-domains` on the first pass. Do not contact accounts, do not bypass rate limits, do not scrape DMs.
 
 ## Steps
 
-1. `cyber_process` `argv`:
-```text
-maigret <username> --no-autoupdate --no-recursion --top-sites 100 --timeout 15 -n 20 -J simple -fo <evidence-dir>
-sherlock <username> --timeout 15 --print-found --output <evidence-dir>/sherlock.txt
+### 1. Bounded scan
+
 ```
-Each own observation.
+cyber_process argv=["maigret","<username>","--no-autoupdate","--no-recursion","--top-sites","100","--timeout","15","-n","20","-J","simple","-fo","<evidence-dir>"]
+cyber_process argv=["sherlock","<username>","--timeout","15","--print-found","--output","<evidence-dir>/sherlock.txt"]
+```
 
-2. Site claim = candidate. Record URL + `200` + marker (profile is searched username, not generic search page). `cyber_source` JSON/HTML chunk.
-3. Confirm via second independent `osint-deep` source: same username + `email/name/photo` hash. One hit not confirmation.
-4. Extracted emails/usernames stay leads — each new identifier needs its own scope before second run.
-5. `cyber_finding` only with two observations (Maigret/Sherlock + second source) + source chunk. Unconfirmed = candidate.
+Each own observation. Missing binary → `not-tested`.
 
-### Identity confidence
+### 2. Classify each URL
 
-Classify each result as unavailable, claimed, found, or confirmed. Check the
-final URL, HTTP body marker, profile title and account creation clues; a 200
-status or generic login page is not a profile. Correlate a second attribute only
-after the username result and keep each discovered username/email separately
-scoped.
+unavailable / claimed / found / confirmed.
 
-### Controls and privacy
+A **found** profile needs: final URL after redirects, HTTP body marker, profile title. The searched username must be the **account**, not a search hit. Generic `/login` 200 = claimed at most.
 
-Use a known-unused username and a near-match as negative controls. Do not
-permute names, enrich profiles, contact accounts, bypass rate limits, or
-collect private content. Store URLs and public result markers, not scraped
-private messages, tokens or unnecessary personal data.
+`cyber_source` JSON/HTML for found URLs only.
+
+### 3. Second independent attribute
+
+Same username + email, public name, or photo hash from `harness-email-osint` / `harness-breach-osint`. One site hit is not confirmation. Extra usernames discovered here are **new scope items**.
+
+### 4. Negative control
+
+A **known-unused** username (operator-listed) and a **near-match** must not produce the same found-set. Record both. If the unused name "exists" on the same 40 sites, the tool is matching search pages — not profiles.
+
+### 5. Finding contract
+
+`cyber_finding` only with Maigret/Sherlock observation + second source + source chunk + unused-username control. Store URLs and public markers. No tokens, no private messages.
+
+Expand to more sites only in a **second** pass after the operator approves, still without permute.
+
+### Result classes
+
+| Class | Meaning |
+|---|---|
+| unavailable | timeout / 5xx |
+| claimed | 200 login/search page |
+| found | username is the account in title/body |
+| confirmed | found + second attribute |
+
+```
+cyber_process argv=["maigret","<username>","--no-autoupdate","--no-recursion","--top-sites","100","--timeout","15","-n","20","-J","simple","-fo","<evidence-dir>"]
+```
+
+Unused-username control must not share the same found-set.
+
+### Second pass
+
+More sites only after operator approval, still no `--permute`. Extra usernames found here are new scope items, not automatic follow-ups.
+
+```
+cyber_process argv=["sherlock","<username>","--timeout","15","--print-found","--output","<evidence-dir>/sherlock.txt"]
+```
+
+A 200 login page is `claimed`, not `found`. Unused-username negative control required. No DMs, no rate-limit bypass.
+
+### Stop
+
+Permute, all-sites first pass, contacting accounts, storing tokens.
+
+### Evidence ids
+
+Maigret and/or Sherlock, second attribute, unused-username control, HTML/JSON chunk for found URLs only.
+
+### Reproduction recipe
+
+Top-sites only. 200 login is claimed not found. Unused-username control.
+
+## Verification scenarios
+
+Check installed CLI help and the selected site list before a bounded scan.
+Sherlock is not bounded by Maigret's top-sites flag; restrict its sites independently.
+Use approved fixture usernames for the near-match and unused-name controls.
+
+| Scenario | Evidence compared | Expected classification |
+|---|---|---|
+| Profile URL redirects to a generic signup page | redirect chain and body | not a found profile |
+| Site returns the same soft-404 for every username | known-unused twin | reject detector hit |
+| Two people share a username on different sites | independent attributes | identity unresolved |
+| Avatar is a stock image or public template | provenance | weak correlation only |
+| CAPTCHA/rate limit hides the page | tool status and response | unavailable, not account absence |
+
+Keep exact username case when a provider treats it as significant.
+Record final URL, tested site definition version and profile-specific marker.
+Do not expand discovered aliases without a new scope decision.
+Public account existence is inventory, not automatically a security vulnerability.
+Attach the correlation basis and controls without private messages or account contact.
 
 ## Done
 
-Evidence holds Maigret JSON + Sherlock text. Confirmed cites two observations + chunk.
+Evidence holds Maigret JSON and/or Sherlock text. Confirmed cites two observations + chunk + control.

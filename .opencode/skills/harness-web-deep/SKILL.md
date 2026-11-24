@@ -1,54 +1,110 @@
 ---
 name: harness-web-deep
-description: "Test SSRF, SSTI, XXE, deserialization, prototype pollution, and race conditions with single-field mutations and out-of-band controls."
+description: "Test SSRF, SSTI, XXE, deser, prototype pollution, race, upload, websocket, cache poison with one field per mutation, OOB or differential proof, and a benign control."
 ---
 
-# Web deep — one field, one payload, OOB-verified
+# Web deep — one field, one payload, OOB or differential
 
-Source: `testing-for-server-side-vulnerabilities`, `testing-for-race-conditions`, `testing-for-prototype-pollution` (2024: IMDSv2 SSRF, `__proto__`→RCE via `ejs`).
+Source: SSRF IMDSv2, SSTI, XXE, deser, race, upload, websocket, cache. One class per pass if time is short.
 
 ## Gate
 
-Approved `host+method+injection point` only (param/header/JSON field/XML node in scope). Every command `cyber_process` `argv`. One mutation per request. → `harness-vuln-triage` before `cyber_finding`.
+Approved `host+method+injection point` only. Every command `cyber_process` `argv`. One mutation per request. No full file read, no destructive delay, no shell. → `harness-vuln-triage` before `cyber_finding`.
 
 ## Steps
 
-1. Baseline: same request with original value → positive control.
-2. One payload, one request (OOB per-attempt token you control or `httpx` listener in evidence):
-   - SSRF: `http://127.0.0.1/` then `http://169.254.169.254/latest/meta-data/` (IMDSv2: `PUT /latest/api/token` first). Success = OOB hit or `127.0.0.1` banner, not `200` alone.
-   - SSTI: `{{7*7}}`→`49`, then `${7*7}` (SPEL/Jinja), `{{'a'*5}}`→`aaaaa`. One engine each.
-   - XXE: `<!ENTITY x SYSTEM "file:///etc/hostname">`+`&x;`. Marker in response, never full file.
-   - Deser: `{"__type":"java.lang.Runtime"}` sleep(2) Canary; measure `diff-control --seuil-ms`.
-   - Pollution: `{"__proto__":{"polluted":"1"}}` then `GET` polluted object (read-back proof, not `POST 200`).
-   - Race: two identical state-changing requests parallel (~50ms apart) + final `GET` double effect.
-3. Record each as own observation. WAF block (`WAF_SIGNS` `_lib/net.py`) / `5xx` is not confirmation — measure duration.
-4. Repro once with fresh OOB token / `request-id`. Control (original value) no hit = negative control.
-5. `cyber_finding` with baseline+payload+OOB listener+repro `evidence`, tainted chunk `sources`, `checks` payload:reproduction, baseline:positive, control:negative + OOB `contains`. Hash any marker.
+### 1. Baseline
 
-### Payload discipline
+Same request, original value. Positive control.
 
-Classify the injection point first: URL, header, JSON, form, XML, template,
-deserializer or state transition. Use one harmless marker and one transport per
-attempt. Prefer a controlled callback or local listener; never read sensitive
-files, query cloud metadata beyond the minimum approved marker, spawn a shell,
-or use a destructive delay. A WAF page, timeout, 5xx, reflected string or
-parser error is a lead until the intended server-side effect is observed.
+```
+cyber_process argv=["curl","-sS","-D","-","--data-binary","@orig.json","<url>"]
+```
 
-### Negative controls and replay
+### 2. Classify the point
 
-Replay the original value and a syntactically invalid value as separate
-controls. For SSRF, a non-routable or approved external control must not create
-the same callback; for SSTI/XXE/deserialization the literal marker must remain
-literal; for pollution the clean object must lack the property. Reproduce once
-with a new correlation id and stop after the bounded proof.
+URL, header, JSON, form, XML, template, deserializer, or state transition. One harmless marker.
 
-### Proof contract
+### 3. One payload for the chosen class
 
-The evidence chain contains the baseline, mutated request, callback or
-read-back, and reproduction. Record callback timestamps and correlation ids,
-not arbitrary response data. Map the confirmed sink and impact; static payload
-acceptance without execution remains `not-tested` or candidate.
+- SSRF: `http://127.0.0.1/` then metadata **only if cloud is in scope**; OOB token you control. Success = OOB or banner, not `200`.
+- SSTI: `{{7*7}}`→`49`, then one other engine. One engine each.
+- XXE: entity to a **marker file** you own, never `/etc/shadow`.
+- Deser: sleep canary; duration vs control (`diff-control`).
+- Pollution: `__proto__` then **read-back** of polluted object.
+- Race: two state-changing requests ~50ms apart + final GET.
+- Upload / websocket / cache: use the dedicated skill if loaded; else one probe and `not-tested` for the rest.
+
+WAF/`5xx` is not confirmation — measure duration.
+
+### 4. Negative controls
+
+Original value: no OOB/no 49. Syntactically invalid payload: no hit. Out-of-scope host: not queried.
+
+### 5. Finding contract
+
+`cyber_finding` with baseline, payload, OOB or differential, original-value control, source chunk. Hash markers. File-upload/websocket/cache details stay in their skills when those are the claim.
+
+### Class matrix (one row per pass)
+
+| Class | Benign marker | Success | Control |
+|---|---|---|---|
+| SSRF | OOB URL you own | callback or 127 banner | original URL, no callback |
+| SSTI | `{{7*7}}` | `49` in body | literal text `7*7` stays text |
+| XXE | entity to your marker | marker in response | DTD disabled / no marker |
+| Deser | sleep canary | delay > control median | original blob, no delay |
+| Pollution | `__proto__.x=1` | read-back `x` | `{}` without proto |
+| Race | two POSTs ~50ms | double state on GET | serial POSTs, single state |
+
+Untested rows stay `not-tested` with the missing observation named.
+
+### Argv examples (never a shell string)
+
+```
+cyber_process argv=["curl","-sS","-D","-","-H","Content-Type: application/json","--data-binary","@ssrf.json","<url>"]
+cyber_process argv=["curl","-sS","-D","-","--data","q={{7*7}}","<url>"]
+```
+
+OOB listener is its own observation. Correlation id in the callback path.
+
+### WAF
+
+A block page is data. Record status, body hash, duration. Do not rotate five payloads in one observation. One encoding mutation per attempt (HTML entity, double URL, uncommon tag) then stop or open `harness-headers`. File-upload, websocket and cache-poison claims belong in their dedicated skills when that is the finding.
+
+### Evidence ids
+
+Baseline, payload, OOB or differential, original-value control. Correlation id in the callback. One class per finding.
+
+### Reproduction recipe
+
+One class per pass. OOB or differential. Original-value control. WAF block is data.
+
+## Verification scenarios
+
+Choose the branch from the observed parser or source-to-sink path, not the error text.
+Use a lab fixture when a control would otherwise require touching an unrelated host.
+A second valid arithmetic expression is corroboration, not a negative control.
+
+| Scenario | Observation required | Expected result |
+|---|---|---|
+| SSTI marker produces 49 and a second expression produces 56 | same rendering sink | engine evaluation supported |
+| Plain `7*7` input returns plain `7*7` | identical route and identity | SSTI negative control |
+| SSRF payload creates a correlated server callback | OOB log plus request id | server request supported |
+| Callback arrives from the testing browser | callback source attribution | not server-side proof |
+| Prototype field appears only on the submitted object | independent clean-object read | no global prototype proof |
+| Serial duplicate is idempotent but concurrent lab requests double-credit | authoritative ledger | race candidate |
+
+Use inert XML or a DTD-disabled lab build as the XXE negative control.
+An XML parser error alone does not establish external entity resolution.
+For deserialization require an attributable effect or a bounded lab differential.
+Do not promote a single timeout into RCE.
+
+### Finding packet
+
+Attach input context, exact mutation, effect observation and matching branch control.
+Mark upload, cache, WebSocket and deserialization subtests not-tested until their methods run.
+Scope non-execution is not a substitute for an observed negative control.
 
 ## Done
 
-Each flaw cites baseline, payload, OOB listener. `200`/`500` alone never finding.
+Each class cites baseline, one payload, proof (OOB or persistence), and a control. Reflected canary alone is a lead.

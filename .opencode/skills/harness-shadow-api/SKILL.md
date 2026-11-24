@@ -1,48 +1,112 @@
 ---
 name: harness-shadow-api
-description: "Identify an API route that is absent from the documented contract but present in collected client traffic or responses."
+description: "Diff documented OpenAPI/GraphQL against observed traffic; HEAD/GET one in-scope shadow candidate; invalid-sibling control; 200 is existence not impact."
 ---
 
 # Shadow API — doc vs observed, one live probe
 
-Source: `detecting-shadow-api-endpoints` (2024: OpenAPI diff + client crawl).
+Source: OpenAPI, HAR, crawl. Stale archive URLs are not shadows.
 
 ## Gate
 
-Every command goes through `cyber_process` with `argv`. Do not build a shell string. Search evidence already collected: `openapi.json`/`swagger.json`, `endpoints.json` from `harness-source-deep`, `katana -jc`/`hakrawler`/`cariddi`/`paramspider`/`arjun`/`gf`, `waymore`/`gau`, HAR, BBOT URL events. Wordlist brute (`ffuf`/`gobuster`/`dirsearch`) only when the engagement explicitly allows content discovery and never outside the approved boundaries.
+Every command goes through `cyber_process` with `argv`. Do not build a shell string. Use collected evidence first. Wordlist brute only if the engagement allows content discovery, never off-host. Do not POST/PUT/DELETE merely to prove a route exists.
 
 ## Steps
 
-1. List documented routes from the contract (`openapi.json` / GraphQL schema / vendor doc) — `cyber_source` that file. Normalize `method + path template + host` into `documented.txt`.
-2. Extract observed routes from the same evidence that `harness-attack-surface` E already produced, plus `gf` + `arjun` on live hosts in scope → `observed.txt`.
-3. Diff: `observed − documented` on the same `host` = shadow candidates. A route on an out-of-scope host is not a shadow — note it as out-of-scope.
-4. One live probe per shadow candidate when `host + method` are approved (`cyber_process` `argv`, e.g. `curl -s -o /tmp/out -w "%{http_code}" https://host/path`). Record the `code + body + hdrs` observation.
-5. `404` = not a shadow. `200` = needs `harness-vuln-triage` (is the body a real resource or an error page with `200`? — `harness-skill-gate.md` rule 7). One shadow → one `cyber_finding` with `evidence` = contract observation + observed-list observation + live-probe observation, `sources` = contract chunk + crawl chunk, `checks` = documented-absence:positive-control, live-200:reproduction.
+### 1. Documented set
 
-### Normalization matrix
+`cyber_source` `openapi.json` / GraphQL schema / vendor doc. Match
+`method + path template + host`: uppercase the method, lowercase the host,
+and preserve path case/encoding unless the server's equivalence is documented.
 
-Normalize method, scheme, host, path casing, trailing slash, percent encoding,
-query keys, version prefix and GraphQL operation name before diffing. Keep
-authentication and content type in the record. A route is shadow only when the
-observed and documented hosts are the same and the difference survives
-normalization; a stale archive, a redirect, an asset path, or a framework
-health route is not enough.
+### 2. Observed set
 
-### Safe probe and negative control
+Attack-surface URLs, katana/HAR/BBOT, same host. Keep auth and content-type on the record.
 
-Use `HEAD` or a harmless `GET` first, then one approved method/body only when
-the scope names it. Compare the shadow response with a known-invalid sibling
-path and the documented equivalent. Record status, content type, body hash,
-redirect target and authentication requirement. Never mutate state merely to
-prove that an undocumented route exists.
+### 3. Diff
 
-### Proof contract
+`observed − documented` on the **same host** = candidates. Other host = out of scope, not shadow. Health/static asset paths are not enough.
 
-The result distinguishes route existence, undocumented exposure and actual
-impact. Only the first two can be reported from a bounded probe; authorization,
-data exposure and state changes require their own method (`harness-access-control`,
-`harness-idor` or `harness-business-logic`) and separate observations.
+### 4. One live probe
+
+HEAD or harmless GET:
+
+```
+cyber_process argv=["curl","-sS","--head","<approved-url>"]
+```
+
+Record status, content-type, body hash, redirect, auth requirement. `404` = not a shadow. `200` → `harness-vuln-triage` (resource vs error page).
+
+Negative control: known-invalid sibling path on the same host (`/this-route-does-not-exist-<id>`).
+
+### 5. Finding contract
+
+One shadow → one `cyber_finding`: contract obs + observed-list + live probe + documented-absence + sibling 404. Impact (IDOR, data, state) is `harness-idor` / `harness-access-control` / `harness-business-logic` with new observations.
+
+## Proof contract
+
+A shadow finding needs: (1) documented host+method+path template, (2) observed equivalent that survives normalization, (3) live HEAD/GET on the approved URL, (4) sibling 404 or documented-absence control. A crawl hit without a live probe stays a candidate. Authorization impact is a different method.
+
+### Diff rules
+
+Normalize method/host and documented base path; retain raw path and GraphQL operation. Same approved host only.
+
+```
+cyber_process argv=["curl","-sS","--head","<approved-url>"]
+```
+
+| Result | Meaning |
+|---|---|
+| 404 | not a shadow |
+| 200 error page | triage |
+| 200 resource | shadow existence; impact is another method |
+
+No POST/PUT/DELETE merely to prove the route.
+
+### Auth and type
+
+Keep authentication and content-type on the observed record. Health/static assets are not shadows. Stale archive URLs are not shadows.
+
+Impact (IDOR, data, state) is `harness-idor` / `harness-access-control` / `harness-business-logic` with **new** observations. This method only proves undocumented existence.
+
+### Stop
+
+Wordlist off-host, POST/PUT/DELETE merely to prove the route, claiming BOLA from a HEAD 200.
+
+### Evidence ids
+
+Contract source, observed-list, live HEAD/GET, sibling 404 negative control.
+
+### Reproduction recipe
+
+Doc vs observed, HEAD/GET, sibling 404. Impact is another method.
+
+## Verification scenarios
+
+Keep raw paths and normalized paths so normalization decisions can be inspected.
+Do not lowercase case-sensitive route paths or decode encoded slashes speculatively.
+Match against the OpenAPI `servers` base path and path-parameter templates.
+
+| Scenario | Comparison | Expected result |
+|---|---|---|
+| `/users/123` matches `/users/{id}` | same method and server | documented route |
+| Old archive route now returns 404 | current response | historical candidate only |
+| Every path returns the same SPA shell | candidate vs invalid sibling | not proof of API existence |
+| HEAD returns 405 | explicit `Allow` header | method unsupported; approved GET may still exist |
+| Candidate returns JSON while sibling returns a distinct 404 | same identity and content negotiation | route existence supported |
+
+Use curl `--head` rather than `-X HEAD` when only headers are needed.
+Use an engagement response file instead of hard-coded Windows `NUL` on Linux.
+A 401 or 403 can establish a protected route exists without proving unauthorized access.
+API version drift is a documentation finding only if the contract is intended complete.
+
+### Finding packet
+
+Attach spec revision, observed client revision, normalized key and raw requests.
+Attach invalid-sibling response, content type and body fingerprint.
+Classify undocumented existence separately from data exposure or authorization bypass.
+Do not turn an observation-only inventory discrepancy into an exploit finding.
 
 ## Done
 
-Each shadow route cites the contract and the traffic/crawl observation plus the live probe. A 200 alone is never a finding.
+Each shadow cites contract, crawl, live probe, sibling control. A 200 alone is never a finding.

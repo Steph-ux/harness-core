@@ -1,6 +1,12 @@
 const fs = require("node:fs"),
   path = require("node:path"),
   assert = require("node:assert/strict");
+const { auditSkills } = require("./skill-audit.cjs");
+const catalogue = auditSkills(path.resolve(__dirname, "../.opencode/skills"));
+assert.deepEqual(catalogue.errors, [], catalogue.errors.join("\n"));
+console.log(
+  `Validated pentest catalogue: total=${catalogue.total} lt80=${catalogue.lt80} ge100=${catalogue.ge100}`,
+);
 for (const name of ["capitaliser-cyber", "rapports-cyber"]) {
   const dir = path.resolve(__dirname, "../.opencode/skills", name),
     body = fs

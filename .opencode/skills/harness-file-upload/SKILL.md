@@ -66,7 +66,7 @@ If the server validates file content:
 
 If the server validates then deletes:
 1. Upload a file that would be rejected
-2. Send rapid GET requests to the uploaded path during the validation window
+2. Use at most two locally coordinated approved requests during the validation window
 3. If the file is accessible before deletion, record as race condition
 
 ### 7. Execution verification
@@ -74,7 +74,9 @@ If the server validates then deletes:
 For any uploaded file that passes validation:
 - Request the file directly via its URL
 - Check Content-Type in response (is it `text/html`? `application/x-httpd-php`?)
-- If the file contains a canary (`<?php echo "CANARY";`), check if the canary appears executed in the response
+- Compare retrieved bytes with the full uploaded source. A literal `CANARY` inside
+  `<?php echo "CANARY";` is not proof that PHP evaluated it. Require a distinct
+  evaluated result plus a non-evaluating twin before claiming execution.
 - For XSS via SVG/HTML: check if script executes (OOB callback)
 
 ### 8. Negative controls
@@ -85,8 +87,47 @@ For any uploaded file that passes validation:
 
 ## Proof contract
 
-A finding needs: (1) identified upload validation mechanism, (2) bypass that passes validation, (3) proof of execution or storage in exploitable location, (4) reproduction, (5) three negative controls. An uploaded file alone is a lead — execution or exploitable storage is a finding.
+A finding needs the validation mechanism, observed boundary violation, fresh reproduction,
+legitimate positive control and actually executed rejecting/non-executing negative controls.
+Storage alone is a lead unless a documented storage or isolation boundary is violated.
+
+### Reproduction recipe
+
+One file, one content-type, stored vs executed. Benign file control.
+
+## Verification scenarios
+
+Use unique inert files and synthetic storage paths; traversal targets stay in a disposable lab.
+Bound upload-race checks to two approved requests, not an open-ended GET loop.
+Content-Type suggests interpretation; it does not prove server-side execution.
+
+```
+cyber_process argv=["curl","-sS","-D","-","-F","file=@<fixture-file>;type=image/png","<approved-upload-url>"]
+```
+
+| Scenario | Evidence compared | Expected classification |
+|---|---|---|
+| Text is renamed to an executable extension but served as download | headers and retrieved bytes | no execution proof |
+| Static source contains the literal canary string | full retrieved body | reflection, not evaluated output |
+| Synthetic server-side canary evaluates to a distinct runtime marker | response and non-evaluating twin | bounded execution candidate |
+| Other test user can retrieve a private upload | owner baseline and cross-user read | object isolation candidate |
+| Oversized fixture is rejected at documented limit | size and rejection body | negative control |
+
+Record filename, bytes hash, multipart metadata, stored id and retrieval origin separately.
+Use sandboxed browser execution only for approved active-content cases.
+Do not overwrite real index files or request real `/etc/passwd` as upload proof.
+Track every uploaded test object through the mission's later approved cleanup.
+
+### Executed local regression
+
+`node test/opencode-skill-fixtures.cjs` executes the multipart curl recipe from
+this file against a loopback service. It checks legitimate upload/read, cross-owner
+disclosure on an intentionally leaky fixture, denial on its strict twin and bad magic.
+A source file served unchanged as `application/x-httpd-php` is a false execution signal.
+The fixture stores bytes in memory; it never interprets PHP or any uploaded code.
+PHP/browser execution, archive extraction, traversal and race behavior remain unvalidated.
 
 ## Done
 
-Each finding cites the validation bypass, the execution proof (served with executable Content-Type, or script executed), and the negative controls.
+Each finding cites the actual validation/storage boundary or observed execution,
+not executable Content-Type alone, plus positive and negative controls.

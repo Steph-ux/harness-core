@@ -3207,7 +3207,7 @@ export default {
           if (input.action === "run") {
             const argv = commandArguments(input.argv);
             // Auto-install: if the binary is absent and in the catalog, install it.
-            const binary = argv[0].includes("/") ? undefined : argv[0];
+            const binary = argv[0].includes("/") || argv[0].includes("\\") ? undefined : argv[0];
             if (binary) {
               // The lookup is the core's, so it answers the same way on every
               // platform (`which` does not exist on Windows).

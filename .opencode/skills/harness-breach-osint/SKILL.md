@@ -46,6 +46,68 @@ near-match are negative controls for parser/correlation errors. Redact personal
 data in sources and retain only the minimum evidence needed for the approved
 finding.
 
+### Confirmation
+
+Two independent sources before "this email is in that breach". One dump hit is a candidate.
+
+```
+cyber_process argv=["h8mail","-t","<email>","-o","<evidence-dir>/h8mail.json"]
+```
+
+Missing tool → `not-tested`. Do not log in with a found password unless the operator approved a one-shot identity check (`harness-secret-scan`). Unused-address control must not share the same dump rows.
+
+### Pairing
+
+One dump hit is a candidate. Confirmed = dump + (public name | approved username | second corpus).
+
+Do not log in with a found password unless the operator approved a one-shot identity check. Then stop. Unused-address negative control must not share the same rows.
+
+### Stop
+
+Credential stuffing, contacting the person, paying a dump site without approval, putting a plaintext password in the ledger.
+
+### Evidence ids
+
+Breach tool, second source, unused-address control, optional auth. Hash any token.
+
+One dump row without a second attribute stays a candidate, never a confirmed owner.
+
+Do not paste a full dump into the finding. Redact to the minimum row.
+
+### Auth
+
+One-shot identity check only if the operator approved. Then stop. No stuffing. Unused-address negative control must not share dump rows.
+
+```
+cyber_process argv=["h8mail","-t","<email>","-o","<evidence-dir>/h8mail.json"]
+```
+
+Missing tool → `not-tested`. Do not paste a full dump. Hash tokens.
+
+### Stop
+
+Contacting the person, paying a dump without approval, plaintext password in the ledger.
+
+## Verification scenarios
+
+Use synthetic breach-search fixtures for near-match and parser controls.
+Holehe tests registration, and theHarvester collects public references; neither is a breach corpus.
+Two providers mirroring one dump are one underlying source.
+
+| Scenario | Evidence compared | Expected classification |
+|---|---|---|
+| Exact scoped address appears in a named corpus | source, breach date and exact match | exposure candidate |
+| Address differs by one character | raw source identifiers | reject identity match |
+| Two mirrors return the same row | underlying corpus fingerprint | duplicate provenance |
+| Authorized fixture address has no corpus row | successful query with zero matches | negative control |
+| Provider returns auth/quota error | error body and status | unavailable, not “no breach” |
+
+A public profile may corroborate identity but cannot prove breach membership.
+Record collection date separately from incident date and data publication date.
+Do not describe an old disclosed password as currently valid without a separate check.
+The finding packet distinguishes historical exposure, identity correlation and live validity.
+Retain only redacted rows and restricted artifact fingerprints, not bulk credential data.
+
 ## Done
 
 Evidence holds the breach outputs (JSON/HTML). Confirmed findings cite the breach tool and a second source; tested credentials cite the auth observation.
