@@ -4,6 +4,20 @@ One entry per decision that is expensive to reverse. Each states what was
 decided, why, and what it costs. New entries go at the top.
 
 
+## 2026-11-24 — Installing a tool is an operator decision, not a launch
+
+**Decision.** `cyber_process run` never installs a binary. A missing executable
+is a failed command, recorded as such. `cyber_toolbox ensure` still exists,
+and it requires a fresh `once` operator decision before `ensureMany` runs.
+**Why.** Auto-install on spawn mixed provisioning with evidence: a timeout
+check could not even run because `which true` failed and apt/go was attempted.
+The ledger proves what executed, not what the plugin downloaded. `sudo apt-get
+install -y` is not a side effect of `nmap`.
+**Cost.** A missing tool stays missing until the operator approves `ensure`.
+The model must say it wants an install instead of hoping a spawn provisions
+the lab.
+
+
 ## 2026-11-24 — A traced command is proven by its result file, not by Linux
 
 **Decision.** `spawnTraced` runs on Windows (and elsewhere) when `argv` is

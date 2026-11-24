@@ -312,6 +312,14 @@ module.exports = async ({ assert, jiti }) => {
       sessionID: "ses_toolbox", agent: "build", messageID: "msg_toolbox",
       id: "call_toolbox", signal: new AbortController().signal, progress: () => {},
     };
+    fixture.ctx.permission = {
+      explicit: async () => "always",
+    };
+    await assert.rejects(
+      () => toolbox.execute({ action: "ensure", name: "nmap" }, context),
+      /explicit operator decision|once/,
+      "ensure does not install without a once decision",
+    );
     const savedKnowledge = process.env.HARNESS_KNOWLEDGE_DB;
     const dbPath = path.join(base, "reference.sqlite");
     const { DatabaseSync } = require("node:sqlite");

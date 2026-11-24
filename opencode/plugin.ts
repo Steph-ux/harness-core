@@ -15,7 +15,6 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { coreRoot } from "./paths";
 import {
@@ -1258,7 +1257,7 @@ export default {
     await ctx.tool.transform((editor: any) => {
       editor.add({
         name: "cyber_toolbox",
-        description: "Discover actual host/CLI/managed capabilities; ensure installs missing tools automatically; knowledge-search reads the configured reference database without making findings; propose and validate scripts, activate instantly, and roll back. Native shell permissions still apply.",
+        description: "Discover actual host/CLI/managed capabilities; ensure installs a catalogued tool only after an operator once-decision; knowledge-search reads the configured reference database without making findings; propose and validate scripts, activate instantly, and roll back. Native shell permissions still apply. Launching a command never installs one.",
         input: {
           type: "object",
           properties: {
@@ -1333,6 +1332,11 @@ export default {
               ? input.names.slice(0, 10).map(String)
               : typeof input.name === "string" ? [input.name] : [];
             if (!names.length) throw new Error("Provide name or names to ensure");
+            await assertOperatorDecision(
+              ctx,
+              context,
+              "ensure-tool:" + names.join(","),
+            );
             const results = ensureMany(names);
             for (const r of results) {
               knowledge.audit(scope, "tools.ensure", {
@@ -2464,27 +2468,7 @@ export default {
               seconds * 1000 > MAX_DEADLINE_MS
             )
               throw new Error("Invalid timeout (0..600 seconds)");
-            // Auto-install: if the binary is absent and in the catalog, install it.
-            const binary = argv[0].includes("/") || argv[0].includes("\\") ? undefined : argv[0];
-            if (binary) {
-              // The lookup is the core's, so it answers the same way on every
-              // platform (`which` does not exist on Windows).
-              const { ensure: ensureTool, isPresent } = await import(
-                path.join(coreRoot(), "src", "installable.ts")
-              );
-              if (!isPresent(binary)) {
-                const installResult = ensureTool(binary);
-                if (installResult.installed && !installResult.wasPresent) {
-                  knowledge.audit(scope, "tools.auto-installed", {
-                    sessionID: context.sessionID,
-                    name: binary,
-                    method: installResult.method,
-                  });
-                }
-                if (!installResult.installed && installResult.error)
-                  throw new Error(`${binary} is not installed and auto-install failed: ${installResult.error}`);
-              }
-            }
+
             const command = argv.map(quoteArgument).join(" ");
             await assertProcessPermission(ctx, context, command);
             context.signal?.throwIfAborted();

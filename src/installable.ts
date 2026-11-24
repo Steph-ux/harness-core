@@ -2,10 +2,11 @@
  * Catalog of installable security tools with their install commands.
  *
  * The ensure function checks whether a tool is present and installs it when
- * it is not. Install commands are non-destructive (they add, never remove)
- * and run with a timeout. The catalog is intentionally static: a dynamic
- * registry that fetches install instructions from the network is a supply
- * chain risk.
+ * it is not. The host must obtain an operator decision before calling it;
+ * a command launch never does. Install commands are non-destructive (they
+ * add, never remove) and run with a timeout. The catalog is intentionally
+ * static: a dynamic registry that fetches install instructions from the
+ * network is a supply chain risk.
  */
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";

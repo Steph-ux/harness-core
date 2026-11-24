@@ -26,6 +26,16 @@ module.exports = async ({ assert, jiti, modules, skip }) => {
   };
   try {
     assert.ok(fixture.tools.has("cyber_process"));
+    fixture.ctx.permission = { ...(fixture.ctx.permission || {}), explicit: async () => "always" };
+    await assert.rejects(
+      () =>
+        fixture.tools.get("cyber_toolbox").execute(
+          { action: "ensure", name: "nmap" },
+          context,
+        ),
+      /explicit operator decision|once/,
+      "ensure does not install without a once decision",
+    );
     let deliver;
     const oldApi = {
       permission: {},
