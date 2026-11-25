@@ -385,8 +385,8 @@ module.exports = async ({ assert, jiti }) => {
     observationCount: 10,
   });
   assert.ok(
-    staleD.some((d) => d.priority === "mandatory" && d.text.includes("STALE")),
-    "a stale hypothesis is mandatory to resolve",
+    staleD.some((d) => d.priority === "recommended" && d.text.includes("Stale")),
+    "a stale hypothesis is advisory, not mandatory",
   );
 
   const noHypD = directives({
@@ -819,11 +819,11 @@ module.exports = async ({ assert, jiti }) => {
   assert.match(untestedGate, /3 declared surface\(s\) never tested nor blocked/, "untested surfaces block the gate");
   assert.match(untestedGate, /under the 60% conclusion threshold/, "low coverage blocks the gate");
 
-  // A stale hypothesis blocks a conclusion.
+  // Stale hypotheses no longer block the gate — they are advisory.
   const staleGate = closingGate(
     mkCapsule({ untested: 0, staleHypotheses: 2, coveragePct: 100 }),
   );
-  assert.match(staleGate, /2 hypothesis\(es\) left stale/, "stale hypotheses block the gate");
+  assert.equal(staleGate, "", "stale hypotheses do not block the gate");
 
   // Fully addressed coverage with no stale hypothesis: the gate is silent.
   const resolvedGate = closingGate(

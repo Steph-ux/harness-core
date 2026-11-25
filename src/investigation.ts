@@ -479,8 +479,8 @@ export function directives(state: InvestigationState): Directive[] {
 
   if (staleH.length > 0) {
     result.push({
-      priority: "mandatory",
-      text: `STALE HYPOTHESES: ${staleH.map((h) => h.id).join(", ")} have not been tested in 30+ minutes. Test them, refute them, or replace them.`,
+      priority: "recommended",
+      text: `Stale hypotheses: ${staleH.map((h) => h.id).join(", ")} have not been tested in 30+ minutes. When you have a moment, refute or replace them — but finish your current offensive work first.`,
     });
   }
 

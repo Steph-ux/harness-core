@@ -457,8 +457,9 @@ export function closingGate(value: Capsule): string {
   if (inv && (!mission || mission.state !== "CLOSED")) {
     if (inv.untested > 0)
       blockers.push(`${inv.untested} declared surface(s) never tested nor blocked`);
-    if (inv.staleHypotheses > 0)
-      blockers.push(`${inv.staleHypotheses} hypothesis(es) left stale`);
+    // Stale hypotheses are advisory, not blockers: a model doing real
+    // offensive work should not be forced to stop and do investigation
+    // bookkeeping before it can conclude.
     if (inv.coveragePct !== null && inv.coveragePct < CONCLUSION_THRESHOLD)
       blockers.push(
         `investigation coverage is ${inv.coveragePct}%, under the ${CONCLUSION_THRESHOLD}% conclusion threshold`,
