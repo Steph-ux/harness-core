@@ -40,6 +40,8 @@ const ENUMERATE_TOOLS = new Set([
   "gobuster", "feroxbuster", "dirsearch", "ffuf", "wfuzz",
   "nikto", "arjun", "paramspider", "katana", "hakrawler",
   "source-deep", "linkfinder", "jsluice", "secretfinder",
+  "jsa", "retire", "webpack-analyzer",
+  "mitmproxy", "burp", "zap", "cariddi",
   "cyber_source", "cyber_entity",
 ]);
 
@@ -261,6 +263,28 @@ const SURFACE_VECTORS: {
       { pillar: 2, category: "CSWSH", test: "Connect from a cross-origin page — is the Origin header validated?" },
       { pillar: 2, category: "Injection", test: "Send malformed JSON/frames — does the server crash or leak errors?" },
       { pillar: 2, category: "Race Condition", test: "Send messages faster than the server processes — does ordering break state?" },
+    ],
+  },
+  {
+    pattern: /js|javascript|bundle|chunk|source|spa|react|angular|vue|next|nuxt|webpack|vite|frontend|client.?side/i,
+    vectors: [
+      { pillar: 2, category: "JS Endpoint Extraction", test: "Download JS bundles/chunks, grep for /api/, /v1/, /graphql, fetch(, axios — map the hidden API surface the UI never exposes" },
+      { pillar: 2, category: "Hardcoded Secrets", test: "Search bundles for API keys, tokens, AWS/GCP/Azure credentials, Firebase config, Stripe keys, internal hostnames" },
+      { pillar: 2, category: "Source Map Leak", test: "Check for .map files (bundle.js.map) — if present, reconstruct full original source and audit business logic" },
+      { pillar: 1, category: "Client-Side Auth", test: "Is authorization enforced only in JS (route guards, role checks in React/Vue)? Bypass by calling the API directly." },
+      { pillar: 2, category: "Dead/Debug Code", test: "Search for console.log, debugger, TODO, HACK, staging/dev URLs, feature flags with hardcoded toggles" },
+      { pillar: 4, category: "Client Trust", test: "Does the client compute prices, discounts, or permissions locally? Replay the request with tampered values — the server must re-validate." },
+    ],
+  },
+  {
+    pattern: /traffic|intercept|proxy|burp|request|response|header|cookie|cors|csp|hsts|network|http|redirect/i,
+    vectors: [
+      { pillar: 2, category: "Hidden Endpoints", test: "Capture all traffic during normal usage — find endpoints not in docs: internal APIs, debug routes, health checks, metrics" },
+      { pillar: 2, category: "Header Injection", test: "Inject X-Forwarded-For, X-Original-URL, X-Rewrite-URL to bypass IP/path restrictions" },
+      { pillar: 2, category: "Cookie Manipulation", test: "Decode session cookies (JWT, base64, serialized objects) — tamper with role/user fields, test without HttpOnly/Secure flags" },
+      { pillar: 1, category: "CORS Misconfiguration", test: "Send Origin: https://evil.com — does the server reflect it in Access-Control-Allow-Origin? Test with null origin." },
+      { pillar: 2, category: "Redirect Chain Abuse", test: "Follow all 3xx redirects manually — can open redirects chain to steal tokens via Referer or fragment?" },
+      { pillar: 4, category: "CSP Bypass", test: "If CSP allows unsafe-inline, script-src with a CDN, or missing frame-ancestors — test XSS/clickjacking through the gap" },
     ],
   },
 ];

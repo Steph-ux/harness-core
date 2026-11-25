@@ -170,6 +170,36 @@ module.exports = async function phases({ assert, jiti }) {
     "mobile surface gets Pillar 3 vectors",
   );
 
+  const jsVectors = counterLogicFor("JavaScript bundle analysis SPA React");
+  assert.ok(jsVectors.length > 0, "JS/source surface matches counter-logic vectors");
+  assert.ok(
+    jsVectors.some((v) => v.category === "JS Endpoint Extraction"),
+    "JS surface gets endpoint extraction vector",
+  );
+  assert.ok(
+    jsVectors.some((v) => v.category === "Source Map Leak"),
+    "JS surface gets source map leak vector",
+  );
+  assert.ok(
+    jsVectors.some((v) => v.category === "Hardcoded Secrets"),
+    "JS surface gets hardcoded secrets vector",
+  );
+
+  const trafficVectors = counterLogicFor("HTTP traffic interception proxy analysis");
+  assert.ok(trafficVectors.length > 0, "traffic/network surface matches vectors");
+  assert.ok(
+    trafficVectors.some((v) => v.category === "Hidden Endpoints"),
+    "traffic surface gets hidden endpoints vector",
+  );
+  assert.ok(
+    trafficVectors.some((v) => v.category === "CORS Misconfiguration"),
+    "traffic surface gets CORS vector",
+  );
+  assert.ok(
+    trafficVectors.some((v) => v.category === "Cookie Manipulation"),
+    "traffic surface gets cookie manipulation vector",
+  );
+
   const genericVectors = counterLogicFor("some unknown surface");
   assert.equal(genericVectors.length, 0, "unknown surface gets no vectors");
 
