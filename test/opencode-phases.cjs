@@ -12,6 +12,7 @@ module.exports = async function phases({ assert, jiti }) {
     detectPhase,
     transitionCheck,
     counterLogicFor,
+    counterLogicGauntlet,
     phaseDirective,
   } = jiti(path.join(CORE, "src/phases.ts"));
 
@@ -260,4 +261,94 @@ module.exports = async function phases({ assert, jiti }) {
     ["recon", "enumerate", "exploit", "post-exploit", "report"],
     "phases follow the kill chain order",
   );
+
+  // -------------------------------------------------------------------------
+  // Counter-Logic Gauntlet — permanent adversarial reasoning protocol
+  // -------------------------------------------------------------------------
+
+  // The gauntlet always returns content (never empty)
+  const gauntletRecon = counterLogicGauntlet({
+    currentPhase: "recon",
+    hasConfirmedFindings: false,
+    hasActiveHypothesis: false,
+    surfacesTested: 0,
+    surfacesTotal: 0,
+  });
+  assert.ok(gauntletRecon.length > 0, "gauntlet always produces output");
+  assert.ok(gauntletRecon.startsWith("COUNTER-LOGIC PROTOCOL"), "gauntlet starts with protocol marker");
+
+  // All 4 pillars present
+  assert.match(gauntletRecon, /PILLAR 1/, "gauntlet includes Pillar 1 (Inversion)");
+  assert.match(gauntletRecon, /PILLAR 2/, "gauntlet includes Pillar 2 (Offensive Logic)");
+  assert.match(gauntletRecon, /PILLAR 3/, "gauntlet includes Pillar 3 (Client & Mobile Entropy)");
+  assert.match(gauntletRecon, /PILLAR 4/, "gauntlet includes Pillar 4 (2nd-Order & Cobra)");
+
+  // The 4-step ritual is present
+  assert.match(gauntletRecon, /ASSUMPTION AUDIT/, "gauntlet includes Step 1");
+  assert.match(gauntletRecon, /MALICIOUS PERSONA/, "gauntlet includes Step 2");
+  assert.match(gauntletRecon, /BLAST-RADIUS TRACE/, "gauntlet includes Step 3");
+  assert.match(gauntletRecon, /HARDENING VERDICT/, "gauntlet includes Step 4");
+
+  // Quick reference checklist present
+  assert.match(gauntletRecon, /CHECKLIST/, "gauntlet includes quick reference checklist");
+  assert.match(gauntletRecon, /Can any step be skipped/, "checklist includes step-skip check");
+  assert.match(gauntletRecon, /two identical actions/, "checklist includes concurrency check");
+
+  // Key inversion concepts from the original skill
+  assert.match(gauntletRecon, /Unstated Trust/, "gauntlet includes Unstated Trust Fallacy");
+  assert.match(gauntletRecon, /Happy-Path Deception/, "gauntlet includes Happy-Path Deception");
+  assert.match(gauntletRecon, /Out-of-Order/, "gauntlet includes Out-of-Order Execution");
+  assert.match(gauntletRecon, /Infinite Resource/, "gauntlet includes Infinite Resource Illusion");
+
+  // Pillar 2 adapts to phase
+  assert.match(gauntletRecon, /recon\/enumerate/, "recon phase gets recon-specific P2");
+  const gauntletExploit = counterLogicGauntlet({
+    currentPhase: "exploit",
+    hasConfirmedFindings: false,
+    hasActiveHypothesis: true,
+    surfacesTested: 3,
+    surfacesTotal: 10,
+  });
+  assert.match(gauntletExploit, /State-Machine Skips/, "exploit phase gets state-machine P2");
+  assert.match(gauntletExploit, /TOCTOU/, "exploit phase gets TOCTOU");
+  assert.match(gauntletExploit, /Parameter Tampering/, "exploit phase gets parameter tampering");
+  assert.match(gauntletExploit, /Callback Forgery/, "exploit phase gets callback forgery");
+  assert.match(gauntletExploit, /IDOR/, "exploit phase gets IDOR nested check");
+
+  const gauntletPostExploit = counterLogicGauntlet({
+    currentPhase: "post-exploit",
+    hasConfirmedFindings: true,
+    hasActiveHypothesis: true,
+    surfacesTested: 8,
+    surfacesTotal: 10,
+  });
+  assert.match(gauntletPostExploit, /pivot/, "post-exploit phase gets pivot guidance");
+  assert.match(gauntletPostExploit, /container.*host|user.*admin/i, "post-exploit gets escalation guidance");
+
+  // Pillar 3 concepts from the original skill
+  assert.match(gauntletRecon, /Multi-Tap/, "P3 includes Rapid Multi-Tap");
+  assert.match(gauntletRecon, /Clock Manipulation/, "P3 includes Clock Manipulation");
+  assert.match(gauntletRecon, /Network Flap/, "P3 includes Network Flap");
+  assert.match(gauntletRecon, /Client-Side Auth/, "P3 includes Client-Side Auth bypass");
+
+  // Pillar 4 adapts based on confirmed findings
+  assert.match(gauntletRecon, /tester who proved you wrong/, "P4 without findings challenges complacency");
+  assert.match(gauntletPostExploit, /attack chains/, "P4 with findings pushes chaining");
+  assert.match(gauntletPostExploit, /XSS chains with CSRF/, "P4 with findings gives concrete chains");
+
+  // Personas from the original skill
+  assert.match(gauntletRecon, /Greedy Attacker/, "gauntlet includes Greedy Attacker persona");
+  assert.match(gauntletRecon, /Chaotic Environment/, "gauntlet includes Chaotic Environment persona");
+  assert.match(gauntletRecon, /Frantic User/, "gauntlet includes Frantic User persona");
+
+  // The gauntlet also works in report phase
+  const gauntletReport = counterLogicGauntlet({
+    currentPhase: "report",
+    hasConfirmedFindings: true,
+    hasActiveHypothesis: false,
+    surfacesTested: 10,
+    surfacesTotal: 10,
+  });
+  assert.ok(gauntletReport.length > 0, "gauntlet fires even in report phase");
+  assert.match(gauntletReport, /PILLAR 1/, "report phase still gets P1");
 };

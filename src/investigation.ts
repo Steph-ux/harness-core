@@ -13,7 +13,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { assertPlainPath, atomicWrite, newId, now } from "./util";
-import { phaseDirective, type PhaseInput, EXPLOIT_TOOLS_SET } from "./phases";
+import { phaseDirective, detectPhase, counterLogicGauntlet, type PhaseInput, EXPLOIT_TOOLS_SET } from "./phases";
 
 // ---------------------------------------------------------------------------
 // Hypothesis tracker
@@ -635,6 +635,29 @@ export function directives(state: InvestigationState): Directive[] {
     result.push({ priority: pd.priority, text: pd.text });
   }
 
+  // Counter-Logic Gauntlet — permanent adversarial reasoning protocol.
+  // Fires every turn, unconditionally.  It is a cognitive protocol that
+  // forces the model to invert assumptions, adopt adversarial personas,
+  // trace blast radius, and prescribe hardening on every action.
+  const phaseInput: PhaseInput = {
+    toolsUsed: state.toolsUsed ?? [],
+    observationCount: state.observationCount,
+    surfacesTotal: cov.total,
+    surfacesTested: cov.tested,
+    surfacesUntested: cov.untested,
+    surfacesInProgress: cov.inProgress,
+    confirmedFindings: confirmedH.length,
+    consecutiveExploitFailures: state.consecutiveExploitFailures ?? 0,
+  };
+  const gauntlet = counterLogicGauntlet({
+    currentPhase: detectPhase(phaseInput),
+    hasConfirmedFindings: confirmedH.length > 0,
+    hasActiveHypothesis: activeH.length > 0,
+    surfacesTested: cov.tested,
+    surfacesTotal: cov.total,
+  });
+  result.push({ priority: "mandatory", text: gauntlet });
+
   return result;
 }
 
@@ -664,7 +687,9 @@ export function addressedPct(cov: {
  */
 export function investigationBlock(ds: readonly Directive[]): string {
   if (!ds.length) return "";
-  const mandatory = ds.filter((d) => d.priority === "mandatory");
+  const isGauntlet = (d: Directive) => d.text.startsWith("COUNTER-LOGIC PROTOCOL");
+  const gauntlet = ds.filter(isGauntlet);
+  const mandatory = ds.filter((d) => d.priority === "mandatory" && !isGauntlet(d));
   const recommended = ds.filter((d) => d.priority === "recommended");
   const lines = [
     "Investigation directives. These are enforced by the harness, not suggestions.",
@@ -676,6 +701,10 @@ export function investigationBlock(ds: readonly Directive[]): string {
   if (recommended.length) {
     lines.push("");
     for (const d of recommended) lines.push(`[RECOMMENDED] ${d.text}`);
+  }
+  if (gauntlet.length) {
+    lines.push("");
+    for (const d of gauntlet) lines.push(d.text);
   }
   return lines.join("\n");
 }

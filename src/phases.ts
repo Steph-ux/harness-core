@@ -1,18 +1,21 @@
 /**
- * Offensive phase detection, transition directives, and counter-logic vectors.
+ * Offensive phase detection, transition directives, counter-logic vectors,
+ * and the Counter-Logic Gauntlet (permanent adversarial reasoning protocol).
  *
- * The phase is inferred from what the model did (tools used, surfaces state),
- * not from what it claims.  When the data says "you have enough recon, start
- * exploiting", the directive is mandatory — the model cannot choose to stay
- * in recon indefinitely.
+ * Three layers work together:
  *
- * Counter-logic vectors (Pillars 1-4) are injected as concrete test
- * suggestions when the model enters the exploit phase.  They turn the
- * abstract "test this surface" into "test step-skip on the checkout flow"
- * or "test race condition on the balance transfer".
+ * 1. **Phase detection & transitions** — inferred from tool usage, not
+ *    self-report.  Mandatory directives push the model through the kill chain.
  *
- * The 3-failure backtrack rule forces the model back to enumerate when
- * exploitation is not working — it needs more information, not more attempts.
+ * 2. **Surface vectors** — concrete attack test suggestions matched to
+ *    surface labels (auth, payment, JS, traffic, etc.).  Pillar 2 of the
+ *    Counter-Logic Protocol.
+ *
+ * 3. **The Gauntlet** — a permanent cognitive protocol (all 4 pillars +
+ *    the 4-step ritual + quick reference checklist) injected every turn to
+ *    force the model to challenge its own assumptions, invert its reasoning,
+ *    adopt adversarial personas, trace blast radius, and prescribe hardening.
+ *    This is NOT conditional — it fires on every single turn.
  */
 
 // ---------------------------------------------------------------------------
@@ -314,6 +317,123 @@ export function counterLogicFor(
     }
   }
   return unique.slice(0, limit);
+}
+
+// ---------------------------------------------------------------------------
+// Counter-Logic Gauntlet — permanent adversarial reasoning protocol
+// ---------------------------------------------------------------------------
+//
+// Faithfully integrated from the Counter-Logic Protocol skill.
+// "Invert, always invert." — Carl Jacobi
+//
+// This is NOT a list of attack vectors (those are SURFACE_VECTORS above).
+// This is a cognitive protocol that forces the model to abandon confirmation
+// bias, invert assumptions, and attack its own reasoning at every step.
+//
+// 4 Pillars: Inversion/Pre-Mortem → Offensive Logic → Client/Mobile Entropy → 2nd-Order/Cobra Effects
+// 4-Step Gauntlet: Assumption Audit → Malicious Persona → Blast-Radius Trace → Hardening Verdict
+
+export interface GauntletContext {
+  currentPhase: OffensivePhase;
+  hasConfirmedFindings: boolean;
+  hasActiveHypothesis: boolean;
+  surfacesTested: number;
+  surfacesTotal: number;
+  lastToolUsed?: string;
+}
+
+export function counterLogicGauntlet(ctx: GauntletContext): string {
+  const lines: string[] = [
+    "COUNTER-LOGIC PROTOCOL — Apply to every action, every conclusion, every tool result.",
+    '"Invert, always invert: What if we focus on what we want to avoid rather than what we want to achieve?"',
+  ];
+
+  // ── Pillar 1: Inversion & Pre-Mortem (always) ─────────────────────
+  lines.push(
+    "PILLAR 1 — INVERSION & PRE-MORTEM:",
+    "  Unstated Trust: What is assumed never null, never empty, never delayed, never hostile?",
+    "  Happy-Path Deception: Does this only work if every call succeeds in <200ms with valid HTTP 200?",
+    "  Out-of-Order: What if step 3 completes before step 2? What if the webhook arrives before the DB commits?",
+    "  Infinite Resource Illusion: What happens at 100% capacity — disk, RAM, connections, rate limits?",
+  );
+
+  // ── Pillar 2: Offensive Business Logic (phase-adapted) ────────────
+  if (ctx.currentPhase === "recon" || ctx.currentPhase === "enumerate") {
+    lines.push(
+      "PILLAR 2 — OFFENSIVE LOGIC (recon/enumerate):",
+      "  You're gathering info — are you missing the attack surface in plain sight?",
+      "  JS bundles: grep for /api/, fetch(, hardcoded keys, source maps (.map files), debug code",
+      "  Traffic: capture all requests during normal usage — find undocumented routes, debug endpoints, internal APIs",
+      "  Errors: 404 pages leak framework fingerprints, stack traces leak file paths, headers leak internal hostnames",
+      "  Cookies: decode session cookies (JWT, base64, serialized objects) — what is the server trusting the client to hold?",
+    );
+  } else if (ctx.currentPhase === "exploit") {
+    lines.push(
+      "PILLAR 2 — OFFENSIVE LOGIC (exploit):",
+      "  State-Machine Skips: Can you hit /checkout/confirm without /checkout/validate? Can CANCELLED → ACTIVE via PATCH?",
+      "  TOCTOU: Send 10 concurrent requests — does it transfer/claim/withdraw once or ten times? Is SELECT...UPDATE atomic?",
+      "  Parameter Tampering: Can quantity be -1? Can price be 0? Can items be []? Does float rounding accumulate errors?",
+      "  Callback Forgery: Does the backend trust the client's claim of payment success, or verify server-to-server?",
+      "  IDOR: Does /tenant/A/orders/999 verify order 999 belongs to tenant A, or just findById(999)?",
+    );
+  } else if (ctx.currentPhase === "post-exploit") {
+    lines.push(
+      "PILLAR 2 — OFFENSIVE LOGIC (post-exploit):",
+      "  Credentials: What secrets are in memory, disk, env, config files, .env, /proc/1/environ?",
+      "  Trust: What internal services trust this host? Can you pivot user→admin, container→host, tenant→tenant?",
+      "  Persistence: Can you establish cron, systemd, registry, or startup script persistence?",
+    );
+  } else {
+    lines.push(
+      "PILLAR 2 — OFFENSIVE LOGIC:",
+      "  Greedy Attacker: How do I duplicate value, skip paying, access competitor's data, escalate privileges?",
+      "  Every endpoint: can the step be skipped? Can the state be rolled back? Does the server re-validate what the client sends?",
+    );
+  }
+
+  // ── Pillar 3: Mobile & Client-Side Entropy (always) ───────────────
+  lines.push(
+    "PILLAR 3 — CLIENT & MOBILE ENTROPY:",
+    "  Rapid Multi-Tap: 5 taps in 100ms on submit — 5 transactions or 1? Client debounce only or server-enforced?",
+    "  Clock Manipulation: Does trial/token/paywall rely on DateTime.now()? Change device clock and check.",
+    "  Network Flap: Drop network between socket write and server response — is state consistent on reconnect?",
+    "  Back-Gesture During Mutation: Swipe back while payment/migration in progress — what happens?",
+    "  Client-Side Auth: Are route guards and role checks only in JS/Flutter? Call the API directly to find out.",
+  );
+
+  // ── Pillar 4: 2nd-Order & Cobra Effects ───────────────────────────
+  if (ctx.hasConfirmedFindings) {
+    lines.push(
+      "PILLAR 4 — 2ND-ORDER & COBRA (you have confirmed findings):",
+      "  A confirmed XSS chains with CSRF. A confirmed SSRF reaches cloud metadata. A confirmed SQLi reads files.",
+      "  A confirmed IDOR on one endpoint means the same pattern exists on every similar endpoint.",
+      "  Don't collect isolated bugs — build attack chains. What does this finding unlock?",
+      "  Cobra check: does your 'fix' for a blocked path create a worse opening elsewhere?",
+    );
+  } else {
+    lines.push(
+      "PILLAR 4 — 2ND-ORDER & COBRA:",
+      "  If you mark a surface 'clean' — did you test from every context (auth, unauth, different roles, different HTTP methods)?",
+      "  Cobra: a short timeout causes retry storms. A cache saves RAM but serves stale data. Rate-limiting by IP blocks NAT users.",
+      "  What would a tester who proved you wrong do differently?",
+    );
+  }
+
+  // ── The 4-Step Gauntlet (always) ──────────────────────────────────
+  lines.push(
+    "THE 4-STEP GAUNTLET (run on every action):",
+    "  1. ASSUMPTION AUDIT: Name your 3 strongest assumptions about this target right now.",
+    "  2. MALICIOUS PERSONA: Adopt one — The Greedy Attacker (duplicate value, skip paying, access others' data) | The Chaotic Environment (80% packet loss, 45min clock drift, disk read-only, 99% memory) | The Frantic User (double-clicking everything, hammering back, switching apps mid-save).",
+    "  3. BLAST-RADIUS TRACE: If this component fails, what downstream services, tables, views suffer collateral? Graceful degradation or full plane crash?",
+    "  4. HARDENING VERDICT: Prescribe exact defense — atomic DB constraints, idempotency keys, state-machine guards, client debounce.",
+  );
+
+  // ── Quick Reference Checklist (always) ────────────────────────────
+  lines.push(
+    "CHECKLIST: Can any step be skipped or called out of order? Can two identical actions execute concurrently and succeed twice? Are monetary/quantity values checked against <=0 and NaN? Does offline state resolve deterministically? Does a timeout trigger retry storms? Are secrets taken from request bodies instead of verified tokens? Is state clean if user navigates away mid-operation?",
+  );
+
+  return lines.join("\n");
 }
 
 // ---------------------------------------------------------------------------

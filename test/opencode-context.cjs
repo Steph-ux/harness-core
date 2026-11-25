@@ -82,7 +82,7 @@ module.exports = async ({ assert, jiti }) => {
   // The rules reach the turn, ahead of the other blocks.
   const event = makeContext(workspace).contextEvent({ sessionID: "ses_ctx" });
   await onContext(event);
-  assert.equal(event.system.length, 5, "operator, routing and capability blocks are added");
+  assert.equal(event.system.length, 6, "operator, routing, capability, and investigation blocks are added");
   assert.equal(event.system[0].text, "base prompt", "the host prompt stays first");
   assert.match(
     event.system[1].text,
@@ -99,8 +99,13 @@ module.exports = async ({ assert, jiti }) => {
     /^Harness capabilities\./,
     "the advisory capabilities follow operator rules and routing",
   );
-  assert.equal(
+  assert.match(
     event.system[4].text,
+    /COUNTER-LOGIC PROTOCOL/,
+    "the counter-logic gauntlet is always injected",
+  );
+  assert.equal(
+    event.system[5].text,
     "another block",
     "the blocks that were there are kept",
   );

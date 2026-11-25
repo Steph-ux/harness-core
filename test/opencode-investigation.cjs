@@ -326,7 +326,13 @@ module.exports = async ({ assert, jiti }) => {
     completedWithEvidence: 3,
     observationCount: 20,
   });
-  assert.equal(good.length, 0, "a progressing session gets no directive");
+  // The gauntlet fires every turn — but no OTHER directive fires when progressing.
+  const goodNonGauntlet = good.filter((d) => !d.text.startsWith("COUNTER-LOGIC PROTOCOL"));
+  assert.equal(goodNonGauntlet.length, 0, "a progressing session gets no directive besides the gauntlet");
+  assert.ok(
+    good.some((d) => d.text.startsWith("COUNTER-LOGIC PROTOCOL")),
+    "the counter-logic gauntlet fires even when progressing",
+  );
 
   // A blocked surface is a standing nudge: the blocker may no longer hold.
   const blockedNudge = directives({
@@ -988,10 +994,18 @@ module.exports = async ({ assert, jiti }) => {
     coverage: mkCov({ total: 10, tested: 8, inProgress: 2 }),
     nowMs,
   });
+  const healthyDirectives = directives(healthyAssembled);
+  const healthyNonGauntlet = healthyDirectives.filter(
+    (d) => !d.text.startsWith("COUNTER-LOGIC PROTOCOL"),
+  );
   assert.deepEqual(
-    directives(healthyAssembled),
+    healthyNonGauntlet,
     [],
-    "a healthy assembled state stays silent",
+    "a healthy assembled state stays silent (except the permanent gauntlet)",
+  );
+  assert.ok(
+    healthyDirectives.some((d) => d.text.startsWith("COUNTER-LOGIC PROTOCOL")),
+    "the gauntlet fires even on a healthy assembled state",
   );
 
   fs.rmSync(ws, { recursive: true, force: true });
