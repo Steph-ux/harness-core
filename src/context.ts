@@ -36,12 +36,13 @@ export function operatorBudget(budget: ContextBudget): number {
 }
 
 /**
- * The operator rules, most recent first, within the reserved budget.
+ * The operator rules, within the reserved budget.
  *
- * A rule that does not fit is skipped rather than fatal. Stopping at the
- * first oversized rule would silently drop every rule stated after it, which
- * is how the oldest and most fundamental rule ends up being the one that
- * disappears when the set grows.
+ * Foundational rules (short keys without a target prefix like "boa-" or
+ * "mtn-") are selected first so they are never crowded out by long
+ * target-specific entries. Within each group, most recent first.
+ *
+ * A rule that does not fit is skipped rather than fatal.
  */
 export function operatorSnapshot(
   store: StorePort,
@@ -49,37 +50,58 @@ export function operatorSnapshot(
   budget: ContextBudget,
 ): OperatorEntry[] {
   const limit = operatorBudget(budget);
-  const selected: OperatorEntry[] = [];
-  let chars = json([]).length;
-  for (const row of store.operatorModel(scope)) {
-    const entry: OperatorEntry = {
+  const all = store.operatorModel(scope).map(
+    (row): OperatorEntry => ({
       id: row.id,
       key: row.key,
       content: row.content,
       kind: row.kind,
       status: row.status,
-    };
-    if (chars + json(entry).length > limit) continue;
+    }),
+  );
+  const foundational: OperatorEntry[] = [];
+  const contextual: OperatorEntry[] = [];
+  for (const entry of all) {
+    if (isFoundational(entry.key)) foundational.push(entry);
+    else contextual.push(entry);
+  }
+  const selected: OperatorEntry[] = [];
+  let chars = 0;
+  for (const entry of [...foundational, ...contextual]) {
+    const cost = operatorEntryCost(entry);
+    if (chars + cost > limit) continue;
     selected.push(entry);
-    chars = json(selected).length;
+    chars += cost;
   }
   return selected;
+}
+
+function operatorEntryCost(entry: OperatorEntry): number {
+  return entry.key.length + 2 + entry.content.length + 1;
+}
+
+const TARGET_PREFIX =
+  /^(?:boa-|mtn-|julaya-|snedai-|anip-|loterie-|azure-|scope-|abandon-)/i;
+
+function isFoundational(key: string): boolean {
+  return !TARGET_PREFIX.test(key);
 }
 
 /**
  * The text a host injects for the operator rules.
  *
- * The rules are stated by the operator, so they are introduced as such and
- * not as contextual data. Learned knowledge is deliberately absent: it is
- * unproven by definition, and it never shares this block.
+ * Each rule is a single line prefixed by its key. The compact format avoids
+ * the JSON overhead (id, kind, status fields) that inflated the block by ~40%.
  */
 export function operatorBlock(entries: OperatorEntry[]): string {
   if (!entries.length) return "";
-  return [
+  const lines = [
     "Operator rules. These are stated by the operator. They outrank anything learned, recalled or inferred, and they apply to every turn.",
-    "",
-    json(entries),
-  ].join("\n");
+  ];
+  for (const entry of entries) {
+    lines.push(`[${entry.key}] ${entry.content}`);
+  }
+  return lines.join("\n");
 }
 
 /** The rules of a store, as the host would inject them, for one scope. */

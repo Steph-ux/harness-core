@@ -86,6 +86,9 @@ const MAX_EVIDENCE = 20;
 const MAX_OBSERVATIONS = 20;
 const MAX_OUTPUT = 600;
 
+/** How many recently completed tasks travel in the compact text. */
+const MAX_COMPLETED_IN_TEXT = 5;
+
 const identifier = (value: unknown): value is string =>
   typeof value === "string" &&
   /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/.test(value);
@@ -278,11 +281,108 @@ export function capsuleText(value: Capsule): string {
     !value.references?.length
   )
     return "";
+  return compactCapsuleText(value);
+}
+
+/**
+ * The raw JSON capsule, for hosts that consume it programmatically.
+ *
+ * Tests and the closing gate still read the full Capsule object; this is only
+ * for callers that need the wire format.
+ */
+export function capsuleJson(value: Capsule): string {
   return [
     "Continuity. This is the state of the work, not a report about it: the running step list, and the observations that close it.",
     "",
     json(value),
   ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Compact text — what the model actually sees
+// ---------------------------------------------------------------------------
+
+function taskLine(task: CapsuleTask): string {
+  const tag = task.status === "blocked" ? `blocked: ${task.reason ?? "?"}` : task.status;
+  return `  [${tag}] ${task.title.slice(0, 120)}`;
+}
+
+function observationLine(obs: CapsuleObservation): string {
+  const ok = obs.success ? "ok" : "FAIL";
+  return `  ${obs.id} ${obs.tool} ${ok}`;
+}
+
+function compactCapsuleText(value: Capsule): string {
+  const lines: string[] = [
+    "Continuity. Running state — act on open/blocked steps, not on completed ones.",
+  ];
+
+  // ---- mission (if any) ----
+  if (value.mission) {
+    const m = value.mission;
+    const stages = m.stages
+      .filter((s) => s.state !== "COMPLETED")
+      .map((s) => `${s.id}(${s.state})`)
+      .join(", ");
+    lines.push("");
+    lines.push(`Mission ${m.id} "${m.title}" [${m.state}]${stages ? ` — open: ${stages}` : ""}`);
+    if (m.closed) lines.push(`  closed: ${m.closed.reason}`);
+  }
+
+  // ---- tasks: open/blocked first, then a few recent completed ----
+  const open = value.tasks.filter((t) => t.status !== "completed");
+  const completed = value.tasks.filter((t) => t.status === "completed");
+  const recentCompleted = completed.slice(-MAX_COMPLETED_IN_TEXT);
+  const hiddenCompleted = completed.length - recentCompleted.length;
+
+  if (open.length || recentCompleted.length) {
+    lines.push("");
+    lines.push(`Steps: ${value.tasks.length} total, ${open.length} open/blocked, ${completed.length} completed`);
+    for (const t of open) lines.push(taskLine(t));
+    if (hiddenCompleted > 0)
+      lines.push(`  ... ${hiddenCompleted} earlier completed steps omitted`);
+    for (const t of recentCompleted) lines.push(taskLine(t));
+  }
+
+  // ---- observations: one line each, no output blobs ----
+  if (value.observations.length) {
+    lines.push("");
+    lines.push(`Recent observations (${value.observations.length}):`);
+    for (const obs of value.observations) lines.push(observationLine(obs));
+  }
+
+  // ---- approvals ----
+  if (value.approvals?.length) {
+    lines.push("");
+    lines.push("Waiting for operator:");
+    for (const a of value.approvals)
+      lines.push(`  ${a.id} ${a.action}: ${a.justification.slice(0, 100)}`);
+  }
+
+  // ---- processes ----
+  if (value.processes?.length) {
+    lines.push("");
+    lines.push("Owned commands:");
+    for (const p of value.processes)
+      lines.push(`  ${p.id} [${p.status}] ${p.command.slice(0, 100)}`);
+  }
+
+  // ---- references ----
+  if (value.references?.length) {
+    lines.push("");
+    lines.push("References:");
+    for (const r of value.references)
+      lines.push(`  ${r.id} [${r.kind}] hash=${r.hash}`);
+  }
+
+  // ---- investigation summary ----
+  if (value.investigation) {
+    const inv = value.investigation;
+    lines.push("");
+    lines.push(`Investigation: ${inv.coveragePct ?? 0}% coverage, ${inv.untested} untested surface(s), ${inv.staleHypotheses} stale hypothesis(es)`);
+  }
+
+  return lines.join("\n");
 }
 
 export const GATE_MARKER = "Closing gate.";

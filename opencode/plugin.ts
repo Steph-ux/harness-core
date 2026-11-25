@@ -1123,13 +1123,27 @@ export default {
                       `lessons ${sessionID}: ${outcome.facts} faits, ${outcome.skills} methodes`,
                     );
                   } catch (error) {
-                    // A failed extraction leaves a trace: a session that was
-                    // not read must not look like one that taught nothing.
                     try {
                       knowledge.audit(scope, "lessons.failed", {
                         sessionID,
                         error: String(error).slice(0, 300),
                       });
+                      // A model-not-found or provider error is permanent: mark
+                      // the session as extracted so pendingLessons stops
+                      // retrying it on every turn.
+                      if (
+                        /model.not.found|provider.*not.*configured|no model can serve/i.test(
+                          String(error),
+                        )
+                      ) {
+                        knowledge.audit(scope, "lessons.extracted", {
+                          sessionID,
+                          digest: hash(
+                            JSON.stringify({ scope, sessionID, skipped: true }),
+                          ),
+                          skipped: String(error).slice(0, 200),
+                        });
+                      }
                     } catch {
                       /* The store may be closing. */
                     }

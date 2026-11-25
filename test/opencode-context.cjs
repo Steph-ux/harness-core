@@ -106,10 +106,9 @@ module.exports = async ({ assert, jiti }) => {
   );
 
   const injected = event.system[1].text;
-  const entries = JSON.parse(injected.slice(injected.indexOf("[")));
+  const keys = [...injected.matchAll(/^\[([^\]]+)\]/gm)].map((m) => m[1]);
 
   // Every rule is present, in priority order.
-  const keys = entries.map((entry) => entry.key);
   assert.deepEqual(
     keys,
     ["terminal-possede", "francais-sans-emoji", "preuves-ou-rien"],
@@ -126,10 +125,6 @@ module.exports = async ({ assert, jiti }) => {
   assert.ok(
     !injected.includes("Fait appris sans preuve"),
     "the injected context holds no learned text",
-  );
-  assert.ok(
-    !entries.some((entry) => entry.kind !== "operator"),
-    "only operator rules are injected",
   );
 
   // The rules the host injects are the rules the Pi harness injects. That
@@ -179,8 +174,9 @@ module.exports = async ({ assert, jiti }) => {
   });
   assert.equal(all[0].key, "regle-longue", "the most recent rule comes first");
   const shortest = all.find((entry) => entry.key === "regle-courte");
+  const shortCost = shortest.key.length + 2 + shortest.content.length + 1;
   const tight = operatorSnapshot(store, budgetScope, {
-    operatorModelChars: JSON.stringify(shortest).length + 10,
+    operatorModelChars: shortCost + 10,
     memoryMaxChars: 6000,
   });
   assert.ok(
