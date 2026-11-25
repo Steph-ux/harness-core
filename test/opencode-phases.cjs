@@ -217,6 +217,132 @@ module.exports = async function phases({ assert, jiti }) {
   const limited = counterLogicFor("payment checkout cart order", 2);
   assert.ok(limited.length <= 2, "counter-logic respects the limit parameter");
 
+  // --- New surface vector patterns ---
+  const xssV = counterLogicFor("XSS cross-site scripting reflected");
+  assert.ok(xssV.length > 0, "XSS surface matches");
+  assert.ok(xssV.some((v) => v.category === "WAF Bypass"), "XSS gets WAF bypass");
+  assert.ok(xssV.some((v) => v.category === "DOM XSS"), "XSS gets DOM XSS");
+  assert.ok(xssV.some((v) => v.category === "Blind XSS"), "XSS gets blind XSS");
+
+  const sqliV = counterLogicFor("SQL injection database MySQL", 6);
+  assert.ok(sqliV.length > 0, "SQLi surface matches");
+  assert.ok(sqliV.some((v) => v.category === "Second-Order SQLi"), "SQLi gets second-order");
+  assert.ok(sqliV.some((v) => v.category === "OOB Exfiltration"), "SQLi gets OOB");
+  assert.ok(sqliV.some((v) => v.category === "NoSQL Injection"), "SQLi gets NoSQL");
+
+  const ssrfV = counterLogicFor("SSRF server-side request forgery", 6);
+  assert.ok(ssrfV.length > 0, "SSRF surface matches");
+  assert.ok(ssrfV.some((v) => v.category === "Cloud Metadata"), "SSRF gets cloud metadata");
+  assert.ok(ssrfV.some((v) => v.category === "DNS Rebinding"), "SSRF gets DNS rebinding");
+
+  const sstiV = counterLogicFor("SSTI template injection Jinja2");
+  assert.ok(sstiV.length > 0, "SSTI surface matches");
+  assert.ok(sstiV.some((v) => v.category === "Detection Polyglot"), "SSTI gets polyglot");
+
+  const xxeV = counterLogicFor("XXE XML external entity upload");
+  assert.ok(xxeV.length > 0, "XXE surface matches");
+  assert.ok(xxeV.some((v) => v.category === "Blind OOB XXE"), "XXE gets blind OOB");
+
+  const deserV = counterLogicFor("deserialization pickle ysoserial");
+  assert.ok(deserV.length > 0, "deser surface matches");
+  assert.ok(deserV.some((v) => v.category === "Java Deser"), "deser gets Java");
+  assert.ok(deserV.some((v) => v.category === "Python Pickle"), "deser gets Python pickle");
+
+  const ppV = counterLogicFor("prototype pollution __proto__ merge");
+  assert.ok(ppV.length > 0, "prototype pollution matches");
+  assert.ok(ppV.some((v) => v.category === "PP2RCE Gadget"), "PP gets RCE gadget");
+
+  const cacheV = counterLogicFor("cache poisoning request smuggling desync");
+  assert.ok(cacheV.length > 0, "cache poison surface matches");
+  assert.ok(cacheV.some((v) => v.category === "CL.TE Desync"), "cache gets CL.TE");
+
+  const credV = counterLogicFor("credential brute force password spray MFA");
+  assert.ok(credV.length > 0, "credential surface matches");
+  assert.ok(credV.some((v) => v.category === "MFA Bypass"), "credential gets MFA bypass");
+
+  const cloudV = counterLogicFor("AWS S3 bucket IAM cloud Lambda");
+  assert.ok(cloudV.length > 0, "cloud surface matches");
+  assert.ok(cloudV.some((v) => v.category === "IMDS v1 SSRF"), "cloud gets IMDS");
+  assert.ok(cloudV.some((v) => v.category === "IAM Privilege Escalation"), "cloud gets IAM privesc");
+
+  const containerV = counterLogicFor("Docker Kubernetes container pod");
+  assert.ok(containerV.length > 0, "container surface matches");
+  assert.ok(containerV.some((v) => v.category === "Docker Socket Escape"), "container gets socket escape");
+
+  const adV = counterLogicFor("Active Directory Kerberos LDAP domain controller");
+  assert.ok(adV.length > 0, "AD surface matches");
+  assert.ok(adV.some((v) => v.category === "Kerberoasting"), "AD gets Kerberoasting");
+  assert.ok(adV.some((v) => v.category === "ADCS ESC1-ESC8"), "AD gets ADCS");
+
+  const pivotV = counterLogicFor("lateral movement pivot tunnel chisel");
+  assert.ok(pivotV.length > 0, "pivot surface matches");
+  assert.ok(pivotV.some((v) => v.category === "Pass-the-Hash"), "pivot gets PtH");
+
+  const dnsV = counterLogicFor("DNS subdomain zone transfer takeover");
+  assert.ok(dnsV.length > 0, "DNS surface matches");
+  assert.ok(dnsV.some((v) => v.category === "Subdomain Takeover"), "DNS gets takeover");
+
+  const secretV = counterLogicFor("secret leak gitleaks .env credential scan");
+  assert.ok(secretV.length > 0, "secret surface matches");
+  assert.ok(secretV.some((v) => v.category === "Git History Secrets"), "secret gets git history");
+
+  const supplyV = counterLogicFor("supply chain dependency npm audit lockfile");
+  assert.ok(supplyV.length > 0, "supply chain surface matches");
+  assert.ok(supplyV.some((v) => v.category === "Dependency Confusion"), "supply gets confusion");
+
+  const llmV = counterLogicFor("LLM AI security prompt injection agent");
+  assert.ok(llmV.length > 0, "LLM surface matches");
+  assert.ok(llmV.some((v) => v.category === "Prompt Injection"), "LLM gets prompt injection");
+
+  const iotV = counterLogicFor("IoT firmware MQTT embedded device");
+  assert.ok(iotV.length > 0, "IoT surface matches");
+  assert.ok(iotV.some((v) => v.category === "Firmware Extraction"), "IoT gets firmware");
+
+  const redTeamV = counterLogicFor("red team kill chain C2 beacon persistence");
+  assert.ok(redTeamV.length > 0, "red team surface matches");
+  assert.ok(redTeamV.some((v) => v.category === "C2 Channel"), "red team gets C2");
+  assert.ok(redTeamV.some((v) => v.category === "Detection Twin"), "red team gets detection twin");
+
+  const contractV = counterLogicFor("smart contract Solidity reentrancy DeFi");
+  assert.ok(contractV.length > 0, "smart contract surface matches");
+  assert.ok(contractV.some((v) => v.category === "Flash Loan Attack"), "contract gets flash loan");
+
+  const wirelessV = counterLogicFor("wireless WiFi WPA2 deauth evil twin");
+  assert.ok(wirelessV.length > 0, "wireless surface matches");
+  assert.ok(wirelessV.some((v) => v.category === "Evil Twin"), "wireless gets evil twin");
+
+  const binaryV = counterLogicFor("binary reverse engineering Ghidra buffer overflow");
+  assert.ok(binaryV.length > 0, "binary surface matches");
+  assert.ok(binaryV.some((v) => v.category === "Buffer Overflow"), "binary gets BOF");
+
+  const thickV = counterLogicFor("thick client Electron desktop app");
+  assert.ok(thickV.length > 0, "thick client surface matches");
+  assert.ok(thickV.some((v) => v.category === "DLL Hijacking"), "thick client gets DLL hijack");
+
+  const cryptoV = counterLogicFor("TLS SSL cipher certificate crypto");
+  assert.ok(cryptoV.length > 0, "crypto/TLS surface matches");
+  assert.ok(cryptoV.some((v) => v.category === "Weak Cipher Suites"), "crypto gets weak ciphers");
+
+  const gqlV = counterLogicFor("GraphQL introspection mutation");
+  assert.ok(gqlV.length > 0, "GraphQL surface matches");
+  assert.ok(gqlV.some((v) => v.category === "Introspection Leak"), "GraphQL gets introspection");
+
+  const scadaV = counterLogicFor("SCADA ICS PLC Modbus industrial");
+  assert.ok(scadaV.length > 0, "SCADA surface matches");
+  assert.ok(scadaV.some((v) => v.category === "Unauthenticated Protocol"), "SCADA gets unauth protocol");
+
+  const voipV = counterLogicFor("VoIP SIP RTP PBX Asterisk");
+  assert.ok(voipV.length > 0, "VoIP surface matches");
+  assert.ok(voipV.some((v) => v.category === "RTP Interception"), "VoIP gets RTP intercept");
+
+  const forensicV = counterLogicFor("forensic memory dump Volatility disk image");
+  assert.ok(forensicV.length > 0, "forensic surface matches");
+  assert.ok(forensicV.some((v) => v.category === "Memory Analysis"), "forensic gets memory analysis");
+
+  const socialV = counterLogicFor("social engineering phishing pretext");
+  assert.ok(socialV.length > 0, "social engineering surface matches");
+  assert.ok(socialV.some((v) => v.category === "Phishing Simulation"), "social gets phishing sim");
+
   // -------------------------------------------------------------------------
   // Phase directive — full integration
   // -------------------------------------------------------------------------
