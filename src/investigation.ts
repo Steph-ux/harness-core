@@ -13,6 +13,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { assertPlainPath, atomicWrite, newId, now } from "./util";
+import { phaseDirective, type PhaseInput, EXPLOIT_TOOLS_SET } from "./phases";
 
 // ---------------------------------------------------------------------------
 // Hypothesis tracker
@@ -426,6 +427,8 @@ export interface InvestigationState {
   observationCount: number;
   /** Tools used in the observation window, for proactive directives. */
   toolsUsed?: readonly string[];
+  /** Consecutive failed exploit-class tool calls (for 3-failure backtrack). */
+  consecutiveExploitFailures?: number;
 }
 
 export interface Directive {
@@ -608,6 +611,28 @@ export function directives(state: InvestigationState): Directive[] {
       priority: "mandatory",
       text: `PREMATURE CONCLUSION GUARD: Coverage is only ${pct}%. Do not declare findings or write a report until at least ${CONCLUSION_THRESHOLD}% of surfaces are tested or explicitly blocked with a reason.`,
     });
+  }
+
+  // Phase-aware directive with counter-logic vectors.
+  // Uses tool usage, surface state, and confirmed findings to detect the
+  // current offensive phase and emit transition or deepening directives.
+  const pd = phaseDirective(
+    {
+      toolsUsed: state.toolsUsed ?? [],
+      observationCount: state.observationCount,
+      surfacesTotal: cov.total,
+      surfacesTested: cov.tested,
+      surfacesUntested: cov.untested,
+      surfacesInProgress: cov.inProgress,
+      confirmedFindings: confirmedH.length,
+      consecutiveExploitFailures: state.consecutiveExploitFailures ?? 0,
+    },
+    cov.surfaces
+      .filter((s) => s.state === "untested" || s.state === "in-progress")
+      .map((s) => s.label),
+  );
+  if (pd) {
+    result.push({ priority: pd.priority, text: pd.text });
   }
 
   return result;
@@ -1046,6 +1071,17 @@ export function assembleInvestigation(opts: {
     completedRecently,
     opts.nowMs,
   );
+  // Count consecutive exploit-tool failures at the tail of observations.
+  let consecutiveExploitFailures = 0;
+  for (let i = opts.observations.length - 1; i >= 0; i--) {
+    const obs = opts.observations[i];
+    if (EXPLOIT_TOOLS_SET.has(obs.tool) && !obs.success) {
+      consecutiveExploitFailures++;
+    } else {
+      break;
+    }
+  }
+
   return {
     hypotheses: opts.hypotheses,
     stagnation,
@@ -1053,5 +1089,6 @@ export function assembleInvestigation(opts: {
     completedWithEvidence,
     observationCount: opts.observations.length,
     toolsUsed: [...new Set(opts.observations.map((o) => o.tool))],
+    consecutiveExploitFailures,
   };
 }
