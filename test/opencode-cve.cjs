@@ -200,6 +200,9 @@ module.exports = async ({ assert, jiti }) => {
 
   // Mocked queryNvd & multiSourceLookup tests
   const savedNvdKey = process.env.NVD_API_KEY;
+  const savedStateRoot = process.env.HARNESS_STATE_ROOT;
+  const nvdStateDir = fs.mkdtempSync(path.join(os.tmpdir(), "harness-nvd-state-"));
+  process.env.HARNESS_STATE_ROOT = nvdStateDir;
   delete process.env.NVD_API_KEY;
   const nvdFetch = mock.method(globalThis, "fetch", async () =>
     new Response(JSON.stringify({ vulnerabilities: [] }), { status: 200 }),
@@ -234,7 +237,21 @@ module.exports = async ({ assert, jiti }) => {
     assert.equal(seenHeaders[0]?.apiKey, "nvd-secret-key-test", "NVD_API_KEY sets apiKey header");
     assert.match(seenUrls[0], /keywordSearch=Apache\+2\.4\.49/);
 
-    // Without NVD_API_KEY, no apiKey header is sent
+    // Persistent state/nvd-api-key fallback when NVD_API_KEY env is unset
+    delete process.env.NVD_API_KEY;
+    const keyFile = path.join(nvdStateDir, "nvd-api-key");
+    fs.writeFileSync(keyFile, "# comment\nnvd-state-file-key\n", { mode: 0o600 });
+    seenHeaders.length = 0;
+    await queryNvd("nginx");
+    assert.equal(seenHeaders[0]?.apiKey, "nvd-state-file-key", "state/nvd-api-key provides apiKey fallback");
+    // Env wins over state/nvd-api-key
+    process.env.NVD_API_KEY = "nvd-env-wins";
+    seenHeaders.length = 0;
+    await queryNvd("nginx");
+    assert.equal(seenHeaders[0]?.apiKey, "nvd-env-wins", "NVD_API_KEY env overrides state/nvd-api-key");
+    fs.unlinkSync(keyFile);
+
+    // Without NVD_API_KEY or state/nvd-api-key, no apiKey header is sent
     delete process.env.NVD_API_KEY;
     seenHeaders.length = 0;
     await queryNvd("nginx");
@@ -457,6 +474,9 @@ module.exports = async ({ assert, jiti }) => {
     nvdFetch.mock.restore();
     if (savedNvdKey === undefined) delete process.env.NVD_API_KEY;
     else process.env.NVD_API_KEY = savedNvdKey;
+    if (savedStateRoot === undefined) delete process.env.HARNESS_STATE_ROOT;
+    else process.env.HARNESS_STATE_ROOT = savedStateRoot;
+    fs.rmSync(nvdStateDir, { recursive: true, force: true });
   }
 
   // Test the adapter and multiSourceLookup deterministically, without assuming a Kali host/database.

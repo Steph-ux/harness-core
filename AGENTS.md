@@ -42,6 +42,8 @@ devDependency with a committed lockfile; it never reaches the runtime.
 - `state/captures/` — visual attestations.
 - `state/verifier` — one line, `provider/model`, the model that serves a direct
   call (reviews, lesson extraction). `HARNESS_VERIFIER` wins when set.
+- `state/nvd-api-key` — optional single-line NVD API v2 key for `cyber_cve`
+  `search` (rate-limit uplift). `NVD_API_KEY` wins when set.
 
 A session is read by the learning loop once it has been quiet for ten minutes:
 a host that never marked a session closed leaves it `active` forever, so time,
