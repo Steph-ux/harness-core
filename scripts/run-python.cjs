@@ -26,7 +26,11 @@ for (const candidate of candidates) {
   // alias launches and exits with 9009, which is not an answer: it has to be
   // passed over, or the gate reports the store's message instead of the
   // interpreter it never found.
-  const probe = spawnSync(candidate, ["--version"], { stdio: "ignore" });
+  const probe = spawnSync(
+    candidate,
+    ["-c", "import sys; sys.exit(0 if sys.version_info >= (3,) else 1)"],
+    { stdio: "ignore" },
+  );
   if (probe.error || probe.status !== 0) continue;
   const result = spawnSync(candidate, args, { stdio: "inherit" });
   process.exit(result.status === null ? 1 : result.status);

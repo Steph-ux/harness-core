@@ -45,8 +45,16 @@ module.exports = async ({ assert, jiti }) => {
   );
 
   // Check the shipped bytes on a clean clone too, not a stale host installation.
+  const explicitSkillsDir = process.env.HARNESS_SKILLS_DIR?.trim();
+  if (
+    process.env.HARNESS_SKILLS_DIR !== undefined &&
+    process.env.HARNESS_SKILLS_DIR !== "" &&
+    !explicitSkillsDir
+  ) {
+    throw new Error("HARNESS_SKILLS_DIR is set to whitespace only");
+  }
   const skillsDir =
-    process.env.HARNESS_SKILLS_DIR ||
+    explicitSkillsDir ||
     path.join(CORE, ".opencode", "skills");
   assert.ok(fs.existsSync(skillsDir), "the skill catalogue exists");
 
@@ -60,8 +68,16 @@ module.exports = async ({ assert, jiti }) => {
   // but none of the declared methods has not installed it: that is an absence,
   // not a malformed procedure, and it is reported as such. A partial pack still
   // fails, so a missing method is never hidden by the ones that are present.
-  if (EXTERNAL_METHODS.every((name) => read(name) === null))
+  // When HARNESS_SKILLS_DIR is explicitly configured, an empty catalogue is an
+  // error rather than a silent skip.
+  if (EXTERNAL_METHODS.every((name) => read(name) === null)) {
+    if (explicitSkillsDir) {
+      throw new Error(
+        `HARNESS_SKILLS_DIR (${skillsDir}) yielded 0 declared harness skills`,
+      );
+    }
     skip("external harness method catalogue is not installed");
+  }
 
   for (const name of EXTERNAL_METHODS) {
     const body = read(name);

@@ -192,7 +192,7 @@ export default {
     const { observationId } = await import(
       path.join(coreRoot(), "src", "observation-id.ts")
     );
-    const { assertPlainPath, scopeFor, hash } = await import(
+    const { assertPlainPath, hash, redactText, scopeFor } = await import(
       path.join(coreRoot(), "src", "util.ts")
     );
     const { operatorContext } = await import(
@@ -1682,6 +1682,29 @@ export default {
             const items = Array.isArray(input.packages) ? input.packages : [];
             if (!items.length) throw new Error("batch requires a packages array");
             if (items.length > 20) throw new Error("batch is limited to 20 packages");
+            const formatBatchError = (err: unknown): string => {
+              const raw =
+                err instanceof Error
+                  ? err.message
+                    ? err.name && err.name !== "Error"
+                      ? `${err.name}: ${err.message}`
+                      : err.message
+                    : err.name || "lookup-failed"
+                  : typeof err === "string"
+                    ? err
+                    : (() => {
+                        try {
+                          return JSON.stringify(err) ?? String(err);
+                        } catch {
+                          return String(err);
+                        }
+                      })();
+              const noStack = raw
+                .replace(/\r?\n\s*at\s+[\s\S]*/g, "")
+                .replace(/[\r\n]+/g, " ")
+                .trim();
+              return redactText(noStack).slice(0, 200) || "lookup-failed";
+            };
             const results = [];
             for (const item of items) {
               if (!item || typeof item !== "object") {
@@ -1719,6 +1742,11 @@ export default {
                   results.push({ ecosystem: eco, package: pkg, version: ver ?? null, error: `osv-${resp.status}` });
                   continue;
                 }
+                const declared = Number(resp.headers?.get?.("content-length") ?? 0);
+                if (Number.isFinite(declared) && declared > 512000) {
+                  results.push({ ecosystem: eco, package: pkg, version: ver ?? null, error: "osv-too-large" });
+                  continue;
+                }
                 const text = await resp.text();
                 if (Buffer.byteLength(text, "utf8") > 512000) {
                   results.push({ ecosystem: eco, package: pkg, version: ver ?? null, error: "osv-too-large" });
@@ -1731,7 +1759,12 @@ export default {
                   vulnerabilities: summarizeOsv(JSON.parse(text)),
                 });
               } catch (err) {
-                results.push({ ecosystem: eco, package: pkg, version: ver ?? null, error: String(err) });
+                results.push({
+                  ecosystem: eco,
+                  package: pkg,
+                  version: ver ?? null,
+                  error: formatBatchError(err),
+                });
               }
             }
             return { content: JSON.stringify({ batch: results }) };
@@ -3009,89 +3042,91 @@ export default {
               buf.readUInt32BE(16) > 0 &&
               buf.readUInt32BE(20) > 0;
             let isolated = false;
-            if (input.file) {
-              // Register an existing screenshot file as evidence.
-              const src = path.resolve(String(input.file));
-              assertPlainPath(src);
-              let stat: fs.Stats;
-              try {
-                stat = fs.statSync(src);
-              } catch {
-                throw new Error("the file does not exist: " + src);
+            let image: Buffer;
+            try {
+              if (input.file) {
+                // Register an existing screenshot file as evidence.
+                const src = path.resolve(String(input.file));
+                assertPlainPath(src);
+                let stat: fs.Stats;
+                try {
+                  stat = fs.statSync(src);
+                } catch {
+                  throw new Error("the file does not exist: " + src);
+                }
+                if (!stat.isFile())
+                  throw new Error("the file is not a regular file: " + src);
+                if (stat.size > 25 * 1024 * 1024)
+                  throw new Error("the browser capture file exceeds 25 MB limit");
+                if (stat.size < 24)
+                  throw new Error("the file is not a valid PNG");
+                const header = Buffer.alloc(24);
+                const fd = fs.openSync(src, "r");
+                let bytesRead = 0;
+                try {
+                  bytesRead = fs.readSync(fd, header, 0, 24, 0);
+                } finally {
+                  fs.closeSync(fd);
+                }
+                if (!hasValidPng(header.subarray(0, bytesRead)))
+                  throw new Error("the file is not a valid PNG");
+                fs.copyFileSync(src, dest);
+              } else if (input.port !== undefined) {
+                const port = Number(input.port);
+                if (!Number.isInteger(port) || port < 1 || port > 65535)
+                  throw new Error("Invalid CDP port (must be integer 1..65535)");
+                const script = path.join(coreRoot(), "scripts", "capture_browser.mjs");
+                const args = [script, dest, "--port", String(port)];
+                if (input.url) args.push("--url", String(input.url));
+                await new Promise<void>((resolve, reject) => {
+                  const child = spawn(process.execPath, args, {
+                    stdio: ["ignore", "pipe", "pipe"],
+                    signal: context?.signal,
+                  });
+                  let output = "";
+                  const timer = setTimeout(() => {
+                    child.kill("SIGTERM");
+                  }, 25000);
+                  child.stdout?.on("data", (chunk) => {
+                    output += String(chunk);
+                  });
+                  child.stderr?.on("data", (chunk) => {
+                    output += String(chunk);
+                  });
+                  child.on("error", (error) => {
+                    clearTimeout(timer);
+                    reject(new Error(`${process.execPath} failed: ${error.message}`));
+                  });
+                  child.on("close", (code) => {
+                    clearTimeout(timer);
+                    if (code === 0) return resolve();
+                    reject(new Error(`${process.execPath} failed: ${output.slice(0, 300)}`));
+                  });
+                });
+              } else if (typeof input.url === "string" && input.url.trim()) {
+                captureBrowserIsolated({
+                  url: input.url.trim(),
+                  dest,
+                  timeoutMs: 25000,
+                });
+                isolated = true;
+              } else {
+                throw new Error(
+                  "a browser capture requires file, url (for isolated capture), or port",
+                );
               }
-              if (!stat.isFile())
-                throw new Error("the file is not a regular file: " + src);
-              if (stat.size > 25 * 1024 * 1024)
-                throw new Error("the browser capture file exceeds 25 MB limit");
-              if (stat.size < 24)
-                throw new Error("the file is not a valid PNG");
-              const header = Buffer.alloc(24);
-              const fd = fs.openSync(src, "r");
-              let bytesRead = 0;
-              try {
-                bytesRead = fs.readSync(fd, header, 0, 24, 0);
-              } finally {
-                fs.closeSync(fd);
+              if (!fs.existsSync(dest) || fs.statSync(dest).size < 32) {
+                throw new Error("the browser capture is empty or failed");
               }
-              if (!hasValidPng(header.subarray(0, bytesRead)))
-                throw new Error("the file is not a valid PNG");
-              fs.copyFileSync(src, dest);
-            } else if (input.port !== undefined) {
-              const port = Number(input.port);
-              if (!Number.isInteger(port) || port < 1 || port > 65535)
-                throw new Error("Invalid CDP port (must be integer 1..65535)");
-              const script = path.join(coreRoot(), "scripts", "capture_browser.mjs");
-              const args = [script, dest, "--port", String(port)];
-              if (input.url) args.push("--url", String(input.url));
-              await new Promise<void>((resolve, reject) => {
-                const child = spawn(process.execPath, args, {
-                  stdio: ["ignore", "pipe", "pipe"],
-                  signal: context?.signal,
-                });
-                let output = "";
-                const timer = setTimeout(() => {
-                  child.kill("SIGTERM");
-                }, 25000);
-                child.stdout?.on("data", (chunk) => {
-                  output += String(chunk);
-                });
-                child.stderr?.on("data", (chunk) => {
-                  output += String(chunk);
-                });
-                child.on("error", (error) => {
-                  clearTimeout(timer);
-                  reject(new Error(`${process.execPath} failed: ${error.message}`));
-                });
-                child.on("close", (code) => {
-                  clearTimeout(timer);
-                  if (code === 0) return resolve();
-                  reject(new Error(`${process.execPath} failed: ${output.slice(0, 300)}`));
-                });
-              });
-            } else if (typeof input.url === "string" && input.url.trim()) {
-              captureBrowserIsolated({
-                url: input.url.trim(),
-                dest,
-                timeoutMs: 25000,
-              });
-              isolated = true;
-            } else {
-              throw new Error(
-                "a browser capture requires file, url (for isolated capture), or port",
-              );
-            }
-            if (!fs.existsSync(dest) || fs.statSync(dest).size < 32) {
+              image = fs.readFileSync(dest);
+              if (!hasValidPng(image)) {
+                throw new Error("the browser capture is not a valid PNG");
+              }
+            } catch (error) {
               try {
                 fs.rmSync(dest, { force: true });
               } catch {}
-              throw new Error("the browser capture is empty or failed");
-            }
-            const image = fs.readFileSync(dest);
-            if (!hasValidPng(image)) {
-              try {
-                fs.rmSync(dest, { force: true });
-              } catch {}
-              throw new Error("the browser capture is not a valid PNG");
+              throw error;
             }
             const link = {
               kind: "browser-capture",

@@ -28,7 +28,9 @@ module.exports = async ({ assert, jiti, skip }) => {
   // The suite never opens a terminal window: the printed rendering is tested here.
   process.env.HARNESS_CAPTURE_TERMINAL = "off";
 
-  const plugin = jiti(PLUGIN).default;
+  let unload;
+  try {
+    const plugin = jiti(PLUGIN).default;
   const {
     assertNotRoot,
     captureDestination,
@@ -88,6 +90,21 @@ module.exports = async ({ assert, jiti, skip }) => {
     "the hex equivalent of a decimal root window is refused",
   );
   assert.throws(
+    () => assertNotRoot("0x4dd", "0x4DD"),
+    /desktop is not a subject/,
+    "the uppercase hex root window is refused",
+  );
+  assert.throws(
+    () => assertNotRoot("0x4dd", " 1245 "),
+    /desktop is not a subject/,
+    "the whitespace-padded decimal root window is refused",
+  );
+  assert.throws(
+    () => assertNotRoot("0x4dd", " 0x04DD "),
+    /desktop is not a subject/,
+    "the whitespace-padded zero-padded hex root window is refused",
+  );
+  assert.throws(
     () => assertNotRoot("0x4dd", "0x0"),
     /desktop is not a subject/,
     "the zero id is refused",
@@ -103,6 +120,7 @@ module.exports = async ({ assert, jiti, skip }) => {
     "the zero-padded zero id is refused",
   );
   assert.doesNotThrow(() => assertNotRoot("0x4dd", "0x4600095"));
+  assert.doesNotThrow(() => assertNotRoot("0x4dd", "1246"));
 
   // The capture lands in the capture root and nowhere else.
   const root = path.join(workspace, "captures");
@@ -159,7 +177,7 @@ module.exports = async ({ assert, jiti, skip }) => {
 
   // The tool, on a real display when there is one.
   const fixture = makeContext(workspace);
-  const unload = await loadPlugin(plugin, fixture.ctx);
+  unload = await loadPlugin(plugin, fixture.ctx);
   const { observationId } = jiti(path.join(CORE, "src", "observation-id.ts"));
   const captureObservation = observationId("ses_cap", "call-capture-source");
   await fixture.hooks.get("execute.after")({
@@ -342,7 +360,6 @@ module.exports = async ({ assert, jiti, skip }) => {
   );
   store.close();
 
-  try {
     // Browser capture: register an existing PNG file as evidence.
     // Create a minimal valid PNG (1×1 white pixel) for testing.
     const pngHeader = Buffer.from([
@@ -392,11 +409,16 @@ module.exports = async ({ assert, jiti, skip }) => {
       "browser capture rejects a non-PNG file",
     );
 
-    // Browser capture requires an observation.
+    // Browser capture requires a valid scoped observation.
     await assert.rejects(
       () => call({ action: "browser", file: testPng }),
       /observation/,
       "browser capture requires an observation",
+    );
+    await assert.rejects(
+      () => call({ action: "browser", file: testPng, observationId: "obs-missing-capture" }),
+      /Missing evidence/,
+      "browser capture refuses an unknown observation",
     );
 
     // Browser capture rejects a missing file.
@@ -420,8 +442,9 @@ module.exports = async ({ assert, jiti, skip }) => {
     );
     store2.close();
 
-    const display = process.env.DISPLAY;
+    const display = process.env.DISPLAY?.trim();
     if (!display) {
+      console.log("  note: no DISPLAY; skipping live window display checks");
       skip("no display; real window capture is not exercised");
     } else {
       // The windows of the operator, before the harness does anything.
