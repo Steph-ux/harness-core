@@ -6,11 +6,14 @@ The adapter is in `opencode/`; `src/` uses Node's native modules.
 Node 24 or newer is required. Command supervision needs a `node` executable
 the server can reach (`HARNESS_NODE` can pin its path). Off Linux, pass
 `argv`; process-group ownership stays Linux-only.
-A trace capture opens in the operator's terminal (qterminal), decorations
-included, then the window is closed; without a display, or with
-`HARNESS_CAPTURE_TERMINAL=off`, a printed rendering is produced instead (Python 3
-and Pillow). Capturing a real window needs X11 (`import`, `identify`) and a
-display.
+A trace capture runs `qterminal` inside an isolated `Xvfb` display by default
+(`HARNESS_CAPTURE_XVFB=off` disables it) so it never touches the operator's
+desktop or steals foreground focus; without `Xvfb`/display, or with
+`HARNESS_CAPTURE_TERMINAL=off`, a printed rendering is produced instead
+(Python 3 and Pillow). `cyber_capture action="browser"` captures pages via an
+isolated temporary Chromium profile under `Xvfb` (or `--headless=new`), an
+explicit loopback CDP port, or an existing PNG file. Capturing an arbitrary
+desktop window (`action="shot"`) needs X11 (`import`, `identify`) and a display.
 
 ## Install in OpenCode v2
 
@@ -36,11 +39,13 @@ method to avoid a duplicate plugin identifier. Wait for the host to activate the
 plugin before reading its catalogue. Then check `harness-core.proof` in
 `plugin.list` and the two procedures in `skill.list`.
 
-`capitaliser-cyber` and `rapports-cyber` are served from `.opencode/skills/`.
-The other `harness-*` methods of the router belong to an external catalogue,
-declared in `src/routing.ts` so the contract can be checked anywhere. Their
-absence must be resolved before an operation that requires them. A failed load
-never satisfies that requirement.
+All procedures and methods shipped under `.opencode/skills/` (`capitaliser-cyber`,
+`rapports-cyber`, `harness-cyber-playbooks`, and the 60 `harness-*` methods)
+are registered dynamically by the plugin from the repository, alongside active
+learned methods. To mirror them into `~/.config/opencode/skills/` as well, run
+`node scripts/sync-skills.cjs` (`--dry-run` / `--check` supported). The method
+catalogue is also declared in `src/routing.ts` so the contract can be checked
+anywhere. A failed load never satisfies an enforced route requirement.
 
 ## Guarantees and limits
 
@@ -92,13 +97,22 @@ is scope-local: another project sees nothing.
 
 ## Vulnerability lookup
 
-`cyber_cve` asks OSV, the public vulnerability database, for a package version:
-`ecosystem` (`PyPI`, `npm`, `Go`, `Debian`, …), `package`, `version`. The answer is
-bounded (100 entries, 500 characters per summary, a 512 KB response cap), and the
-call itself is an observation, so a finding can cite it. Pair it with the entity
-graph: a `technology` entity (`wordpress:6.5`), a `vulnerability` entity
-(`CVE-2024-…`), and an `affected-by` relation. A version is not a vulnerability
-until the lookup says so, and a lookup is not an exploit.
+`cyber_cve` supports three actions, all recorded as immutable observations:
+
+- `lookup` / `batch` (up to 20 packages): queries OSV for open-source ecosystems
+  (`PyPI`, `npm`, `Go`, `Debian`, `Ubuntu`, `Alpine`, `Packagist`, `Maven`,
+  `NuGet`, `RubyGems`, `crates.io`, `Hex`, `GitHub Actions`). Answers are
+  bounded (100 entries, 500 characters per summary, 512 KB response cap).
+- `search`: queries **NVD API v2** (supporting keyword search, direct `cpeName`
+  lookup, CPE version-range matching fallback, and CVSS v3.1/v3.0/v2.0 sorting)
+  plus local **`searchsploit`** for services, servers, CMS, appliances, and
+  firmware. To raise the public NVD rate limit, place your key once in
+  `~/.local/share/harness-core/state/nvd-api-key` (`chmod 600`) or set
+  `NVD_API_KEY` (the environment variable wins when set).
+
+Pair lookups with the entity graph: a `technology` entity (`wordpress:6.5`), a
+`vulnerability` entity (`CVE-2024-…`), and an `affected-by` relation. A version
+is not a vulnerability until the lookup says so, and a lookup is not an exploit.
 
 ## The task tree and the coverage map
 
@@ -122,9 +136,13 @@ so a target list becomes a checklist instead of a paragraph.
 - `HARNESS_TOOL_HOME` and `HARNESS_TOOL_PATHS` have no default. Set them to the
   directories that hold the tools of the installation; nothing about the
   operator's home is assumed.
-- The real-terminal capture is an adapter for qterminal on X11. Elsewhere, set
-  `HARNESS_CAPTURE_TERMINAL=off`: the trace is rendered as an image by Python
+- The real-terminal capture uses `qterminal` isolated inside `xvfb-run` when
+  available (`HARNESS_CAPTURE_XVFB=off` disables Xvfb isolation). Elsewhere, set
+  `HARNESS_CAPTURE_TERMINAL=off`: the trace is rendered as an image by Python 3
   and Pillow, without a display.
+- `cyber_capture browser` with a `url` (and no `port`) launches Chromium in an
+  isolated temporary `--user-data-dir` under `xvfb-run` (or `--headless=new`)
+  with `--test-type`, never touching the operator's personal browser profile.
 - `cyber_capture shot` needs X11 (`import`, `identify`) and a display.
 
 ## Reports and restitution
@@ -216,6 +234,8 @@ not a server billing cap.
 | `processes.json`, `traces/` | Runs, private traces, results and control files |
 | `reports/` | Report snapshots kept by version |
 | `skills/` | Revisions and learned methods |
+| `verifier` | Optional single-line `provider/model` pin (`HARNESS_VERIFIER` wins) |
+| `nvd-api-key` | Optional single-line NVD API v2 key (`NVD_API_KEY` wins) |
 
 SQLite migrations are additive. No missing full hash is invented for old
 observations, and no old process is turned into a success. Back up the state
@@ -321,10 +341,11 @@ not add a native OpenCode tool per script.
   (`url` over https, `commit`, `license`); a URL carrying credentials is
   refused, and the provenance is kept with the revision.
 - `validate`: checks the syntax without running the script, then requires two
-  distinct successful observations (a positive test and a negative test) from
-  the same scope, containing the exact path of the candidate and the expected
-  result. Both runs must first have been performed with the host's authorised
-  tools; the mere output of a text generator is not evidence.
+  distinct successful observations (a positive test and a negative test with
+  different observed outputs) from the same scope, directly invoking the
+  candidate script via shell `command` or `cyber_process` `argv`. Both runs must
+  first have been performed with the host's authorised tools; the mere output of a
+  text generator is not evidence.
 - `activate`: makes the validated version immediately visible to its project,
   removing the previous one from the active index. Published files are checked
   by SHA-256 before every use.
