@@ -16,9 +16,37 @@ const MAX_TITLE = 200;
 const MAX_REASON = 400;
 const MAX_DEPENDS = 10;
 const MAX_DEPTH = 6;
+const STALE_LOCK_MS = 30000;
 const identifier = (value: unknown): value is string =>
   typeof value === "string" &&
   /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/.test(value);
+const isPidAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+};
+const isStaleLock = (lock: string, stat: fs.Stats): boolean => {
+  if (Date.now() - stat.mtimeMs > STALE_LOCK_MS) return true;
+  try {
+    const raw = fs.readFileSync(lock, "utf8").trim();
+    if (!raw) return false;
+    const parsed = JSON.parse(raw) as { pid?: unknown };
+    if (
+      typeof parsed?.pid === "number" &&
+      Number.isInteger(parsed.pid) &&
+      parsed.pid > 0 &&
+      parsed.pid !== process.pid &&
+      !isPidAlive(parsed.pid)
+    )
+      return true;
+  } catch {
+    /* Unreadable or partial lock relies on the age threshold above. */
+  }
+  return false;
+};
 
 export interface Task {
   id: string;
@@ -57,22 +85,76 @@ export class TaskStore {
     return path.join(this.stateRoot, `tasks-${scope}.json`);
   }
 
+  private acquireLock(lock: string): number {
+    assertPlainPath(lock);
+    try {
+      return fs.openSync(lock, "wx", 0o600);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+    const stat = fs.lstatSync(lock, { throwIfNoEntry: false });
+    if (stat?.isSymbolicLink())
+      throw new Error("Linked or special harness paths are not allowed");
+    if (stat && isStaleLock(lock, stat)) {
+      const recovery = `${lock}.recover`;
+      assertPlainPath(recovery);
+      let recFd: number | undefined;
+      try {
+        recFd = fs.openSync(recovery, "wx", 0o600);
+        const current = fs.lstatSync(lock, { throwIfNoEntry: false });
+        if (
+          current &&
+          !current.isSymbolicLink() &&
+          current.dev === stat.dev &&
+          current.ino === stat.ino &&
+          current.mtimeMs === stat.mtimeMs &&
+          isStaleLock(lock, current)
+        )
+          fs.unlinkSync(lock);
+      } catch {
+        /* Another worker is already recovering or owns the lock. */
+      } finally {
+        if (recFd !== undefined) {
+          fs.closeSync(recFd);
+          try {
+            fs.unlinkSync(recovery);
+          } catch {
+            /* already removed */
+          }
+        }
+      }
+      try {
+        assertPlainPath(lock);
+        return fs.openSync(lock, "wx", 0o600);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EEXIST")
+          throw new Error("Concurrent task update; retry from the current state");
+        throw error;
+      }
+    }
+    throw new Error("Concurrent task update; retry from the current state");
+  }
+
   private mutate<T>(scope: string, fn: () => T): T {
     const lock = `${this.file(scope)}.lock`;
-    assertPlainPath(lock);
-    let fd: number;
+    const fd = this.acquireLock(lock);
     try {
-      fd = fs.openSync(lock, "wx", 0o600);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "EEXIST")
-        throw new Error("Concurrent task update; retry from the current state");
-      throw error;
-    }
-    try {
+      fs.writeSync(
+        fd,
+        JSON.stringify({ pid: process.pid, createdAt: Date.now() }),
+      );
       return fn();
     } finally {
+      const held = fs.fstatSync(fd);
       fs.closeSync(fd);
-      fs.unlinkSync(lock);
+      const onDisk = fs.lstatSync(lock, { throwIfNoEntry: false });
+      if (onDisk && onDisk.dev === held.dev && onDisk.ino === held.ino) {
+        try {
+          fs.unlinkSync(lock);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+      }
     }
   }
   /**
@@ -168,28 +250,63 @@ export class TaskStore {
   ): Task {
     return this.mutate(scope, () => {
       const title = bounded(input?.title, MAX_TITLE, "task title");
-      const dependsOn = Array.isArray(input?.dependsOn)
-        ? [
-            ...new Set(input.dependsOn.filter((v) => typeof v === "string")),
-          ].slice(0, MAX_DEPENDS)
-        : [];
+      let dependsOn: string[] = [];
+      if (input?.dependsOn !== undefined) {
+        if (
+          !Array.isArray(input.dependsOn) ||
+          !input.dependsOn.every(identifier)
+        )
+          throw new Error("Invalid task dependency list");
+        dependsOn = [...new Set(input.dependsOn)];
+        if (dependsOn.length > MAX_DEPENDS)
+          throw new Error(
+            `A task accepts at most ${MAX_DEPENDS} dependencies`,
+          );
+      }
       const rows = this.load(scope);
       if (dependsOn.some((id) => !rows.some((r) => r.id === id)))
         throw new Error("Missing task dependency");
+      const stamp = now();
       let parentId: string | undefined;
       if (input?.parent !== undefined) {
         if (!identifier(input.parent)) throw new Error("Invalid parent task id");
+        const ancestors: Task[] = [];
+        const seen = new Set<string>();
         let cursor = rows.find((row) => row.id === input.parent),
           depth = 1;
         if (!cursor) throw new Error("Unknown parent task");
-        while (cursor?.parentId) {
+        while (cursor) {
+          if (seen.has(cursor.id)) throw new Error("Task tree cycle");
+          seen.add(cursor.id);
+          ancestors.push(cursor);
+          if (!cursor.parentId) break;
           depth += 1;
           if (depth > MAX_DEPTH) throw new Error("Task tree is too deep");
           cursor = rows.find((row) => row.id === cursor!.parentId);
         }
+        for (const ancestor of ancestors) {
+          if (
+            ancestor.status === "completed" &&
+            rows.some(
+              (r) =>
+                r.dependsOn.includes(ancestor.id) &&
+                ["in-progress", "completed"].includes(r.status),
+            )
+          )
+            throw new Error(
+              "Cannot add subtask to a completed task while dependent tasks are active or completed",
+            );
+        }
+        for (const ancestor of ancestors) {
+          if (ancestor.status === "completed" || ancestor.status === "blocked") {
+            ancestor.status = "pending";
+            delete ancestor.reason;
+            delete ancestor.evidence;
+            ancestor.updatedAt = stamp;
+          }
+        }
         parentId = input.parent;
       }
-      const stamp = now();
       const task: Task = {
         id: newId(),
         title,
@@ -200,7 +317,7 @@ export class TaskStore {
         updatedAt: stamp,
       };
       this.save(scope, [...rows, task]);
-      return { ...task };
+      return { ...task, dependsOn: [...task.dependsOn] };
     });
   }
 
@@ -277,6 +394,33 @@ export class TaskStore {
         rows.some((r) => r.parentId === id && !taskAddressed(r))
       )
         throw new Error("A task closes only after its subtasks");
+      if (row.status === "completed" && status !== "completed") {
+        if (
+          rows.some(
+            (r) =>
+              r.dependsOn.includes(id) &&
+              ["in-progress", "completed"].includes(r.status),
+          )
+        )
+          throw new Error(
+            "Cannot reopen a completed task while dependent tasks are active or completed",
+          );
+        if (
+          row.parentId &&
+          rows.some((r) => r.id === row.parentId && r.status === "completed")
+        )
+          throw new Error(
+            "Cannot reopen a completed subtask while its parent task is completed",
+          );
+      }
+      if (
+        status === "in-progress" &&
+        row.parentId &&
+        rows.some((r) => r.id === row.parentId && r.status === "completed")
+      )
+        throw new Error(
+          "Cannot reopen a subtask while its parent task is completed",
+        );
       row.status = status;
       row.updatedAt = now();
       if (status === "blocked")

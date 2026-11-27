@@ -19,5 +19,8 @@ export const ASSET_STEPS: Record<string, string[]> = {
   person: ["accounts", "emails", "validation"],
 };
 export function assetSteps(type: string): string[] {
-  return ASSET_STEPS[String(type).toLowerCase()] ?? ["surface", "validation"];
+  const key = String(type ?? "").toLowerCase();
+  return Object.hasOwn(ASSET_STEPS, key)
+    ? [...ASSET_STEPS[key]]
+    : ["surface", "validation"];
 }

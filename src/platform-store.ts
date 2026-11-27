@@ -78,46 +78,47 @@ export class PlatformStore {
     }
   }
   private migrate() {
-    const version = Number(
-      this.db.prepare("PRAGMA user_version").get()!.user_version,
-    );
-    if (version > 7)
-      throw new Error("Platform database version is newer than this harness");
-    if (version === 7) return;
-    if (version === 0)
-      this.db.exec(`BEGIN IMMEDIATE;
-   CREATE TABLE missions(id TEXT PRIMARY KEY,scope TEXT NOT NULL,title TEXT NOT NULL,boundaries TEXT NOT NULL,created TEXT NOT NULL,UNIQUE(id,scope));
-   CREATE INDEX missions_scope ON missions(scope,created);
-   CREATE TABLE nodes(mission_id TEXT NOT NULL,scope TEXT NOT NULL,id TEXT NOT NULL,state TEXT NOT NULL,result TEXT NOT NULL DEFAULT 'null',attempt INTEGER NOT NULL DEFAULT 0,lease TEXT,owner TEXT,expires INTEGER,PRIMARY KEY(mission_id,id),UNIQUE(mission_id,id,scope),FOREIGN KEY(mission_id,scope) REFERENCES missions(id,scope));
-   CREATE TABLE edges(mission_id TEXT NOT NULL,scope TEXT NOT NULL,node_id TEXT NOT NULL,dependency TEXT NOT NULL,PRIMARY KEY(mission_id,node_id,dependency),FOREIGN KEY(mission_id,node_id,scope) REFERENCES nodes(mission_id,id,scope),FOREIGN KEY(mission_id,dependency,scope) REFERENCES nodes(mission_id,id,scope));
-   CREATE TABLE checkpoints(seq INTEGER PRIMARY KEY AUTOINCREMENT,mission_id TEXT NOT NULL,scope TEXT NOT NULL,node_id TEXT NOT NULL,attempt INTEGER NOT NULL,state TEXT NOT NULL,payload TEXT NOT NULL,timestamp TEXT NOT NULL,FOREIGN KEY(mission_id,node_id,scope) REFERENCES nodes(mission_id,id,scope));
-   CREATE INDEX checkpoints_mission ON checkpoints(scope,mission_id,seq);
-   CREATE TABLE active_missions(scope TEXT PRIMARY KEY,id TEXT NOT NULL,FOREIGN KEY(id,scope) REFERENCES missions(id,scope));
-   CREATE TABLE revisions(id TEXT PRIMARY KEY,scope TEXT NOT NULL,source_id TEXT NOT NULL,uri TEXT NOT NULL,title TEXT NOT NULL,hash TEXT NOT NULL,current INTEGER NOT NULL,created TEXT NOT NULL,UNIQUE(id,scope));
-   CREATE UNIQUE INDEX current_revision ON revisions(scope,source_id,uri) WHERE current=1;
-   CREATE TABLE chunks(id TEXT PRIMARY KEY,scope TEXT NOT NULL,revision_id TEXT NOT NULL,ordinal INTEGER NOT NULL,text TEXT NOT NULL,hash TEXT NOT NULL,UNIQUE(id,scope),FOREIGN KEY(revision_id,scope) REFERENCES revisions(id,scope));
-   CREATE INDEX chunks_revision ON chunks(revision_id,ordinal);
-   CREATE TABLE findings(id TEXT PRIMARY KEY,scope TEXT NOT NULL,mission_id TEXT NOT NULL,title TEXT NOT NULL,severity TEXT NOT NULL,description TEXT NOT NULL,limitations TEXT NOT NULL,status TEXT NOT NULL,confidence REAL NOT NULL,checks TEXT NOT NULL,created TEXT NOT NULL,UNIQUE(id,scope),FOREIGN KEY(mission_id,scope) REFERENCES missions(id,scope));
-   CREATE INDEX findings_mission ON findings(scope,mission_id,status);
-   CREATE TABLE finding_evidence(finding_id TEXT NOT NULL,scope TEXT NOT NULL,observation_id TEXT NOT NULL,hash TEXT NOT NULL,PRIMARY KEY(finding_id,observation_id),FOREIGN KEY(finding_id,scope) REFERENCES findings(id,scope));
-   CREATE TABLE finding_citations(finding_id TEXT NOT NULL,scope TEXT NOT NULL,chunk_id TEXT NOT NULL,PRIMARY KEY(finding_id,chunk_id),FOREIGN KEY(finding_id,scope) REFERENCES findings(id,scope),FOREIGN KEY(chunk_id,scope) REFERENCES chunks(id,scope));
-   CREATE TABLE verification_links(mission_id TEXT NOT NULL,scope TEXT NOT NULL,finding_id TEXT NOT NULL,attempt INTEGER NOT NULL,PRIMARY KEY(mission_id,finding_id,attempt),FOREIGN KEY(finding_id,scope) REFERENCES findings(id,scope),FOREIGN KEY(mission_id,scope) REFERENCES missions(id,scope));
-   CREATE INDEX citation_chunk ON finding_citations(chunk_id);
-   CREATE TABLE memory_uses(scope TEXT NOT NULL,session_id TEXT NOT NULL,turn_id TEXT NOT NULL,chunk_id TEXT NOT NULL,timestamp TEXT NOT NULL,PRIMARY KEY(scope,session_id,turn_id,chunk_id),FOREIGN KEY(chunk_id,scope) REFERENCES chunks(id,scope));
-   CREATE TABLE mission_reviews(mission_id TEXT PRIMARY KEY,scope TEXT NOT NULL,digest TEXT NOT NULL,payload TEXT NOT NULL,timestamp TEXT NOT NULL,FOREIGN KEY(mission_id,scope) REFERENCES missions(id,scope));
-   CREATE TABLE source_specs(id TEXT NOT NULL,scope TEXT NOT NULL,payload TEXT NOT NULL,etag TEXT,last_modified TEXT,last_synced TEXT,PRIMARY KEY(id,scope));
-   CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-   CREATE TABLE search_records(id TEXT PRIMARY KEY,scope TEXT NOT NULL,kind TEXT NOT NULL,title TEXT NOT NULL,text TEXT NOT NULL,reference TEXT NOT NULL,hash TEXT NOT NULL,mission_id TEXT);
-   CREATE INDEX search_scope ON search_records(scope,kind);
-   CREATE VIRTUAL TABLE search_fts USING fts5(id UNINDEXED,title,text);
-   CREATE TRIGGER search_insert AFTER INSERT ON search_records BEGIN INSERT INTO search_fts(id,title,text)VALUES(new.id,new.title,new.text);END;
-   CREATE TRIGGER search_update AFTER UPDATE ON search_records BEGIN DELETE FROM search_fts WHERE id=old.id;INSERT INTO search_fts(id,title,text)VALUES(new.id,new.title,new.text);END;
-   CREATE TRIGGER search_delete AFTER DELETE ON search_records BEGIN DELETE FROM search_fts WHERE id=old.id;END;
-   CREATE TRIGGER checkpoints_immutable_update BEFORE UPDATE ON checkpoints BEGIN SELECT RAISE(ABORT,'Immutable checkpoint');END;
-   CREATE TRIGGER checkpoints_immutable_delete BEFORE DELETE ON checkpoints BEGIN SELECT RAISE(ABORT,'Immutable checkpoint');END;
-    PRAGMA user_version=1;COMMIT;`);
-    if (version < 2)
-      this.db.exec(`BEGIN IMMEDIATE;
+    this.tx(() => {
+      const version = Number(
+        this.db.prepare("PRAGMA user_version").get()!.user_version,
+      );
+      if (version > 7)
+        throw new Error("Platform database version is newer than this harness");
+      if (version === 7) return;
+      if (version === 0)
+        this.db.exec(`
+   CREATE TABLE IF NOT EXISTS missions(id TEXT PRIMARY KEY,scope TEXT NOT NULL,title TEXT NOT NULL,boundaries TEXT NOT NULL,created TEXT NOT NULL,UNIQUE(id,scope));
+   CREATE INDEX IF NOT EXISTS missions_scope ON missions(scope,created);
+   CREATE TABLE IF NOT EXISTS nodes(mission_id TEXT NOT NULL,scope TEXT NOT NULL,id TEXT NOT NULL,state TEXT NOT NULL,result TEXT NOT NULL DEFAULT 'null',attempt INTEGER NOT NULL DEFAULT 0,lease TEXT,owner TEXT,expires INTEGER,PRIMARY KEY(mission_id,id),UNIQUE(mission_id,id,scope),FOREIGN KEY(mission_id,scope) REFERENCES missions(id,scope));
+   CREATE TABLE IF NOT EXISTS edges(mission_id TEXT NOT NULL,scope TEXT NOT NULL,node_id TEXT NOT NULL,dependency TEXT NOT NULL,PRIMARY KEY(mission_id,node_id,dependency),FOREIGN KEY(mission_id,node_id,scope) REFERENCES nodes(mission_id,id,scope),FOREIGN KEY(mission_id,dependency,scope) REFERENCES nodes(mission_id,id,scope));
+   CREATE TABLE IF NOT EXISTS checkpoints(seq INTEGER PRIMARY KEY AUTOINCREMENT,mission_id TEXT NOT NULL,scope TEXT NOT NULL,node_id TEXT NOT NULL,attempt INTEGER NOT NULL,state TEXT NOT NULL,payload TEXT NOT NULL,timestamp TEXT NOT NULL,FOREIGN KEY(mission_id,node_id,scope) REFERENCES nodes(mission_id,id,scope));
+   CREATE INDEX IF NOT EXISTS checkpoints_mission ON checkpoints(scope,mission_id,seq);
+   CREATE TABLE IF NOT EXISTS active_missions(scope TEXT PRIMARY KEY,id TEXT NOT NULL,FOREIGN KEY(id,scope) REFERENCES missions(id,scope));
+   CREATE TABLE IF NOT EXISTS revisions(id TEXT PRIMARY KEY,scope TEXT NOT NULL,source_id TEXT NOT NULL,uri TEXT NOT NULL,title TEXT NOT NULL,hash TEXT NOT NULL,current INTEGER NOT NULL,created TEXT NOT NULL,UNIQUE(id,scope));
+   CREATE UNIQUE INDEX IF NOT EXISTS current_revision ON revisions(scope,source_id,uri) WHERE current=1;
+   CREATE TABLE IF NOT EXISTS chunks(id TEXT PRIMARY KEY,scope TEXT NOT NULL,revision_id TEXT NOT NULL,ordinal INTEGER NOT NULL,text TEXT NOT NULL,hash TEXT NOT NULL,UNIQUE(id,scope),FOREIGN KEY(revision_id,scope) REFERENCES revisions(id,scope));
+   CREATE INDEX IF NOT EXISTS chunks_revision ON chunks(revision_id,ordinal);
+   CREATE TABLE IF NOT EXISTS findings(id TEXT PRIMARY KEY,scope TEXT NOT NULL,mission_id TEXT NOT NULL,title TEXT NOT NULL,severity TEXT NOT NULL,description TEXT NOT NULL,limitations TEXT NOT NULL,status TEXT NOT NULL,confidence REAL NOT NULL,checks TEXT NOT NULL,created TEXT NOT NULL,UNIQUE(id,scope),FOREIGN KEY(mission_id,scope) REFERENCES missions(id,scope));
+   CREATE INDEX IF NOT EXISTS findings_mission ON findings(scope,mission_id,status);
+   CREATE TABLE IF NOT EXISTS finding_evidence(finding_id TEXT NOT NULL,scope TEXT NOT NULL,observation_id TEXT NOT NULL,hash TEXT NOT NULL,PRIMARY KEY(finding_id,observation_id),FOREIGN KEY(finding_id,scope) REFERENCES findings(id,scope));
+   CREATE TABLE IF NOT EXISTS finding_citations(finding_id TEXT NOT NULL,scope TEXT NOT NULL,chunk_id TEXT NOT NULL,PRIMARY KEY(finding_id,chunk_id),FOREIGN KEY(finding_id,scope) REFERENCES findings(id,scope),FOREIGN KEY(chunk_id,scope) REFERENCES chunks(id,scope));
+   CREATE TABLE IF NOT EXISTS verification_links(mission_id TEXT NOT NULL,scope TEXT NOT NULL,finding_id TEXT NOT NULL,attempt INTEGER NOT NULL,PRIMARY KEY(mission_id,finding_id,attempt),FOREIGN KEY(finding_id,scope) REFERENCES findings(id,scope),FOREIGN KEY(mission_id,scope) REFERENCES missions(id,scope));
+   CREATE INDEX IF NOT EXISTS citation_chunk ON finding_citations(chunk_id);
+   CREATE TABLE IF NOT EXISTS memory_uses(scope TEXT NOT NULL,session_id TEXT NOT NULL,turn_id TEXT NOT NULL,chunk_id TEXT NOT NULL,timestamp TEXT NOT NULL,PRIMARY KEY(scope,session_id,turn_id,chunk_id),FOREIGN KEY(chunk_id,scope) REFERENCES chunks(id,scope));
+   CREATE TABLE IF NOT EXISTS mission_reviews(mission_id TEXT PRIMARY KEY,scope TEXT NOT NULL,digest TEXT NOT NULL,payload TEXT NOT NULL,timestamp TEXT NOT NULL,FOREIGN KEY(mission_id,scope) REFERENCES missions(id,scope));
+   CREATE TABLE IF NOT EXISTS source_specs(id TEXT NOT NULL,scope TEXT NOT NULL,payload TEXT NOT NULL,etag TEXT,last_modified TEXT,last_synced TEXT,PRIMARY KEY(id,scope));
+   CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+   CREATE TABLE IF NOT EXISTS search_records(id TEXT PRIMARY KEY,scope TEXT NOT NULL,kind TEXT NOT NULL,title TEXT NOT NULL,text TEXT NOT NULL,reference TEXT NOT NULL,hash TEXT NOT NULL,mission_id TEXT);
+   CREATE INDEX IF NOT EXISTS search_scope ON search_records(scope,kind);
+   CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(id UNINDEXED,title,text);
+   CREATE TRIGGER IF NOT EXISTS search_insert AFTER INSERT ON search_records BEGIN INSERT INTO search_fts(id,title,text)VALUES(new.id,new.title,new.text);END;
+   CREATE TRIGGER IF NOT EXISTS search_update AFTER UPDATE ON search_records BEGIN DELETE FROM search_fts WHERE id=old.id;INSERT INTO search_fts(id,title,text)VALUES(new.id,new.title,new.text);END;
+   CREATE TRIGGER IF NOT EXISTS search_delete AFTER DELETE ON search_records BEGIN DELETE FROM search_fts WHERE id=old.id;END;
+   CREATE TRIGGER IF NOT EXISTS checkpoints_immutable_update BEFORE UPDATE ON checkpoints BEGIN SELECT RAISE(ABORT,'Immutable checkpoint');END;
+   CREATE TRIGGER IF NOT EXISTS checkpoints_immutable_delete BEFORE DELETE ON checkpoints BEGIN SELECT RAISE(ABORT,'Immutable checkpoint');END;
+    PRAGMA user_version=1;`);
+      if (version < 2)
+        this.db.exec(`
       CREATE TABLE IF NOT EXISTS verification_links(mission_id TEXT NOT NULL,scope TEXT NOT NULL,finding_id TEXT NOT NULL,attempt INTEGER NOT NULL,PRIMARY KEY(mission_id,finding_id,attempt),FOREIGN KEY(finding_id,scope) REFERENCES findings(id,scope),FOREIGN KEY(mission_id,scope) REFERENCES missions(id,scope));
       CREATE TRIGGER IF NOT EXISTS search_delete AFTER DELETE ON search_records BEGIN DELETE FROM search_fts WHERE id=old.id;END;
       CREATE TABLE IF NOT EXISTS finding_verifications(finding_id TEXT PRIMARY KEY,scope TEXT NOT NULL,observation_id TEXT NOT NULL,hash TEXT NOT NULL,attempt INTEGER NOT NULL,timestamp TEXT NOT NULL,FOREIGN KEY(finding_id,scope) REFERENCES findings(id,scope));
@@ -127,37 +128,53 @@ export class PlatformStore {
       CREATE TRIGGER IF NOT EXISTS chunks_immutable_delete BEFORE DELETE ON chunks BEGIN SELECT RAISE(ABORT,'Immutable source chunk');END;
       CREATE TRIGGER IF NOT EXISTS revisions_immutable_update BEFORE UPDATE ON revisions WHEN new.id!=old.id OR new.scope!=old.scope OR new.source_id!=old.source_id OR new.uri!=old.uri OR new.title!=old.title OR new.hash!=old.hash OR new.created!=old.created BEGIN SELECT RAISE(ABORT,'Immutable source revision');END;
       CREATE TRIGGER IF NOT EXISTS revisions_immutable_delete BEFORE DELETE ON revisions BEGIN SELECT RAISE(ABORT,'Immutable source revision');END;
-      PRAGMA user_version=2;COMMIT;`);
-    if (version < 3) {
-      this.db.exec(`BEGIN IMMEDIATE;
+      PRAGMA user_version=2;`);
+      if (version < 3)
+        this.db.exec(`
       CREATE TABLE IF NOT EXISTS approvals(id TEXT NOT NULL,scope TEXT NOT NULL,mission_id TEXT NOT NULL,action TEXT NOT NULL,justification TEXT NOT NULL,requested_by TEXT NOT NULL,status TEXT NOT NULL,created TEXT NOT NULL,decided TEXT,decided_by TEXT,PRIMARY KEY(id,scope),FOREIGN KEY(mission_id,scope) REFERENCES missions(id,scope));
-      CREATE INDEX approvals_scope ON approvals(scope,status,created);
-      PRAGMA user_version=3;COMMIT;`);
-    }
-    if (version < 4)
-      this.db.exec(
-        `BEGIN IMMEDIATE; ALTER TABLE finding_verifications ADD COLUMN detail TEXT NOT NULL DEFAULT '{}'; PRAGMA user_version=4; COMMIT;`,
-      );
-    if (version < 5)
-      this.db.exec(`BEGIN IMMEDIATE;
+      CREATE INDEX IF NOT EXISTS approvals_scope ON approvals(scope,status,created);
+      PRAGMA user_version=3;`);
+      if (version < 4) {
+        const columns = new Set(
+          this.db
+            .prepare("PRAGMA table_info(finding_verifications)")
+            .all()
+            .map((r) => String(r.name)),
+        );
+        if (!columns.has("detail"))
+          this.db.exec(
+            "ALTER TABLE finding_verifications ADD COLUMN detail TEXT NOT NULL DEFAULT '{}';",
+          );
+        this.db.exec("PRAGMA user_version=4;");
+      }
+      if (version < 5)
+        this.db.exec(`
       CREATE TABLE IF NOT EXISTS mission_roots(mission_id TEXT NOT NULL,scope TEXT NOT NULL,root TEXT NOT NULL,PRIMARY KEY(mission_id,scope),FOREIGN KEY(mission_id,scope) REFERENCES missions(id,scope));
-      PRAGMA user_version=5;COMMIT;`);
-    if (version < 6)
-      this.db.exec(`BEGIN IMMEDIATE;
+      PRAGMA user_version=5;`);
+      if (version < 6)
+        this.db.exec(`
       CREATE TABLE IF NOT EXISTS entities(id TEXT PRIMARY KEY,scope TEXT NOT NULL,type TEXT NOT NULL,key TEXT NOT NULL,label TEXT NOT NULL,attributes TEXT NOT NULL,observation_ids TEXT NOT NULL,created TEXT NOT NULL,updated TEXT NOT NULL,UNIQUE(scope,type,key),UNIQUE(id,scope));
       CREATE INDEX IF NOT EXISTS entities_scope ON entities(scope,type);
       CREATE TABLE IF NOT EXISTS relations(id TEXT PRIMARY KEY,scope TEXT NOT NULL,source TEXT NOT NULL,target TEXT NOT NULL,kind TEXT NOT NULL,attributes TEXT NOT NULL,observation_ids TEXT NOT NULL,created TEXT NOT NULL,UNIQUE(scope,source,target,kind),FOREIGN KEY(source,scope) REFERENCES entities(id,scope),FOREIGN KEY(target,scope) REFERENCES entities(id,scope));
       CREATE INDEX IF NOT EXISTS relations_source ON relations(scope,source);
       CREATE INDEX IF NOT EXISTS relations_target ON relations(scope,target);
-      PRAGMA user_version=6;COMMIT;`);
-    if (version < 7)
-      this.db.exec(`BEGIN IMMEDIATE;
+      PRAGMA user_version=6;`);
+      if (version < 7)
+        this.db.exec(`
       CREATE TABLE IF NOT EXISTS mission_closures(mission_id TEXT NOT NULL,scope TEXT NOT NULL,reason TEXT NOT NULL,timestamp TEXT NOT NULL,PRIMARY KEY(mission_id,scope),FOREIGN KEY(mission_id,scope) REFERENCES missions(id,scope));
-      PRAGMA user_version=7;COMMIT;`);
+      PRAGMA user_version=7;`);
+    });
   }
   private open(scope: string) {
     if (this.closed) throw new Error("Platform store is closed");
     identifier(scope);
+  }
+  private rollback() {
+    try {
+      this.db.exec("ROLLBACK");
+    } catch {
+      /* SQLite may have already rolled back on error */
+    }
   }
   private tx<T>(fn: () => T): T {
     this.db.exec("BEGIN IMMEDIATE");
@@ -166,7 +183,7 @@ export class PlatformStore {
       this.db.exec("COMMIT");
       return out;
     } catch (e) {
-      this.db.exec("ROLLBACK");
+      this.rollback();
       throw e;
     }
   }
@@ -181,9 +198,24 @@ export class PlatformStore {
   ) {
     this.open(scope);
     const safe = redactText(body);
+    const digest = hash(safe);
+    const existing = this.db
+      .prepare(
+        "SELECT hash,title,kind,reference,mission_id FROM search_records WHERE id=? AND scope=?",
+      )
+      .get(id, scope);
+    if (
+      existing &&
+      existing.hash === digest &&
+      existing.title === title &&
+      existing.kind === kind &&
+      existing.reference === reference &&
+      (existing.mission_id ?? null) === (missionId ?? null)
+    )
+      return;
     this.db
       .prepare(
-        "INSERT INTO search_records VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,text=excluded.text,hash=excluded.hash",
+        "INSERT INTO search_records VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,text=excluded.text,hash=excluded.hash WHERE search_records.hash!=excluded.hash OR search_records.title!=excluded.title",
       )
       .run(
         id,
@@ -192,7 +224,7 @@ export class PlatformStore {
         title,
         safe,
         reference,
-        hash(safe),
+        digest,
         missionId ?? null,
       );
   }
@@ -378,22 +410,23 @@ export class PlatformStore {
    * separate record with its reason, and it is what the closing gate reads.
    */
   closeMission(scope: string, id: string, reason: string) {
-    const mission = this.mission(scope, id);
-    if (mission.state === "CLOSED") throw new Error("Mission is already closed");
-    if (mission.nodes.some((n) => ["RUNNING", "WAITING_APPROVAL"].includes(n.state)))
-      throw new Error("A stage is still open; stop it before closing");
     if (typeof reason !== "string" || reason.trim().length < 10)
       throw new Error("A closure needs a written reason");
-    this.tx(() => {
+    const safeReason = text(reason);
+    return this.tx(() => {
+      const mission = this.mission(scope, id);
+      if (mission.state === "CLOSED") throw new Error("Mission is already closed");
+      if (mission.nodes.some((n) => ["RUNNING", "WAITING_APPROVAL"].includes(n.state)))
+        throw new Error("A stage is still open; stop it before closing");
       this.db
         .prepare(
           "INSERT INTO mission_closures(mission_id,scope,reason,timestamp)VALUES(?,?,?,?)",
         )
-        .run(id, scope, text(reason), now());
+        .run(id, scope, safeReason, now());
+      const closed = this.mission(scope, id);
+      this.index(scope, id, "mission", closed.title, json(closed), `cyber://mission/${id}`, id);
+      return closed;
     });
-    const closed = this.mission(scope, id);
-    this.index(scope, id, "mission", closed.title, json(closed), `cyber://mission/${id}`, id);
-    return closed;
   }
   /** The report gate lives with the engagement workflow; a host registers it once. */
   setReportGuard(guard: (scope: string, missionId: string) => void) {
@@ -428,28 +461,30 @@ export class PlatformStore {
     justification: string,
     requestedBy: string,
   ) {
-    this.mission(scope, missionId);
-    const id = `AP-${newId().slice(0, 18)}`;
+    if (typeof action !== "string" || !action.trim())
+      throw new Error("An approval needs the action it covers");
+    const safeAction = text(action, 1000);
     const reason = text(justification, 2000);
     if (!reason.trim()) throw new Error("An approval needs its reason");
-    if (!action.trim())
-      throw new Error("An approval needs the action it covers");
     identifier(requestedBy);
-    this.tx(() => {
+    const id = `AP-${newId().slice(0, 18)}`;
+    return this.tx(() => {
+      if (this.mission(scope, missionId).state === "CLOSED")
+        throw new Error("Mission is closed");
       this.db
         .prepare("INSERT INTO approvals VALUES(?,?,?,?,?,?,?,?,NULL,NULL)")
         .run(
           id,
           scope,
           missionId,
-          text(action, 1000),
+          safeAction,
           reason,
           requestedBy,
           "pending",
           now(),
         );
+      return this.approval(scope, id);
     });
-    return this.approval(scope, id);
   }
 
   approval(scope: string, id: string) {
@@ -502,37 +537,41 @@ export class PlatformStore {
     approve: boolean,
     decidedBy: string,
   ) {
-    const current = this.approval(scope, id);
-    if (current.status !== "pending")
-      throw new Error("Approval was already decided");
     identifier(decidedBy);
-    this.tx(() => {
-      this.db
+    return this.tx(() => {
+      const current = this.approval(scope, id);
+      if (current.status !== "pending")
+        throw new Error("Approval was already decided");
+      const result = this.db
         .prepare(
           "UPDATE approvals SET status=?,decided=?,decided_by=? WHERE scope=? AND id=? AND status='pending'",
         )
         .run(approve ? "approved" : "denied", now(), decidedBy, scope, id);
+      if (result.changes === 0)
+        throw new Error("Approval was already decided");
+      return this.approval(scope, id);
     });
-    return this.approval(scope, id);
   }
 
-  approveScope(scope: string, id: string) {
-    this.mission(scope, id);
+  approveScope(scope: string, id: string, operator = "user") {
+    const approvedBy = text(operator, 300);
     this.tx(() => {
+      if (this.mission(scope, id).state === "CLOSED")
+        throw new Error("Mission is closed");
       const node = this.db
         .prepare(
-          "SELECT state FROM nodes WHERE mission_id=? AND id='scope-validation'",
+          "SELECT state FROM nodes WHERE mission_id=? AND scope=? AND id='scope-validation'",
         )
-        .get(id);
+        .get(id, scope);
       if (node?.state !== "WAITING_APPROVAL")
         throw new Error("Scope is not awaiting approval");
       this.db
         .prepare(
-          "UPDATE nodes SET state='COMPLETED',result=? WHERE mission_id=? AND id='scope-validation'",
+          "UPDATE nodes SET state='COMPLETED',result=? WHERE mission_id=? AND scope=? AND id='scope-validation'",
         )
-        .run(json({ approvedBy: "user", timestamp: now() }), id);
+        .run(json({ approvedBy, timestamp: now() }), id, scope);
       this.checkpoint(scope, id, "scope-validation", "COMPLETED", {
-        approvedBy: "user",
+        approvedBy,
       });
     });
   }
@@ -559,12 +598,11 @@ export class PlatformStore {
     owner: string,
     findingIds: string[] = [],
   ): string {
-    if (this.mission(scope, id).state === "CLOSED")
-      throw new Error("Mission is closed");
     identifier(owner);
     return this.tx(() => {
-      const m = this.mission(scope, id),
-        n = m.nodes.find((n) => n.id === node);
+      const m = this.mission(scope, id);
+      if (m.state === "CLOSED") throw new Error("Mission is closed");
+      const n = m.nodes.find((n) => n.id === node);
       if (
         !n ||
         n.id === "scope-validation" ||
@@ -839,8 +877,9 @@ export class PlatformStore {
   ) {
     const explanation = text(reason, 4000),
       decidedBy = text(operator, 300);
-    this.tx(() => {
+    return this.tx(() => {
       const mission = this.mission(scope, id);
+      if (mission.state === "CLOSED") throw new Error("Mission is closed");
       if (mission.nodes.some((n) => n.state === "RUNNING"))
         throw new Error(
           "Mission has running work; inspect effects before reopening validation",
@@ -863,6 +902,12 @@ export class PlatformStore {
           )
           .run(scope, id, node);
       }
+      const affected = this.db
+        .prepare(
+          "SELECT id FROM findings WHERE scope=? AND mission_id=? AND status='verified'",
+        )
+        .all(scope, id)
+        .map((r) => String(r.id));
       this.db
         .prepare(
           "DELETE FROM finding_verifications WHERE scope=? AND finding_id IN (SELECT id FROM findings WHERE scope=? AND mission_id=?)",
@@ -873,15 +918,52 @@ export class PlatformStore {
           "UPDATE findings SET status='unverified' WHERE scope=? AND mission_id=? AND status='verified'",
         )
         .run(scope, id);
+      if (
+        this.db
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='workflow_reports'",
+          )
+          .get()
+      ) {
+        this.db
+          .prepare(
+            "UPDATE workflow_reports SET reviewed=0 WHERE scope=? AND mission_id=?",
+          )
+          .run(scope, id);
+      }
+      for (const fid of affected) {
+        const updated = this.finding(scope, fid);
+        this.index(
+          scope,
+          fid,
+          "finding",
+          updated.title,
+          json(updated),
+          `cyber://finding/${fid}`,
+          id,
+        );
+      }
+      const reopened = this.mission(scope, id);
+      this.index(
+        scope,
+        id,
+        "mission",
+        reopened.title,
+        json(reopened),
+        `cyber://mission/${id}`,
+        id,
+      );
+      return reopened;
     });
-    return this.mission(scope, id);
   }
-  retry(scope: string, id: string, node: string) {
-    this.mission(scope, id);
+  retry(scope: string, id: string, node: string, operator = "user") {
+    const approvedBy = text(operator, 300);
     this.tx(() => {
+      if (this.mission(scope, id).state === "CLOSED")
+        throw new Error("Mission is closed");
       const row = this.db
-        .prepare("SELECT state FROM nodes WHERE mission_id=? AND id=?")
-        .get(id, node);
+        .prepare("SELECT state FROM nodes WHERE mission_id=? AND scope=? AND id=?")
+        .get(id, scope, node);
       if (
         node === "scope-validation" ||
         !row ||
@@ -889,36 +971,45 @@ export class PlatformStore {
       )
         throw new Error("Node cannot be retried");
       this.checkpoint(scope, id, node, "PENDING", {
-        approvedBy: "user",
+        approvedBy,
         possibleEffectsAcknowledged: true,
       });
       this.db
-        .prepare("UPDATE nodes SET state='PENDING' WHERE mission_id=? AND id=?")
-        .run(id, node);
+        .prepare("UPDATE nodes SET state='PENDING' WHERE mission_id=? AND scope=? AND id=?")
+        .run(id, scope, node);
     });
   }
-  skip(scope: string, id: string, node: string, reason: string) {
-    this.mission(scope, id);
+  skip(
+    scope: string,
+    id: string,
+    node: string,
+    reason: string,
+    operator = "user",
+  ) {
     if (["scope-validation", "validation", "evidence", "report"].includes(node))
       throw new Error("Mandatory stages cannot be skipped");
+    const safeReason = text(reason),
+      approvedBy = text(operator, 300);
     this.tx(() => {
+      if (this.mission(scope, id).state === "CLOSED")
+        throw new Error("Mission is closed");
       const row = this.db
-        .prepare("SELECT state FROM nodes WHERE mission_id=? AND id=?")
-        .get(id, node);
+        .prepare("SELECT state FROM nodes WHERE mission_id=? AND scope=? AND id=?")
+        .get(id, scope, node);
       if (
         !row ||
         !["PENDING", "FAILED", "WAITING_APPROVAL"].includes(String(row.state))
       )
         throw new Error("Node cannot be skipped");
       this.checkpoint(scope, id, node, "SKIPPED", {
-        approvedBy: "user",
-        reason: text(reason),
+        approvedBy,
+        reason: safeReason,
       });
       this.db
         .prepare(
-          "UPDATE nodes SET state='SKIPPED',result=? WHERE mission_id=? AND id=?",
+          "UPDATE nodes SET state='SKIPPED',result=? WHERE mission_id=? AND scope=? AND id=?",
         )
-        .run(json({ reason }), id, node);
+        .run(json({ reason: safeReason }), id, scope, node);
     });
   }
   indexEvidence(scope: string, ids: string[]) {
@@ -1040,7 +1131,7 @@ export class PlatformStore {
       if (json(this.sourceState(spec.scope, spec.id).spec) !== json(spec))
         throw new Error("Source registration changed during sync");
       for (const doc of documents)
-        if (doc.text.trim())
+        if (typeof doc.text === "string" && doc.text.trim())
           this.ingestDocument(
             spec.scope,
             spec.id,
@@ -1051,7 +1142,11 @@ export class PlatformStore {
       this.retireDocuments(
         spec.scope,
         spec.id,
-        new Set(documents.filter((d) => d.text.trim()).map((d) => d.uri)),
+        new Set(
+          documents
+            .filter((d) => typeof d.text === "string" && d.text.trim())
+            .map((d) => d.uri),
+        ),
       );
       this.synced(spec.scope, spec.id, etag, lastModified);
     });
@@ -1061,7 +1156,8 @@ export class PlatformStore {
     return this.evidenceStore.evidence(scope, ids);
   }
   createFinding(scope: string, p: FindingProposal) {
-    this.mission(scope, p.missionId);
+    if (this.mission(scope, p.missionId).state === "CLOSED")
+      throw new Error("Mission is closed");
     const title = text(p.title, 1000),
       description = text(p.description),
       limitations = text(p.limitations);
@@ -1121,7 +1217,9 @@ export class PlatformStore {
         0.75,
         new Set(p.checks.map((c) => c.purpose)).size / 3,
       );
-    this.tx(() => {
+    return this.tx(() => {
+      if (this.mission(scope, p.missionId).state === "CLOSED")
+        throw new Error("Mission is closed");
       this.db
         .prepare("INSERT INTO findings VALUES(?,?,?,?,?,?,?,?,?,?,?)")
         .run(
@@ -1145,18 +1243,18 @@ export class PlatformStore {
         this.db
           .prepare("INSERT INTO finding_citations VALUES(?,?,?)")
           .run(id, scope, chunk);
+      const finding = this.finding(scope, id);
+      this.index(
+        scope,
+        id,
+        "finding",
+        title,
+        json(finding),
+        `cyber://finding/${id}`,
+        p.missionId,
+      );
+      return finding;
     });
-    const finding = this.finding(scope, id);
-    this.index(
-      scope,
-      id,
-      "finding",
-      title,
-      json(finding),
-      `cyber://finding/${id}`,
-      p.missionId,
-    );
-    return finding;
   }
   finding(scope: string, id: string) {
     this.open(scope);
@@ -1346,147 +1444,160 @@ export class PlatformStore {
     };
   }
   verifyFinding(scope: string, id: string, verificationId?: string) {
-    const f = this.finding(scope, id),
-      m = this.mission(scope, f.missionId);
-    const verification = m.nodes.find((n) => n.id === "validation");
-    if (
-      verification?.state !== "COMPLETED" ||
-      !Array.isArray(verification.result) ||
-      !verification.result.some(
-        (r: any) => r.role === "verification-agent" && r.evidence?.length,
-      )
-    )
-      throw new Error("Independent verification-stage evidence is required");
-    if (
-      !this.db
-        .prepare(
-          "SELECT 1 FROM verification_links WHERE mission_id=? AND scope=? AND finding_id=? AND attempt=?",
+    return this.tx(() => {
+      const f = this.finding(scope, id),
+        m = this.mission(scope, f.missionId);
+      const verification = m.nodes.find((n) => n.id === "validation");
+      if (
+        verification?.state !== "COMPLETED" ||
+        !Array.isArray(verification.result) ||
+        !verification.result.some(
+          (r: any) => r.role === "verification-agent" && r.evidence?.length,
         )
-        .get(f.missionId, scope, f.id, verification.attempt)
-    )
-      throw new Error(
-        "Finding was not included in the completed verification checkpoint",
-      );
-    if (
-      !f.sources.length ||
-      !f.checks.some((c) => c.purpose === "reproduction") ||
-      !f.checks.some((c) => c.purpose === "negative-control")
-    )
-      throw new Error(
-        "Sources, reproduction and negative controls are required",
-      );
-    if (
-      !verificationId ||
-      f.evidence.includes(verificationId) ||
-      !verification.result.some(
-        (r: Pick<WorkerResult, "evidence" | "role">) =>
-          r.role === "verification-agent" &&
-          r.evidence.includes(verificationId),
       )
-    )
-      throw new Error(
-        "Choose an independent verification observation from the completed validation checkpoint",
-      );
-    const observation = this.evidenceStore.evidence(scope, [verificationId])[0];
-    if (!observation.success)
-      throw new Error("Independent verification observation failed");
-    let attestation: any;
-    try {
-      attestation = JSON.parse(observation.output);
-    } catch {
-      throw new Error("A linked verification attestation is required");
-    }
-    if (
-      observation.tool !== "harness:verification" ||
-      attestation.findingId !== id ||
-      attestation.findingHash !== this.findingHash(scope, id) ||
-      attestation.verdict !== "confirmed"
-    )
-      throw new Error("Verification attestation is unrelated or stale");
-    this.checkVerification(scope, f, attestation.checks, observation.sessionId);
-    const observations = this.evidenceStore.evidence(scope, f.evidence);
-    if (
-      f.checks.some(
-        (c) =>
-          !observations.some(
-            (o) =>
-              o.id === c.observationId &&
-              o.success &&
-              o.output.includes(c.contains),
-          ),
+        throw new Error("Independent verification-stage evidence is required");
+      if (
+        !this.db
+          .prepare(
+            "SELECT 1 FROM verification_links WHERE mission_id=? AND scope=? AND finding_id=? AND attempt=?",
+          )
+          .get(f.missionId, scope, f.id, verification.attempt)
       )
-    )
-      throw new Error("Observed checks no longer match evidence");
-    // The declared control must observe a different output than the
-    // reproduction it refutes. The same observation would have the same
-    // output, so this covers the control that cites the reproduction too.
-    for (const control of f.checks.filter(
-      (c) => c.purpose === "negative-control",
-    )) {
-      for (const claim of f.checks.filter(
-        (c) => c.purpose === "reproduction",
-      )) {
-        const claimed = observations.find((o) => o.id === claim.observationId);
-        const observed = observations.find(
-          (o) => o.id === control.observationId,
+        throw new Error(
+          "Finding was not included in the completed verification checkpoint",
         );
-        if (claimed && observed && claimed.output === observed.output)
-          throw new Error(
-            "A negative control must observe a different output than the reproduction",
-          );
+      if (
+        !f.sources.length ||
+        !f.checks.some((c) => c.purpose === "reproduction") ||
+        !f.checks.some((c) => c.purpose === "negative-control")
+      )
+        throw new Error(
+          "Sources, reproduction and negative controls are required",
+        );
+      if (
+        !verificationId ||
+        f.evidence.includes(verificationId) ||
+        !verification.result.some(
+          (r: Pick<WorkerResult, "evidence" | "role">) =>
+            r.role === "verification-agent" &&
+            r.evidence.includes(verificationId),
+        )
+      )
+        throw new Error(
+          "Choose an independent verification observation from the completed validation checkpoint",
+        );
+      const observation = this.evidenceStore.evidence(scope, [verificationId])[0];
+      if (!observation.success)
+        throw new Error("Independent verification observation failed");
+      let attestation: any;
+      try {
+        attestation = JSON.parse(observation.output);
+      } catch {
+        throw new Error("A linked verification attestation is required");
       }
-    }
-    this.db
-      .prepare(
-        "INSERT INTO finding_verifications(finding_id,scope,observation_id,hash,attempt,timestamp,detail) VALUES(?,?,?,?,?,?,?) ON CONFLICT(finding_id)DO UPDATE SET observation_id=excluded.observation_id,hash=excluded.hash,attempt=excluded.attempt,timestamp=excluded.timestamp,detail=excluded.detail",
+      if (
+        !attestation ||
+        typeof attestation !== "object" ||
+        Array.isArray(attestation) ||
+        observation.tool !== "harness:verification" ||
+        attestation.findingId !== id ||
+        attestation.findingHash !== this.findingHash(scope, id) ||
+        attestation.verdict !== "confirmed"
       )
-      .run(
-        id,
+        throw new Error("Verification attestation is unrelated or stale");
+      this.checkVerification(scope, f, attestation.checks, observation.sessionId);
+      const observations = this.evidenceStore.evidence(scope, f.evidence);
+      if (
+        f.checks.some(
+          (c) =>
+            !observations.some(
+              (o) =>
+                o.id === c.observationId &&
+                o.success &&
+                o.output.includes(c.contains),
+            ),
+        )
+      )
+        throw new Error("Observed checks no longer match evidence");
+      // The declared control must observe a different output than the
+      // reproduction it refutes. The same observation would have the same
+      // output, so this covers the control that cites the reproduction too.
+      for (const control of f.checks.filter(
+        (c) => c.purpose === "negative-control",
+      )) {
+        for (const claim of f.checks.filter(
+          (c) => c.purpose === "reproduction",
+        )) {
+          const claimed = observations.find((o) => o.id === claim.observationId);
+          const observed = observations.find(
+            (o) => o.id === control.observationId,
+          );
+          if (claimed && observed && claimed.output === observed.output)
+            throw new Error(
+              "A negative control must observe a different output than the reproduction",
+            );
+        }
+      }
+      this.db
+        .prepare(
+          "INSERT INTO finding_verifications(finding_id,scope,observation_id,hash,attempt,timestamp,detail) VALUES(?,?,?,?,?,?,?) ON CONFLICT(finding_id)DO UPDATE SET observation_id=excluded.observation_id,hash=excluded.hash,attempt=excluded.attempt,timestamp=excluded.timestamp,detail=excluded.detail",
+        )
+        .run(
+          id,
+          scope,
+          verificationId,
+          observation.hash,
+          verification.attempt,
+          now(),
+          json({
+            sessionId: observation.sessionId,
+            runId: attestation.runId,
+            kind: "technical-reproduction",
+          }),
+        );
+      this.db
+        .prepare(
+          "UPDATE findings SET status='verified',confidence=? WHERE id=? AND scope=?",
+        )
+        .run(new Set(f.checks.map((c) => c.purpose)).size / 3, id, scope);
+      const updated = this.finding(scope, id);
+      this.index(
         scope,
-        verificationId,
-        observation.hash,
-        verification.attempt,
-        now(),
-        json({
-          sessionId: observation.sessionId,
-          runId: attestation.runId,
-          kind: "technical-reproduction",
-        }),
+        id,
+        "finding",
+        updated.title,
+        json(updated),
+        `cyber://finding/${id}`,
+        f.missionId,
       );
-    this.db
-      .prepare(
-        "UPDATE findings SET status='verified',confidence=? WHERE id=? AND scope=?",
-      )
-      .run(new Set(f.checks.map((c) => c.purpose)).size / 3, id, scope);
-    const updated = this.finding(scope, id);
-    this.index(
-      scope,
-      id,
-      "finding",
-      updated.title,
-      json(updated),
-      `cyber://finding/${id}`,
-      f.missionId,
-    );
-    return updated;
+      return updated;
+    });
   }
   rejectFinding(scope: string, id: string) {
-    const f = this.finding(scope, id);
-    this.db
-      .prepare(
-        "UPDATE findings SET status='disproven',confidence=0 WHERE id=? AND scope=?",
-      )
-      .run(id, scope);
-    this.index(
-      scope,
-      id,
-      "finding",
-      f.title,
-      json(this.finding(scope, id)),
-      `cyber://finding/${id}`,
-      f.missionId,
-    );
-    return this.finding(scope, id);
+    return this.tx(() => {
+      const f = this.finding(scope, id);
+      this.db
+        .prepare(
+          "DELETE FROM finding_verifications WHERE finding_id=? AND scope=?",
+        )
+        .run(id, scope);
+      this.db
+        .prepare(
+          "UPDATE findings SET status='disproven',confidence=0 WHERE id=? AND scope=?",
+        )
+        .run(id, scope);
+      const updated = this.finding(scope, id);
+      this.index(
+        scope,
+        id,
+        "finding",
+        updated.title,
+        json(updated),
+        `cyber://finding/${id}`,
+        f.missionId,
+      );
+      return updated;
+    });
   }
   search(
     scope: string,
@@ -1561,35 +1672,47 @@ export class PlatformStore {
     query: string,
     maxChars: number,
   ) {
+    if (
+      typeof sessionId !== "string" ||
+      !sessionId.trim() ||
+      sessionId.length > 256 ||
+      typeof turnId !== "string" ||
+      !turnId.trim() ||
+      turnId.length > 256
+    )
+      throw new Error("Invalid recall session or turn");
     if (!Number.isFinite(maxChars) || maxChars < 0 || maxChars > 64000)
       throw new Error("Invalid recall character budget");
-    const hits = this.search(scope, "all", query, 50),
-      selected: SearchResult[] = [];
-    const seen = new Set<string>();
-    for (const hit of hits) {
-      if (selected.length >= 8) break;
-      const raw = this.db
-        .prepare("SELECT text FROM search_records WHERE id=? AND scope=?")
-        .get(hit.id, scope);
-      const key = memoryFragment(hit.kind, String(raw!.text));
-      if (seen.has(key)) continue;
-      selected.push(hit);
-      if (json(selected).length > maxChars) {
-        selected.pop();
-        continue;
+    const hits = this.search(scope, "all", query, 50);
+    return this.tx(() => {
+      const selected: SearchResult[] = [];
+      const seen = new Set<string>();
+      for (const hit of hits) {
+        if (selected.length >= 8) break;
+        const raw = this.db
+          .prepare("SELECT text FROM search_records WHERE id=? AND scope=?")
+          .get(hit.id, scope);
+        if (!raw) continue;
+        const key = memoryFragment(hit.kind, String(raw.text));
+        if (seen.has(key)) continue;
+        selected.push(hit);
+        if (json(selected).length > maxChars) {
+          selected.pop();
+          continue;
+        }
+        seen.add(key);
       }
-      seen.add(key);
-    }
-    for (const hit of selected) {
-      this.db
-        .prepare("INSERT OR IGNORE INTO memory_refs VALUES(?,?,?,?,?,?,?)")
-        .run(scope, sessionId, turnId, hit.id, hit.kind, hit.hash, now());
-      if (hit.kind !== "source") continue;
-      this.db
-        .prepare("INSERT OR IGNORE INTO memory_uses VALUES(?,?,?,?,?)")
-        .run(scope, sessionId, turnId, hit.id, now());
-    }
-    return selected;
+      for (const hit of selected) {
+        this.db
+          .prepare("INSERT OR IGNORE INTO memory_refs VALUES(?,?,?,?,?,?,?)")
+          .run(scope, sessionId, turnId, hit.id, hit.kind, hit.hash, now());
+        if (hit.kind !== "source") continue;
+        this.db
+          .prepare("INSERT OR IGNORE INTO memory_uses VALUES(?,?,?,?,?)")
+          .run(scope, sessionId, turnId, hit.id, now());
+      }
+      return selected;
+    });
   }
   memoryUses(scope: string, sessionId: string) {
     this.open(scope);
@@ -1610,7 +1733,7 @@ export class PlatformStore {
     this.open(scope);
     return this.db
       .prepare(
-        "SELECT id FROM missions m WHERE scope=? AND NOT EXISTS(SELECT 1 FROM nodes n WHERE n.mission_id=m.id AND n.state NOT IN ('COMPLETED','SKIPPED')) ORDER BY created DESC LIMIT 50",
+        "SELECT id FROM missions m WHERE scope=? AND NOT EXISTS(SELECT 1 FROM mission_closures c WHERE c.mission_id=m.id AND c.scope=m.scope) AND NOT EXISTS(SELECT 1 FROM nodes n WHERE n.mission_id=m.id AND n.scope=m.scope AND n.state NOT IN ('COMPLETED','SKIPPED')) ORDER BY created DESC LIMIT 50",
       )
       .all(scope)
       .map((r) => String(r.id));
@@ -1695,27 +1818,41 @@ export class PlatformStore {
       ?.value as string | undefined;
   }
   indexKnowledge(scope: string) {
+    this.open(scope);
     const facts = this.evidenceStore.getKnowledge(scope, undefined, 200),
       active = new Set(facts.map((f) => `K-${f.id}`));
+    const existingRows = this.db
+      .prepare(
+        "SELECT id, title, hash FROM search_records WHERE scope=? AND kind='knowledge'",
+      )
+      .all(scope) as { id: string; title: string; hash: string }[];
+    const existingById = new Map(existingRows.map((r) => [String(r.id), r]));
+    const staleIds = existingRows
+      .map((r) => String(r.id))
+      .filter((id) => !active.has(id));
+    const updates: { id: string; title: string; body: string; ref: string }[] = [];
+    for (const fact of facts) {
+      const id = `K-${fact.id}`;
+      const body = json(fact);
+      const digest = hash(redactText(body));
+      const prior = existingById.get(id);
+      if (!prior || prior.hash !== digest || prior.title !== fact.key) {
+        updates.push({
+          id,
+          title: fact.key,
+          body,
+          ref: `cyber://knowledge/${fact.id}`,
+        });
+      }
+    }
+    if (!staleIds.length && !updates.length) return;
     this.tx(() => {
-      for (const row of this.db
-        .prepare(
-          "SELECT id FROM search_records WHERE scope=? AND kind='knowledge'",
-        )
-        .all(scope))
-        if (!active.has(String(row.id)))
-          this.db
-            .prepare("DELETE FROM search_records WHERE id=? AND scope=?")
-            .run(row.id, scope);
-      for (const fact of facts)
-        this.index(
-          scope,
-          `K-${fact.id}`,
-          "knowledge",
-          fact.key,
-          json(fact),
-          `cyber://knowledge/${fact.id}`,
-        );
+      for (const staleId of staleIds)
+        this.db
+          .prepare("DELETE FROM search_records WHERE id=? AND scope=?")
+          .run(staleId, scope);
+      for (const u of updates)
+        this.index(scope, u.id, "knowledge", u.title, u.body, u.ref);
     });
   }
   /** A fact needs the observations it was read from, in this scope. */
@@ -1787,7 +1924,11 @@ export class PlatformStore {
     this.open(scope);
     if (!ENTITY_TYPES.includes(input.type as EntityType))
       throw new Error("Unsupported entity type");
-    const key = String(input.key ?? "").trim();
+    const rawKey = String(input.key ?? "").trim();
+    const key =
+      input.type === "secret" || input.type === "url"
+        ? redactText(rawKey)
+        : rawKey;
     if (!key || key.length > 300 || /[\u0000-\u001f]/.test(key))
       throw new Error("Invalid entity key");
     const label =

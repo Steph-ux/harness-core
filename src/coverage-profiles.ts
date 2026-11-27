@@ -138,14 +138,15 @@ export const COVERAGE_CONTRACTS = {
 } as const;
 
 export function coverageProfile(name: string): (typeof COVERAGE_PROFILES)[CoverageProfile] {
-  const profile = COVERAGE_PROFILES[String(name).toLowerCase() as CoverageProfile];
-  if (!profile) throw new Error("Unknown coverage profile");
-  return profile;
+  const key = String(name ?? "").toLowerCase();
+  if (!Object.hasOwn(COVERAGE_PROFILES, key))
+    throw new Error("Unknown coverage profile");
+  return COVERAGE_PROFILES[key as CoverageProfile];
 }
 
 export function coverageContract(name: string): (typeof COVERAGE_CONTRACTS)[CoverageProfile] {
-  const key = String(name).toLowerCase() as CoverageProfile;
-  const contract = COVERAGE_CONTRACTS[key];
-  if (!contract) throw new Error("Unknown coverage profile");
-  return contract;
+  const key = String(name ?? "").toLowerCase();
+  if (!Object.hasOwn(COVERAGE_CONTRACTS, key))
+    throw new Error("Unknown coverage profile");
+  return COVERAGE_CONTRACTS[key as CoverageProfile];
 }

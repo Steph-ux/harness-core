@@ -70,45 +70,61 @@ export class KnowledgeStore implements StorePort {
       throw e;
     }
   }
+  private rollback(): void {
+    try {
+      this.db.exec("ROLLBACK");
+    } catch {
+      /* SQLite may have already rolled back on error */
+    }
+  }
+  private tx<T>(fn: () => T): T {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const out = fn();
+      this.db.exec("COMMIT");
+      return out;
+    } catch (error) {
+      this.rollback();
+      throw error;
+    }
+  }
   private migrate(): void {
-    const version = Number(
-      this.db.prepare("PRAGMA user_version").get()!.user_version,
-    );
-    if (version > 3)
-      throw new Error("Knowledge database is newer than this harness");
-    if (version === 3) return;
-    if (version === 0)
-      this.db.exec(`BEGIN IMMEDIATE;
-      CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, scope TEXT NOT NULL, cwd TEXT NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(id,scope));
-      CREATE TABLE IF NOT EXISTS messages (entry_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, scope TEXT NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL, timestamp TEXT NOT NULL, FOREIGN KEY(session_id,scope) REFERENCES sessions(id,scope));
-      CREATE INDEX IF NOT EXISTS messages_scope ON messages(scope,session_id,timestamp);
-      CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(entry_id UNINDEXED,scope UNINDEXED,text);
-      CREATE TRIGGER IF NOT EXISTS messages_fts_insert AFTER INSERT ON messages BEGIN INSERT INTO messages_fts(entry_id,scope,text) VALUES(new.entry_id,new.scope,new.text); END;
-      CREATE TABLE IF NOT EXISTS observations (id TEXT PRIMARY KEY,session_id TEXT NOT NULL,scope TEXT NOT NULL,tool TEXT NOT NULL,input TEXT NOT NULL,output TEXT NOT NULL,success INTEGER NOT NULL,timestamp TEXT NOT NULL,hash TEXT NOT NULL, UNIQUE(id,scope),FOREIGN KEY(session_id,scope) REFERENCES sessions(id,scope));
-      CREATE INDEX IF NOT EXISTS observations_session ON observations(scope,session_id,timestamp);
-      CREATE TABLE IF NOT EXISTS knowledge (id TEXT PRIMARY KEY,scope TEXT NOT NULL,key TEXT NOT NULL,content TEXT NOT NULL,kind TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL,UNIQUE(id,scope));
-      CREATE UNIQUE INDEX IF NOT EXISTS knowledge_active_key ON knowledge(scope,key) WHERE status='active';
-      CREATE INDEX IF NOT EXISTS knowledge_scope ON knowledge(scope,status);
-      CREATE TABLE IF NOT EXISTS knowledge_evidence (knowledge_id TEXT NOT NULL,observation_id TEXT NOT NULL,scope TEXT NOT NULL,ordinal INTEGER NOT NULL,PRIMARY KEY(knowledge_id,observation_id),FOREIGN KEY(knowledge_id,scope) REFERENCES knowledge(id,scope),FOREIGN KEY(observation_id,scope) REFERENCES observations(id,scope));
-      CREATE TABLE IF NOT EXISTS reviews (session_id TEXT PRIMARY KEY,scope TEXT NOT NULL,digest TEXT NOT NULL,status TEXT NOT NULL,detail TEXT NOT NULL,updated_at TEXT NOT NULL,FOREIGN KEY(session_id,scope) REFERENCES sessions(id,scope));
-      CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT,scope TEXT NOT NULL,event TEXT NOT NULL,detail TEXT NOT NULL,timestamp TEXT NOT NULL);
-      CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit_log BEGIN SELECT RAISE(ABORT,'Audit log is append-only'); END;
-      CREATE TRIGGER IF NOT EXISTS audit_no_delete BEFORE DELETE ON audit_log BEGIN SELECT RAISE(ABORT,'Audit log is append-only'); END;
-      DELETE FROM messages_fts;
-      INSERT INTO messages_fts(entry_id,scope,text) SELECT entry_id,scope,text FROM messages;
-      PRAGMA user_version = 1;
-      COMMIT;`);
-    if (version < 2) {
-      // Idempotent: a database that kept its columns but lost its version tag
-      // must migrate, not fail on a duplicate column.
-      const columns = new Set(
-        this.db
-          .prepare("PRAGMA table_info(observations)")
-          .all()
-          .map((row) => String(row.name)),
+    this.tx(() => {
+      const version = Number(
+        this.db.prepare("PRAGMA user_version").get()!.user_version,
       );
-      this.db.exec("BEGIN IMMEDIATE;");
-      try {
+      if (version > 3)
+        throw new Error("Knowledge database is newer than this harness");
+      if (version === 0) {
+        this.db.exec(`
+        CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, scope TEXT NOT NULL, cwd TEXT NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(id,scope));
+        CREATE TABLE IF NOT EXISTS messages (entry_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, scope TEXT NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL, timestamp TEXT NOT NULL, FOREIGN KEY(session_id,scope) REFERENCES sessions(id,scope));
+        CREATE INDEX IF NOT EXISTS messages_scope ON messages(scope,session_id,timestamp);
+        CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(entry_id UNINDEXED,scope UNINDEXED,text);
+        CREATE TRIGGER IF NOT EXISTS messages_fts_insert AFTER INSERT ON messages BEGIN INSERT INTO messages_fts(entry_id,scope,text) VALUES(new.entry_id,new.scope,new.text); END;
+        CREATE TABLE IF NOT EXISTS observations (id TEXT PRIMARY KEY,session_id TEXT NOT NULL,scope TEXT NOT NULL,tool TEXT NOT NULL,input TEXT NOT NULL,output TEXT NOT NULL,success INTEGER NOT NULL,timestamp TEXT NOT NULL,hash TEXT NOT NULL, UNIQUE(id,scope),FOREIGN KEY(session_id,scope) REFERENCES sessions(id,scope));
+        CREATE INDEX IF NOT EXISTS observations_session ON observations(scope,session_id,timestamp);
+        CREATE TABLE IF NOT EXISTS knowledge (id TEXT PRIMARY KEY,scope TEXT NOT NULL,key TEXT NOT NULL,content TEXT NOT NULL,kind TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL,UNIQUE(id,scope));
+        CREATE UNIQUE INDEX IF NOT EXISTS knowledge_active_key ON knowledge(scope,key) WHERE status='active';
+        CREATE INDEX IF NOT EXISTS knowledge_scope ON knowledge(scope,status);
+        CREATE TABLE IF NOT EXISTS knowledge_evidence (knowledge_id TEXT NOT NULL,observation_id TEXT NOT NULL,scope TEXT NOT NULL,ordinal INTEGER NOT NULL,PRIMARY KEY(knowledge_id,observation_id),FOREIGN KEY(knowledge_id,scope) REFERENCES knowledge(id,scope),FOREIGN KEY(observation_id,scope) REFERENCES observations(id,scope));
+        CREATE TABLE IF NOT EXISTS reviews (session_id TEXT PRIMARY KEY,scope TEXT NOT NULL,digest TEXT NOT NULL,status TEXT NOT NULL,detail TEXT NOT NULL,updated_at TEXT NOT NULL,FOREIGN KEY(session_id,scope) REFERENCES sessions(id,scope));
+        CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT,scope TEXT NOT NULL,event TEXT NOT NULL,detail TEXT NOT NULL,timestamp TEXT NOT NULL);
+        CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit_log BEGIN SELECT RAISE(ABORT,'Audit log is append-only'); END;
+        CREATE TRIGGER IF NOT EXISTS audit_no_delete BEFORE DELETE ON audit_log BEGIN SELECT RAISE(ABORT,'Audit log is append-only'); END;
+        DELETE FROM messages_fts;
+        INSERT INTO messages_fts(entry_id,scope,text) SELECT entry_id,scope,text FROM messages;
+        PRAGMA user_version = 1;`);
+      }
+      if (version < 2) {
+        // Idempotent: a database that kept its columns but lost its version tag
+        // must migrate, not fail on a duplicate column.
+        const columns = new Set(
+          this.db
+            .prepare("PRAGMA table_info(observations)")
+            .all()
+            .map((row) => String(row.name)),
+        );
         for (const [name, type] of [
           ["raw_hash", "TEXT"],
           ["raw_bytes", "INTEGER"],
@@ -119,19 +135,36 @@ export class KnowledgeStore implements StorePort {
               `ALTER TABLE observations ADD COLUMN ${name} ${type};`,
             );
         this.db.exec(`
-      CREATE TRIGGER IF NOT EXISTS observations_no_update BEFORE UPDATE ON observations BEGIN SELECT RAISE(ABORT,'Immutable observation'); END;
-      CREATE TRIGGER IF NOT EXISTS observations_no_delete BEFORE DELETE ON observations BEGIN SELECT RAISE(ABORT,'Immutable observation'); END;
-      PRAGMA user_version=2; COMMIT;`);
-      } catch (error) {
-        this.db.exec("ROLLBACK");
-        throw error;
+        CREATE TRIGGER IF NOT EXISTS observations_no_update BEFORE UPDATE ON observations BEGIN SELECT RAISE(ABORT,'Immutable observation'); END;
+        CREATE TRIGGER IF NOT EXISTS observations_no_delete BEFORE DELETE ON observations BEGIN SELECT RAISE(ABORT,'Immutable observation'); END;
+        PRAGMA user_version=2;`);
       }
-    }
-    if (version < 3)
-      this.db.exec(`BEGIN IMMEDIATE;
-      CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages BEGIN DELETE FROM messages_fts WHERE entry_id=old.entry_id; END;
-      CREATE INDEX IF NOT EXISTS messages_timestamp ON messages(timestamp);
-      PRAGMA user_version=3; COMMIT;`);
+      if (version < 3) {
+        this.db.exec(`
+        CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages BEGIN DELETE FROM messages_fts WHERE entry_id=old.entry_id; END;
+        CREATE INDEX IF NOT EXISTS messages_timestamp ON messages(timestamp);
+        PRAGMA user_version=3;`);
+      }
+      const existing = this.db
+        .prepare("SELECT name, type FROM sqlite_master WHERE type IN ('table','index')")
+        .all() as { name: string; type: string }[];
+      const tables = new Set(
+        existing.filter((r) => r.type === "table").map((r) => r.name),
+      );
+      const indexes = new Set(
+        existing.filter((r) => r.type === "index").map((r) => r.name),
+      );
+      for (const [table, indexName, cols] of [
+        ["observations", "observations_scope", "observations(scope)"],
+        ["audit_log", "audit_log_scope_event", "audit_log(scope,event,id)"],
+        ["sessions", "sessions_scope_updated", "sessions(scope,updated_at)"],
+        ["reviews", "reviews_scope_updated", "reviews(scope,updated_at)"],
+      ] as const) {
+        if (tables.has(table) && !indexes.has(indexName)) {
+          this.db.exec(`CREATE INDEX IF NOT EXISTS ${indexName} ON ${cols};`);
+        }
+      }
+    });
   }
   private open(): void {
     if (this.closed) throw new Error("Knowledge store is closed");
@@ -157,22 +190,24 @@ export class KnowledgeStore implements StorePort {
       typeof session.cwd !== "string"
     )
       throw new Error("Invalid session");
-    const prior = this.db
-      .prepare("SELECT scope FROM sessions WHERE id=?")
-      .get(session.id);
-    if (prior && prior.scope !== session.scope)
-      throw new Error("Session scope collision");
-    this.db
-      .prepare(
-        "INSERT INTO sessions VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at",
-      )
-      .run(
-        session.id,
-        session.scope,
-        redactText(session.cwd),
-        session.status,
-        session.updatedAt,
-      );
+    this.tx(() => {
+      const prior = this.db
+        .prepare("SELECT scope FROM sessions WHERE id=?")
+        .get(session.id);
+      if (prior && prior.scope !== session.scope)
+        throw new Error("Session scope collision");
+      this.db
+        .prepare(
+          "INSERT INTO sessions VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at",
+        )
+        .run(
+          session.id,
+          session.scope,
+          redactText(session.cwd),
+          session.status,
+          session.updatedAt,
+        );
+    });
   }
   recordMessage(
     sessionId: string,
@@ -182,7 +217,9 @@ export class KnowledgeStore implements StorePort {
     text: string,
     timestamp: string,
   ): void {
-    this.session(sessionId, scope);
+    this.open();
+    scopeCheck(scope);
+    idCheck(sessionId);
     idCheck(entryId);
     stamp(timestamp);
     if (
@@ -193,31 +230,37 @@ export class KnowledgeStore implements StorePort {
     )
       throw new Error("Invalid indexed message");
     const safe = redactText(text).slice(0, 100000);
-    const existing = this.db
-      .prepare("SELECT * FROM messages WHERE entry_id=?")
-      .get(entryId);
-    if (existing) {
-      if (
-        existing.session_id !== sessionId ||
-        existing.scope !== scope ||
-        existing.role !== role ||
-        existing.text !== safe ||
-        existing.timestamp !== timestamp
-      )
-        throw new Error("Message entry collision");
-      return;
-    }
-    this.db
-      .prepare(
-        "INSERT INTO messages(entry_id,session_id,scope,role,text,timestamp) VALUES(?,?,?,?,?,?)",
-      )
-      .run(entryId, sessionId, scope, role, safe, timestamp);
+    this.tx(() => {
+      this.session(sessionId, scope);
+      const existing = this.db
+        .prepare("SELECT * FROM messages WHERE entry_id=?")
+        .get(entryId);
+      if (existing) {
+        if (
+          existing.session_id !== sessionId ||
+          existing.scope !== scope ||
+          existing.role !== role ||
+          existing.text !== safe ||
+          existing.timestamp !== timestamp
+        )
+          throw new Error("Message entry collision");
+        return;
+      }
+      this.db
+        .prepare(
+          "INSERT INTO messages(entry_id,session_id,scope,role,text,timestamp) VALUES(?,?,?,?,?,?)",
+        )
+        .run(entryId, sessionId, scope, role, safe, timestamp);
+    });
   }
   recordObservation(observation: Omit<Observation, "hash">): Observation {
     this.open();
+    if (!observation || typeof observation !== "object")
+      throw new Error("Invalid observation");
     if ("hash" in observation)
       throw new Error("Unexpected supplied observation hash");
-    this.session(observation.sessionId, observation.scope);
+    scopeCheck(observation.scope);
+    idCheck(observation.sessionId);
     idCheck(observation.id);
     stamp(observation.timestamp);
     if (
@@ -243,41 +286,44 @@ export class KnowledgeStore implements StorePort {
       truncated: redactText(observation.output).length > 24000,
     };
     const digest = hash(JSON.stringify(immutable));
-    const prior = this.db
-      .prepare("SELECT * FROM observations WHERE id=?")
-      .get(observation.id);
-    if (prior) {
-      // Compare the stored fields, not the hash. Rows written before the
-      // digest dropped the timestamp still match a replay of the same content.
-      if (!this.sameObservationContent(prior, immutable))
-        throw new Error("Immutable observation collision");
-      return this.observation(prior);
-    }
-    this.db
-      .prepare(
-        "INSERT INTO observations(id,session_id,scope,tool,input,output,success,timestamp,hash,raw_hash,raw_bytes,truncated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-      )
-      .run(
-        immutable.id,
-        immutable.sessionId,
-        immutable.scope,
-        immutable.tool,
-        JSON.stringify(immutable.input),
-        immutable.output,
-        immutable.success ? 1 : 0,
-        observation.timestamp,
-        digest,
-        immutable.rawHash,
-        immutable.rawBytes,
-        immutable.truncated ? 1 : 0,
+    return this.tx(() => {
+      this.session(observation.sessionId, observation.scope);
+      const prior = this.db
+        .prepare("SELECT * FROM observations WHERE id=?")
+        .get(observation.id);
+      if (prior) {
+        // Compare the stored fields, not the hash. Rows written before the
+        // digest dropped the timestamp still match a replay of the same content.
+        if (!this.sameObservationContent(prior, immutable))
+          throw new Error("Immutable observation collision");
+        return this.observation(prior);
+      }
+      this.db
+        .prepare(
+          "INSERT INTO observations(id,session_id,scope,tool,input,output,success,timestamp,hash,raw_hash,raw_bytes,truncated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        )
+        .run(
+          immutable.id,
+          immutable.sessionId,
+          immutable.scope,
+          immutable.tool,
+          JSON.stringify(immutable.input),
+          immutable.output,
+          immutable.success ? 1 : 0,
+          observation.timestamp,
+          digest,
+          immutable.rawHash,
+          immutable.rawBytes,
+          immutable.truncated ? 1 : 0,
+        );
+      return JSON.parse(
+        JSON.stringify({
+          ...immutable,
+          timestamp: observation.timestamp,
+          hash: digest,
+        }),
       );
-    return JSON.parse(
-      JSON.stringify({
-        ...immutable,
-        timestamp: observation.timestamp,
-        hash: digest,
-      }),
-    );
+    });
   }
   private sameObservationContent(
     row: Row,
@@ -437,25 +483,24 @@ export class KnowledgeStore implements StorePort {
       throw new Error("Invalid knowledge kind");
     if (!Array.isArray(proposal.evidence) || !proposal.evidence.length)
       throw new Error("Knowledge requires evidence");
-    const evidence = this.evidence(scope, proposal.evidence);
-    if (!evidence.some((item) => item.success))
-      throw new Error("Knowledge requires successful evidence");
-    const duplicate = this.db
-      .prepare(
-        "SELECT * FROM knowledge WHERE scope=? AND key=? AND content=? AND kind=? AND status IN ('active','pending') ORDER BY created_at DESC LIMIT 1",
-      )
-      .get(scope, proposal.key, proposal.content, proposal.kind);
-    if (duplicate) return this.knowledge(duplicate);
-    const conflict = this.db
-      .prepare(
-        "SELECT id FROM knowledge WHERE scope=? AND key=? AND status='active'",
-      )
-      .get(scope, proposal.key);
-    const id = newId(),
-      createdAt = now(),
-      status = conflict ? "pending" : "active";
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    return this.tx(() => {
+      const evidence = this.evidence(scope, proposal.evidence);
+      if (!evidence.some((item) => item.success))
+        throw new Error("Knowledge requires successful evidence");
+      const duplicate = this.db
+        .prepare(
+          "SELECT * FROM knowledge WHERE scope=? AND key=? AND content=? AND kind=? AND status IN ('active','pending') ORDER BY created_at DESC LIMIT 1",
+        )
+        .get(scope, proposal.key, proposal.content, proposal.kind);
+      if (duplicate) return this.knowledge(duplicate);
+      const conflict = this.db
+        .prepare(
+          "SELECT id FROM knowledge WHERE scope=? AND key=? AND status='active'",
+        )
+        .get(scope, proposal.key);
+      const id = newId(),
+        createdAt = now(),
+        status = conflict ? "pending" : "active";
       this.db
         .prepare("INSERT INTO knowledge VALUES(?,?,?,?,?,?,?)")
         .run(
@@ -472,14 +517,10 @@ export class KnowledgeStore implements StorePort {
           .prepare("INSERT INTO knowledge_evidence VALUES(?,?,?,?)")
           .run(id, item.id, scope, index),
       );
-      this.db.exec("COMMIT");
-    } catch (e) {
-      this.db.exec("ROLLBACK");
-      throw e;
-    }
-    return this.knowledge(
-      this.db.prepare("SELECT * FROM knowledge WHERE id=?").get(id)!,
-    );
+      return this.knowledge(
+        this.db.prepare("SELECT * FROM knowledge WHERE id=?").get(id)!,
+      );
+    });
   }
   /**
    * Declare an operator rule. Unlike learned knowledge, a rule is stated by the
@@ -498,19 +539,18 @@ export class KnowledgeStore implements StorePort {
     )
       throw new Error("Invalid knowledge key slug");
     assertLearningText(rule.content);
-    const existing = this.db
-      .prepare(
-        "SELECT * FROM knowledge WHERE scope=? AND key=? AND kind='operator' ORDER BY created_at DESC LIMIT 1",
+    return this.tx(() => {
+      const existing = this.db
+        .prepare(
+          "SELECT * FROM knowledge WHERE scope=? AND key=? AND kind='operator' ORDER BY created_at DESC LIMIT 1",
+        )
+        .get(scope, rule.key);
+      if (
+        existing &&
+        existing.status === "active" &&
+        existing.content === rule.content
       )
-      .get(scope, rule.key);
-    if (
-      existing &&
-      existing.status === "active" &&
-      existing.content === rule.content
-    )
-      return this.knowledge(existing);
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+        return this.knowledge(existing);
       if (existing)
         this.db
           .prepare(
@@ -535,14 +575,10 @@ export class KnowledgeStore implements StorePort {
           "active",
           createdAt,
         );
-      this.db.exec("COMMIT");
       return this.knowledge(
         this.db.prepare("SELECT * FROM knowledge WHERE id=?").get(id)!,
       );
-    } catch (e) {
-      this.db.exec("ROLLBACK");
-      throw e;
-    }
+    });
   }
   operatorModel(scope: string): KnowledgeRecord[] {
     this.open();
@@ -589,40 +625,35 @@ export class KnowledgeStore implements StorePort {
     this.open();
     scopeCheck(scope);
     idCheck(id);
-    const row = this.db.prepare("SELECT * FROM knowledge WHERE id=?").get(id);
-    if (!row) throw new Error("Missing knowledge");
-    if (row.scope !== scope) throw new Error("Knowledge scope mismatch");
-    // Inferred knowledge waits for review; operator-declared rules are the
-    // operator's own state, so retracting or reinstating one is always allowed.
-    if (row.status !== "pending" && row.kind !== "operator")
-      throw new Error("Knowledge is not pending");
-    if (row.kind === "operator" && row.status === "active" && approve) return;
-    if (
-      approve &&
-      row.kind !== "operator" &&
-      this.db
-        .prepare(
-          "SELECT 1 FROM knowledge WHERE scope=? AND key=? AND kind='operator' AND status='active'",
-        )
-        .get(scope, row.key)
-    )
-      throw new Error("An inferred fact cannot replace an operator rule");
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    this.tx(() => {
+      const row = this.db.prepare("SELECT * FROM knowledge WHERE id=?").get(id);
+      if (!row) throw new Error("Missing knowledge");
+      if (row.scope !== scope) throw new Error("Knowledge scope mismatch");
+      // Inferred knowledge waits for review; operator-declared rules are the
+      // operator's own state, so retracting or reinstating one is always allowed.
+      if (row.status !== "pending" && row.kind !== "operator")
+        throw new Error("Knowledge is not pending");
+      if (row.kind === "operator" && row.status === "active" && approve) return;
+      if (
+        approve &&
+        row.kind !== "operator" &&
+        this.db
+          .prepare(
+            "SELECT 1 FROM knowledge WHERE scope=? AND key=? AND kind='operator' AND status='active'",
+          )
+          .get(scope, row.key)
+      )
+        throw new Error("An inferred fact cannot replace an operator rule");
       if (approve)
         this.db
           .prepare(
-            "UPDATE knowledge SET status='retired' WHERE scope=? AND key=? AND status='active'",
+            "UPDATE knowledge SET status='retired' WHERE scope=? AND key=? AND status='active' AND kind!='operator'",
           )
           .run(scope, row.key);
       this.db
         .prepare("UPDATE knowledge SET status=? WHERE id=? AND scope=?")
         .run(approve ? "active" : "rejected", id, scope);
-      this.db.exec("COMMIT");
-    } catch (e) {
-      this.db.exec("ROLLBACK");
-      throw e;
-    }
+    });
   }
   private hit(row: Row): SearchHit {
     return {

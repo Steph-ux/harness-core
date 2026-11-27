@@ -43,6 +43,28 @@ export interface Hypothesis {
 }
 
 const STALE_MS = 30 * 60 * 1000;
+const HYPOTHESIS_STATES: HypothesisState[] = [
+  "proposed",
+  "testing",
+  "confirmed",
+  "refuted",
+  "stale",
+];
+const SURFACE_STATES: SurfaceState[] = [
+  "untested",
+  "in-progress",
+  "tested",
+  "blocked",
+];
+const identifier = (value: unknown): value is string =>
+  typeof value === "string" &&
+  /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/.test(value);
+const assertTimestamp = (value: string): number => {
+  if (typeof value !== "string") throw new Error("Invalid timestamp");
+  const ms = Date.parse(value);
+  if (!Number.isFinite(ms)) throw new Error("Invalid timestamp");
+  return ms;
+};
 
 function normalizeHypothesis(h: Hypothesis): Hypothesis {
   return {
@@ -82,8 +104,14 @@ export function advanceHypothesis(
 ): HypothesisState {
   if (h.state === "confirmed" || h.state === "refuted") return h.state;
   if (h.counterEvidence.length > 0) return "refuted";
-  if (h.state === "testing" && canConfirmHypothesis(h)) return "confirmed";
-  if (now - Date.parse(h.updatedAt) > STALE_MS) return "stale";
+  const fresh = now - Date.parse(h.updatedAt) <= STALE_MS;
+  if (
+    (h.state === "testing" || (h.state === "stale" && fresh)) &&
+    canConfirmHypothesis(h)
+  )
+    return "confirmed";
+  if (!fresh) return "stale";
+  if (h.state === "stale") return "testing";
   return h.state;
 }
 
@@ -117,11 +145,15 @@ export class HypothesisTracker {
   }
 
   propose(id: string, text: string, timestamp: string): Hypothesis {
+    if (!identifier(id)) throw new Error("Invalid hypothesis id");
+    if (typeof text !== "string" || !text.trim())
+      throw new Error("Hypothesis text is required");
+    assertTimestamp(timestamp);
     if (this.items.some((h) => h.id === id))
       throw new Error(`Hypothesis ${id} already exists`);
     const h: Hypothesis = {
       id,
-      text,
+      text: text.trim(),
       state: "proposed",
       evidence: [],
       control: [],
@@ -131,17 +163,18 @@ export class HypothesisTracker {
       updatedAt: timestamp,
     };
     this.items.push(h);
-    return { ...h, evidence: [...h.evidence], control: [...h.control], outputs: { ...h.outputs }, counterEvidence: [...h.counterEvidence] };
+    return normalizeHypothesis(h);
   }
 
   test(id: string, timestamp: string): Hypothesis {
+    const ms = assertTimestamp(timestamp);
     const h = this.find(id);
-    if (h.state !== "proposed")
+    if (h.state !== "proposed" && h.state !== "stale")
       throw new Error(`Hypothesis ${id} is ${h.state}, cannot start testing`);
     h.state = "testing";
     h.updatedAt = timestamp;
-    h.state = advanceHypothesis(h, Date.parse(timestamp));
-    return { ...h };
+    h.state = advanceHypothesis(h, ms);
+    return normalizeHypothesis(h);
   }
 
   addEvidence(
@@ -150,13 +183,14 @@ export class HypothesisTracker {
     timestamp: string,
     outputHash: string,
   ): Hypothesis {
+    const ms = assertTimestamp(timestamp);
     const h = this.find(id);
     if (h.state === "confirmed" || h.state === "refuted")
       throw new Error(`Hypothesis ${id} is already ${h.state}`);
     bindObservation(h, "evidence", observationId, outputHash);
     h.updatedAt = timestamp;
-    h.state = advanceHypothesis(h, Date.parse(timestamp));
-    return { ...h };
+    h.state = advanceHypothesis(h, ms);
+    return normalizeHypothesis(h);
   }
 
   addControl(
@@ -165,16 +199,18 @@ export class HypothesisTracker {
     timestamp: string,
     outputHash: string,
   ): Hypothesis {
+    const ms = assertTimestamp(timestamp);
     const h = this.find(id);
     if (h.state === "confirmed" || h.state === "refuted")
       throw new Error(`Hypothesis ${id} is already ${h.state}`);
     bindObservation(h, "control", observationId, outputHash);
     h.updatedAt = timestamp;
-    h.state = advanceHypothesis(h, Date.parse(timestamp));
-    return { ...h };
+    h.state = advanceHypothesis(h, ms);
+    return normalizeHypothesis(h);
   }
 
   refute(id: string, observationId: string, timestamp: string): Hypothesis {
+    assertTimestamp(timestamp);
     const h = this.find(id);
     if (h.state === "confirmed")
       throw new Error(`Hypothesis ${id} is confirmed; open a new one`);
@@ -182,7 +218,7 @@ export class HypothesisTracker {
       h.counterEvidence.push(observationId);
     h.updatedAt = timestamp;
     h.state = "refuted";
-    return { ...h };
+    return normalizeHypothesis(h);
   }
 
   /** Advance all non-terminal hypotheses and return the ones that became stale. */
@@ -193,24 +229,26 @@ export class HypothesisTracker {
       if (next !== h.state) {
         h.state = next;
         h.updatedAt = new Date(now).toISOString();
-        if (next === "stale") stale.push({ ...h });
+        if (next === "stale") stale.push(normalizeHypothesis(h));
       }
     }
     return stale;
   }
 
   list(): readonly Hypothesis[] {
-    return this.items.map((h) => ({ ...h }));
+    return this.items.map((h) => normalizeHypothesis(h));
   }
 
   active(): Hypothesis[] {
     return this.items
       .filter((h) => h.state === "proposed" || h.state === "testing")
-      .map((h) => ({ ...h }));
+      .map((h) => normalizeHypothesis(h));
   }
 
   refuted(): Hypothesis[] {
-    return this.items.filter((h) => h.state === "refuted").map((h) => ({ ...h }));
+    return this.items
+      .filter((h) => h.state === "refuted")
+      .map((h) => normalizeHypothesis(h));
   }
 
   private find(id: string): Hypothesis {
@@ -229,6 +267,7 @@ export interface ToolCall {
   outputHash: string;
   success: boolean;
   timestamp: string;
+  input?: unknown;
 }
 
 export interface StagnationSignal {
@@ -240,6 +279,18 @@ export interface StagnationSignal {
 const WINDOW_SIZE = 10;
 const LOOP_THRESHOLD = 3;
 const NO_PROGRESS_MINUTES = 15;
+const PROCESS_BOOKKEEPING_ACTIONS = new Set(["run", "list", "stop", "prune"]);
+
+function isNonReadProcessAction(call: ToolCall): boolean {
+  if (call.tool !== "cyber_process") return false;
+  const action =
+    call.input && typeof call.input === "object"
+      ? (call.input as Record<string, unknown>).action
+      : undefined;
+  return (
+    typeof action === "string" && PROCESS_BOOKKEEPING_ACTIONS.has(action)
+  );
+}
 
 export function detectStagnation(
   calls: readonly ToolCall[],
@@ -251,16 +302,22 @@ export function detectStagnation(
   if (calls.length < 3) return signals;
 
   const recent = calls.slice(-WINDOW_SIZE);
+  // Intentional non-"read" cyber_process calls carry success:false per
+  // DECISIONS.md ("launch is not a proof outcome"), so exclude them from
+  // tool-loop, output-repeat, and same-failure signals.
+  const recentActionable = calls
+    .filter((call) => !isNonReadProcessAction(call))
+    .slice(-WINDOW_SIZE);
 
   // Tool loop: same tool called N+ times in the window
   const toolCounts = new Map<string, number>();
-  for (const call of recent)
+  for (const call of recentActionable)
     toolCounts.set(call.tool, (toolCounts.get(call.tool) ?? 0) + 1);
   for (const [tool, count] of toolCounts) {
     if (count >= LOOP_THRESHOLD) {
       signals.push({
         kind: "tool-loop",
-        detail: `${tool} called ${count} times in last ${recent.length} calls`,
+        detail: `${tool} called ${count} times in last ${recentActionable.length} calls`,
         severity: count >= LOOP_THRESHOLD + 2 ? "critical" : "warning",
       });
     }
@@ -268,7 +325,7 @@ export function detectStagnation(
 
   // Output repeat: same output hash appearing 3+ times
   const hashCounts = new Map<string, number>();
-  for (const call of recent)
+  for (const call of recentActionable)
     hashCounts.set(call.outputHash, (hashCounts.get(call.outputHash) ?? 0) + 1);
   for (const [h, count] of hashCounts) {
     if (count >= LOOP_THRESHOLD) {
@@ -282,7 +339,7 @@ export function detectStagnation(
 
   // Same failure: same tool failing repeatedly
   const failCounts = new Map<string, number>();
-  for (const call of recent) {
+  for (const call of recentActionable) {
     if (!call.success)
       failCounts.set(call.tool, (failCounts.get(call.tool) ?? 0) + 1);
   }
@@ -290,7 +347,7 @@ export function detectStagnation(
     if (count >= LOOP_THRESHOLD) {
       signals.push({
         kind: "same-failure",
-        detail: `${tool} failed ${count} times in last ${recent.length} calls`,
+        detail: `${tool} failed ${count} times in last ${recentActionable.length} calls`,
         severity: "critical",
       });
     }
@@ -325,6 +382,13 @@ export interface SurfaceCoverage {
   reason?: string;
 }
 
+function cloneSurface(s: SurfaceCoverage): SurfaceCoverage {
+  return {
+    ...s,
+    evidence: [...(s.evidence ?? [])],
+  };
+}
+
 export class CoverageMap {
   private surfaces: Map<string, SurfaceCoverage> = new Map();
 
@@ -342,8 +406,16 @@ export class CoverageMap {
   }
 
   add(id: string, label: string): void {
+    if (!identifier(id)) throw new Error("Invalid surface id");
+    if (typeof label !== "string" || !label.trim())
+      throw new Error("Surface label is required");
     if (!this.surfaces.has(id)) {
-      this.surfaces.set(id, { id, label, state: "untested", evidence: [] });
+      this.surfaces.set(id, {
+        id,
+        label: label.trim(),
+        state: "untested",
+        evidence: [],
+      });
     }
   }
 
@@ -362,9 +434,11 @@ export class CoverageMap {
   }
 
   block(id: string, reason: string): void {
+    if (typeof reason !== "string" || !reason.trim())
+      throw new Error("A blocked surface requires a reason");
     const s = this.get(id);
     s.state = "blocked";
-    s.reason = reason;
+    s.reason = reason.trim();
   }
 
   summary(): {
@@ -382,26 +456,26 @@ export class CoverageMap {
       inProgress: all.filter((s) => s.state === "in-progress").length,
       blocked: all.filter((s) => s.state === "blocked").length,
       untested: all.filter((s) => s.state === "untested").length,
-      surfaces: all.map((s) => ({ ...s })),
+      surfaces: all.map((s) => cloneSurface(s)),
     };
   }
 
   untested(): SurfaceCoverage[] {
     return [...this.surfaces.values()]
       .filter((s) => s.state === "untested")
-      .map((s) => ({ ...s }));
+      .map((s) => cloneSurface(s));
   }
 
   /** Every surface, for persistence. */
   entries(): SurfaceCoverage[] {
-    return [...this.surfaces.values()].map((s) => ({ ...s, evidence: [...s.evidence] }));
+    return [...this.surfaces.values()].map((s) => cloneSurface(s));
   }
 
   /** Rebuild a map from persisted surfaces, keeping their states. */
   static fromEntries(entries: readonly SurfaceCoverage[]): CoverageMap {
     const map = new CoverageMap();
     for (const entry of entries) {
-      map.surfaces.set(entry.id, { ...entry, evidence: [...entry.evidence] });
+      map.surfaces.set(entry.id, cloneSurface(entry));
     }
     return map;
   }
@@ -829,6 +903,79 @@ interface InvestigationData {
 const MAX_HYPOTHESES = 200;
 const MAX_SURFACES = 500;
 const MAX_TEXT = 400;
+const STALE_LOCK_MS = 30000;
+
+const isPidAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+};
+
+const isStaleLock = (lock: string, stat: fs.Stats): boolean => {
+  if (Date.now() - stat.mtimeMs > STALE_LOCK_MS) return true;
+  try {
+    const raw = fs.readFileSync(lock, "utf8").trim();
+    if (!raw) return false;
+    const parsed = JSON.parse(raw) as { pid?: unknown };
+    if (
+      typeof parsed?.pid === "number" &&
+      Number.isInteger(parsed.pid) &&
+      parsed.pid > 0 &&
+      parsed.pid !== process.pid &&
+      !isPidAlive(parsed.pid)
+    )
+      return true;
+  } catch {
+    /* Unreadable or partial lock relies on the age threshold above. */
+  }
+  return false;
+};
+
+const isStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((item) => typeof item === "string");
+
+const isValidHypothesis = (value: unknown): value is Hypothesis => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const h = value as Record<string, unknown>;
+  if (
+    !identifier(h.id) ||
+    typeof h.text !== "string" ||
+    !HYPOTHESIS_STATES.includes(h.state as HypothesisState) ||
+    !isStringArray(h.evidence) ||
+    typeof h.createdAt !== "string" ||
+    typeof h.updatedAt !== "string"
+  )
+    return false;
+  if (h.control !== undefined && !isStringArray(h.control)) return false;
+  if (h.counterEvidence !== undefined && !isStringArray(h.counterEvidence))
+    return false;
+  if (
+    h.outputs !== undefined &&
+    (!h.outputs ||
+      typeof h.outputs !== "object" ||
+      Array.isArray(h.outputs) ||
+      !Object.values(h.outputs).every((v) => typeof v === "string"))
+  )
+    return false;
+  return true;
+};
+
+const isValidSurface = (value: unknown): value is SurfaceCoverage => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const s = value as Record<string, unknown>;
+  if (
+    !identifier(s.id) ||
+    typeof s.label !== "string" ||
+    !SURFACE_STATES.includes(s.state as SurfaceState) ||
+    !isStringArray(s.evidence)
+  )
+    return false;
+  if (s.reason !== undefined && typeof s.reason !== "string") return false;
+  return true;
+};
 
 /**
  * Hypotheses and surface coverage, per scope, in a small JSON file.
@@ -853,9 +1000,21 @@ export class InvestigationStore {
     try {
       assertPlainPath(this.file(scope));
       const value = JSON.parse(fs.readFileSync(this.file(scope), "utf8"));
+      if (
+        !value ||
+        typeof value !== "object" ||
+        Array.isArray(value) ||
+        !Array.isArray(value.hypotheses) ||
+        !Array.isArray(value.surfaces) ||
+        !value.hypotheses.every(isValidHypothesis) ||
+        !value.surfaces.every(isValidSurface)
+      )
+        throw new Error("Invalid investigation storage");
       return {
-        hypotheses: Array.isArray(value?.hypotheses) ? value.hypotheses : [],
-        surfaces: Array.isArray(value?.surfaces) ? value.surfaces : [],
+        hypotheses: value.hypotheses.map((h: Hypothesis) =>
+          normalizeHypothesis(h),
+        ),
+        surfaces: value.surfaces.map((s: SurfaceCoverage) => cloneSurface(s)),
       };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -863,18 +1022,68 @@ export class InvestigationStore {
     }
   }
 
+  private acquireLock(lock: string): number {
+    assertPlainPath(lock);
+    try {
+      return fs.openSync(lock, "wx", 0o600);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+    const stat = fs.lstatSync(lock, { throwIfNoEntry: false });
+    if (stat?.isSymbolicLink())
+      throw new Error("Linked or special harness paths are not allowed");
+    if (stat && isStaleLock(lock, stat)) {
+      const recovery = `${lock}.recover`;
+      assertPlainPath(recovery);
+      let recFd: number | undefined;
+      try {
+        recFd = fs.openSync(recovery, "wx", 0o600);
+        const current = fs.lstatSync(lock, { throwIfNoEntry: false });
+        if (
+          current &&
+          !current.isSymbolicLink() &&
+          current.dev === stat.dev &&
+          current.ino === stat.ino &&
+          current.mtimeMs === stat.mtimeMs &&
+          isStaleLock(lock, current)
+        )
+          fs.unlinkSync(lock);
+      } catch {
+        /* Another worker is already recovering or owns the lock. */
+      } finally {
+        if (recFd !== undefined) {
+          fs.closeSync(recFd);
+          try {
+            fs.unlinkSync(recovery);
+          } catch {
+            /* already removed */
+          }
+        }
+      }
+      try {
+        assertPlainPath(lock);
+        return fs.openSync(lock, "wx", 0o600);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EEXIST")
+          throw new Error(
+            "Concurrent investigation update; retry from the current state",
+          );
+        throw error;
+      }
+    }
+    throw new Error(
+      "Concurrent investigation update; retry from the current state",
+    );
+  }
+
   private mutate<T>(scope: string, fn: (data: InvestigationData) => T): T {
     const lock = `${this.file(scope)}.lock`;
-    assertPlainPath(lock);
-    let fd: number;
+    const fd = this.acquireLock(lock);
     try {
-      fd = fs.openSync(lock, "wx", 0o600);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "EEXIST")
-        throw new Error("Concurrent investigation update; retry from the current state");
-      throw error;
-    }
-    try {
+      fs.writeSync(
+        fd,
+        JSON.stringify({ pid: process.pid, createdAt: Date.now() }),
+      );
       const data = this.load(scope);
       const result = fn(data);
       if (data.hypotheses.length > MAX_HYPOTHESES)
@@ -884,24 +1093,35 @@ export class InvestigationStore {
       atomicWrite(this.file(scope), JSON.stringify(data, null, 1));
       return result;
     } finally {
+      const held = fs.fstatSync(fd);
       fs.closeSync(fd);
-      fs.unlinkSync(lock);
+      const onDisk = fs.lstatSync(lock, { throwIfNoEntry: false });
+      if (onDisk && onDisk.dev === held.dev && onDisk.ino === held.ino) {
+        try {
+          fs.unlinkSync(lock);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+      }
     }
   }
 
   hypotheses(scope: string): Hypothesis[] {
-    return this.load(scope).hypotheses.map((h) => ({ ...h }));
+    return this.load(scope).hypotheses.map((h) => normalizeHypothesis(h));
   }
 
   coverage(scope: string): SurfaceCoverage[] {
-    return this.load(scope).surfaces.map((s) => ({ ...s }));
+    return this.load(scope).surfaces.map((s) => cloneSurface(s));
   }
 
   proposeHypothesis(scope: string, text: string, id?: string): Hypothesis {
+    if (typeof text !== "string" || !text.trim())
+      throw new Error("Hypothesis text is required");
+    const trimmed = text.trim().slice(0, MAX_TEXT);
     return this.mutate(scope, (data) => {
       const tracker = new HypothesisTracker(data.hypotheses);
-      const h = tracker.propose(id ?? newId(), text.slice(0, MAX_TEXT), now());
-      data.hypotheses = tracker.list().map((x) => ({ ...x }));
+      const h = tracker.propose(id ?? newId(), trimmed, now());
+      data.hypotheses = [...tracker.list()];
       return h;
     });
   }
@@ -910,7 +1130,7 @@ export class InvestigationStore {
     return this.mutate(scope, (data) => {
       const tracker = new HypothesisTracker(data.hypotheses);
       const h = tracker.test(id, now());
-      data.hypotheses = tracker.list().map((x) => ({ ...x }));
+      data.hypotheses = [...tracker.list()];
       return h;
     });
   }
@@ -924,7 +1144,7 @@ export class InvestigationStore {
     return this.mutate(scope, (data) => {
       const tracker = new HypothesisTracker(data.hypotheses);
       const h = tracker.addEvidence(id, observationId, now(), outputHash);
-      data.hypotheses = tracker.list().map((x) => ({ ...x }));
+      data.hypotheses = [...tracker.list()];
       return h;
     });
   }
@@ -938,7 +1158,7 @@ export class InvestigationStore {
     return this.mutate(scope, (data) => {
       const tracker = new HypothesisTracker(data.hypotheses);
       const h = tracker.addControl(id, observationId, now(), outputHash);
-      data.hypotheses = tracker.list().map((x) => ({ ...x }));
+      data.hypotheses = [...tracker.list()];
       return h;
     });
   }
@@ -947,7 +1167,7 @@ export class InvestigationStore {
     return this.mutate(scope, (data) => {
       const tracker = new HypothesisTracker(data.hypotheses);
       const h = tracker.refute(id, observationId, now());
-      data.hypotheses = tracker.list().map((x) => ({ ...x }));
+      data.hypotheses = [...tracker.list()];
       return h;
     });
   }
@@ -957,15 +1177,18 @@ export class InvestigationStore {
     return this.mutate(scope, (data) => {
       const tracker = new HypothesisTracker(data.hypotheses);
       const stale = tracker.tick(nowMs);
-      data.hypotheses = tracker.list().map((x) => ({ ...x }));
+      data.hypotheses = [...tracker.list()];
       return stale;
     });
   }
 
   addSurface(scope: string, id: string, label: string): void {
+    if (typeof label !== "string" || !label.trim())
+      throw new Error("Surface label is required");
+    const trimmed = label.trim().slice(0, MAX_TEXT);
     this.mutate(scope, (data) => {
       const map = CoverageMap.fromEntries(data.surfaces);
-      map.add(id, label.slice(0, MAX_TEXT));
+      map.add(id, trimmed);
       data.surfaces = map.entries();
     });
   }
@@ -987,9 +1210,12 @@ export class InvestigationStore {
   }
 
   blockSurface(scope: string, id: string, reason: string): void {
+    if (typeof reason !== "string" || !reason.trim())
+      throw new Error("A blocked surface requires a reason");
+    const trimmed = reason.trim().slice(0, MAX_TEXT);
     this.mutate(scope, (data) => {
       const map = CoverageMap.fromEntries(data.surfaces);
-      map.block(id, reason.slice(0, MAX_TEXT));
+      map.block(id, trimmed);
       data.surfaces = map.entries();
     });
   }
@@ -1026,9 +1252,11 @@ export function surfacesFromTasks(
     .filter((t) => !t.parentId)
     .map((t) => {
       const proven = t.status === "completed" && (t.evidence?.length ?? 0) > 0;
+      const reason = typeof t.reason === "string" ? t.reason.trim() : "";
+      const blocked = t.status === "blocked" && reason.length > 0;
       const state: SurfaceState = proven
         ? "tested"
-        : t.status === "blocked"
+        : blocked
           ? "blocked"
           : t.status === "in-progress"
             ? "in-progress"
@@ -1037,8 +1265,8 @@ export function surfacesFromTasks(
         id: t.id,
         label: t.title,
         state,
-        evidence: t.evidence ?? [],
-        ...(t.reason ? { reason: t.reason } : {}),
+        evidence: [...(t.evidence ?? [])],
+        ...(blocked ? { reason } : {}),
       };
     });
 }
@@ -1071,6 +1299,7 @@ export function assembleInvestigation(opts: {
     hash: string;
     success: boolean;
     timestamp: string;
+    input?: unknown;
   }[];
   tasks: readonly { status: string; evidence?: string[]; updatedAt: string }[];
   hypotheses: readonly Hypothesis[];
@@ -1082,6 +1311,7 @@ export function assembleInvestigation(opts: {
     outputHash: o.hash,
     success: o.success,
     timestamp: o.timestamp,
+    ...(o.input !== undefined ? { input: o.input } : {}),
   }));
   const openTaskCount = opts.tasks.filter(
     (t) => t.status === "pending" || t.status === "in-progress",
