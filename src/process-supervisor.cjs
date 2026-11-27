@@ -94,16 +94,27 @@ try {
       fs.closeSync(fd);
       const digest = createHash("sha256"),
         input = fs.createReadStream(job.logPath);
-      input.on("data", (b) => digest.update(b));
-      input.on("error", () =>
+      let traceBytes = 0;
+      const cleanupStop = () => {
+        try {
+          fs.unlinkSync(`${resultPath}.stop`);
+        } catch {}
+      };
+      input.on("data", (b) => {
+        digest.update(b);
+        traceBytes += b.length;
+      });
+      input.on("error", () => {
+        cleanupStop();
         write({
           status: "failed",
           exitCode: code,
           reason: "unreadable-trace",
           finishedAt: new Date().toISOString(),
-        }),
-      );
-      input.on("end", () =>
+        });
+      });
+      input.on("end", () => {
+        cleanupStop();
         write({
           status: timedOut
             ? "timed_out"
@@ -121,9 +132,9 @@ try {
           signal: signal || null,
           finishedAt: new Date().toISOString(),
           traceHash: digest.digest("hex"),
-          traceBytes: fs.statSync(job.logPath).size,
-        }),
-      );
+          traceBytes,
+        });
+      });
     };
     if (timedOut || stopped || descendantsOutlived) setTimeout(finalize, 1050);
     else finalize();
@@ -131,7 +142,12 @@ try {
   child.once("error", (e) => finish(null, null, e));
   child.once("exit", (code, signal) => finish(code, signal));
 } catch (error) {
-  fs.closeSync(fd);
+  try {
+    fs.closeSync(fd);
+  } catch {}
+  try {
+    fs.unlinkSync(`${resultPath}.stop`);
+  } catch {}
   write({
     status: "failed",
     exitCode: null,

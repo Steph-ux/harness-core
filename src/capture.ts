@@ -10,6 +10,13 @@
  * way and can prove it did.
  */
 import * as path from "node:path";
+import { assertPlainPath } from "./util";
+
+function parseWindowId(value: unknown): bigint | null {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (/^0x[0-9a-f]+$/.test(raw) || /^[0-9]+$/.test(raw)) return BigInt(raw);
+  return null;
+}
 
 export interface WindowInfo {
   id: string;
@@ -74,7 +81,14 @@ export function selectWindowById(
 ): WindowInfo {
   const wanted = String(id ?? "").trim();
   if (!wanted) throw new Error("A capture needs a window");
-  const matches = windows.filter((window) => window.id.trim() === wanted);
+  const wantedNum = parseWindowId(wanted);
+  const matches = windows.filter((window) => {
+    const wid = window.id.trim();
+    if (wid === wanted) return true;
+    if (wantedNum === null) return false;
+    const widNum = parseWindowId(wid);
+    return widNum !== null && widNum === wantedNum;
+  });
   if (matches.length !== 1)
     throw new Error("No window carries that id");
   return matches[0];
@@ -90,20 +104,28 @@ export function assertNotRoot(rootId: string, targetId: string): void {
   const root = String(rootId ?? "").trim().toLowerCase();
   const target = String(targetId ?? "").trim().toLowerCase();
   if (!target) throw new Error("A capture needs a window");
-  if (root && root === target)
+  const rootNum = parseWindowId(root);
+  const targetNum = parseWindowId(target);
+  if (targetNum !== null && targetNum === 0n)
     throw new Error("The desktop is not a subject of a capture");
-  if (target === "0x0" || target === "0")
+  if (rootNum !== null && targetNum !== null && rootNum === targetNum)
+    throw new Error("The desktop is not a subject of a capture");
+  if (root && root === target)
     throw new Error("The desktop is not a subject of a capture");
 }
 
 /** The file a capture is written to, inside the capture root and nowhere else. */
 export function captureDestination(root: string, name: string): string {
-  if (!path.isAbsolute(root)) throw new Error("Capture root must be absolute");
-  if (!/^[a-z0-9-]{8,80}$/.test(name))
+  if (typeof root !== "string" || !root.trim() || !path.isAbsolute(root))
+    throw new Error("Capture root must be absolute");
+  if (typeof name !== "string" || !/^[a-z0-9-]{8,80}$/.test(name))
     throw new Error("Invalid capture name");
-  const dest = path.resolve(root, `${name}.png`);
-  if (path.dirname(dest) !== path.resolve(root))
+  const resolvedRoot = path.resolve(root);
+  assertPlainPath(resolvedRoot);
+  const dest = path.resolve(resolvedRoot, `${name}.png`);
+  if (path.dirname(dest) !== resolvedRoot)
     throw new Error("Capture path escaped its directory");
+  assertPlainPath(dest);
   return dest;
 }
 
@@ -114,13 +136,29 @@ export function captureDestination(root: string, name: string): string {
  * not only in the store.
  */
 export function captureName(observationId: string, label?: string): string {
-  const id = String(observationId ?? "").trim();
+  if (typeof observationId !== "string")
+    throw new Error("Invalid observation id");
+  const id = observationId.trim();
   if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/.test(id))
     throw new Error("Invalid observation id");
-  const suffix = label
-    ? `-${String(label).toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40)}`
+  const normalizedId = id
+    .toLowerCase()
+    .replace(/[_.:]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  if (!normalizedId || !/^[a-z0-9-]+$/.test(normalizedId))
+    throw new Error("Invalid observation id");
+  if (label !== undefined && label !== null && typeof label !== "string")
+    throw new Error("Invalid capture label");
+  const cleanLabel = label
+    ? String(label)
+        .toLowerCase()
+        .replace(/[^a-z0-9-]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 40)
+        .replace(/-+$/g, "")
     : "";
-  const name = `${id.toLowerCase()}${suffix}`;
+  const suffix = cleanLabel ? `-${cleanLabel}` : "";
+  const name = `${normalizedId}${suffix}`;
   if (!/^[a-z0-9-]{8,80}$/.test(name))
     throw new Error("Invalid capture name");
   return name;
@@ -171,8 +209,34 @@ export function captureLink(
   result: CaptureResult,
   takenAt: string,
 ): CaptureLink {
-  if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/.test(String(observationId ?? "")))
+  if (
+    typeof observationId !== "string" ||
+    !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/.test(observationId)
+  )
     throw new Error("Invalid observation id");
+  if (!result || typeof result !== "object")
+    throw new Error("Invalid capture result");
+  if (typeof result.path !== "string" || !result.path.trim())
+    throw new Error("Invalid capture path");
+  if (typeof result.window !== "string" || !result.window.trim())
+    throw new Error("Invalid capture window");
+  if (typeof result.title !== "string")
+    throw new Error("Invalid capture title");
+  if (
+    !Number.isFinite(result.width) ||
+    result.width <= 0 ||
+    !Number.isFinite(result.height) ||
+    result.height <= 0
+  )
+    throw new Error("Invalid capture dimensions");
+  if (!Number.isFinite(result.bytes) || result.bytes <= 0)
+    throw new Error("Invalid capture size");
+  if (
+    typeof takenAt !== "string" ||
+    !takenAt.trim() ||
+    Number.isNaN(Date.parse(takenAt))
+  )
+    throw new Error("Invalid capture timestamp");
   return {
     observationId,
     path: result.path,

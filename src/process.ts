@@ -38,6 +38,10 @@ export interface ProcessOutcome {
 }
 export const DEFAULT_DEADLINE_MS = 120000,
   MAX_DEADLINE_MS = 600000;
+const LOCK_STALE_MS = 30_000,
+  LOCK_WAIT_MS = 2000,
+  LOCK_POLL_MS = 10,
+  lockSleepBuffer = new Int32Array(new SharedArrayBuffer(4));
 export function spawnTraced(
   command: string,
   options: {
@@ -96,18 +100,20 @@ export function spawnTraced(
       windowsHide: true,
     },
   );
-  child.on("error", () =>
-    atomicWrite(
-      `${options.logPath}.result.json`,
-      JSON.stringify({
-        runKey,
-        status: "failed",
-        exitCode: null,
-        reason: "supervisor-spawn-error",
-        finishedAt: now(),
-      }),
-    ),
-  );
+  child.on("error", () => {
+    try {
+      atomicWrite(
+        `${options.logPath}.result.json`,
+        JSON.stringify({
+          runKey,
+          status: "failed",
+          exitCode: null,
+          reason: "supervisor-spawn-error",
+          finishedAt: now(),
+        }),
+      );
+    } catch {}
+  });
   child.unref();
   if (!child.pid) throw new Error("Unable to start command supervisor");
   return { pid: child.pid, detached: true, runKey };
@@ -267,6 +273,86 @@ export class ProcessRegistry {
   private archiveFile() {
     return path.join(this.stateRoot, "processes-archive.json");
   }
+  private staleLock(lock: string): boolean {
+    try {
+      assertPlainPath(lock);
+      const stat = fs.statSync(lock);
+      if (Date.now() - stat.mtimeMs > LOCK_STALE_MS) return true;
+      const raw = fs.readFileSync(lock, "utf8").trim();
+      if (!raw) return false;
+      const meta = JSON.parse(raw) as { pid?: unknown; identity?: unknown };
+      if (
+        typeof meta?.pid === "number" &&
+        Number.isInteger(meta.pid) &&
+        meta.pid > 0
+      ) {
+        if (!processAlive(meta.pid)) return true;
+        if (typeof meta.identity === "string" && meta.identity) {
+          const current = processIdentity(meta.pid);
+          if (current && current !== meta.identity) return true;
+        }
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }
+  private withLock<T>(fn: () => T): T {
+    fs.mkdirSync(this.stateRoot, { recursive: true, mode: 0o700 });
+    const lock = `${this.file()}.lock`;
+    assertPlainPath(lock);
+    const deadline = Date.now() + LOCK_WAIT_MS;
+    let fd: number | undefined;
+    while (fd === undefined) {
+      try {
+        fd = fs.openSync(lock, "wx", 0o600);
+        fs.writeFileSync(
+          fd,
+          JSON.stringify({
+            pid: process.pid,
+            identity: processIdentity(process.pid),
+            createdAt: now(),
+          }),
+        );
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        let recovered = false;
+        assertPlainPath(lock);
+        if (this.staleLock(lock)) {
+          try {
+            const before = fs.statSync(lock);
+            if (this.staleLock(lock)) {
+              const check = fs.statSync(lock);
+              if (
+                check.ino === before.ino &&
+                check.mtimeMs === before.mtimeMs
+              ) {
+                fs.unlinkSync(lock);
+                recovered = true;
+              }
+            }
+          } catch (unlinkErr) {
+            if ((unlinkErr as NodeJS.ErrnoException).code === "ENOENT")
+              recovered = true;
+          }
+        }
+        if (recovered) continue;
+        if (Date.now() >= deadline)
+          throw new Error("Concurrent process registry update; retry");
+        Atomics.wait(lockSleepBuffer, 0, 0, LOCK_POLL_MS);
+      }
+    }
+    try {
+      return fn();
+    } finally {
+      try {
+        fs.closeSync(fd);
+      } catch {}
+      try {
+        fs.unlinkSync(lock);
+      } catch {}
+    }
+  }
   /**
    * A launch whose process is gone stays in the ledger as `unknown`: the
    * harness cannot verify what it did, so it must not claim a result. Those
@@ -275,11 +361,7 @@ export class ProcessRegistry {
    * archive with their last known status; the trace files are left untouched.
    */
   prune(scope: string) {
-    fs.mkdirSync(this.stateRoot, { recursive: true, mode: 0o700 });
-    const lock = `${this.file()}.lock`;
-    assertPlainPath(lock);
-    const fd = fs.openSync(lock, "wx", 0o600);
-    try {
+    return this.withLock(() => {
       const all = this.readAll(),
         archived: string[] = [],
         kept: string[] = [];
@@ -295,12 +377,14 @@ export class ProcessRegistry {
       if (!archived.length) return { archived, kept };
       const previous = (() => {
         try {
+          assertPlainPath(this.archiveFile());
           const rows = JSON.parse(
             fs.readFileSync(this.archiveFile(), "utf8"),
           );
           return Array.isArray(rows) ? rows : [];
-        } catch {
-          return [];
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+          throw error;
         }
       })();
       const entry = all
@@ -316,20 +400,14 @@ export class ProcessRegistry {
       );
       atomicWrite(this.file(), JSON.stringify(remaining, null, 1));
       return { archived, kept };
-    } finally {
-      fs.closeSync(fd);
-      fs.unlinkSync(lock);
-    }
+    });
   }
   add(record: ProcessRecord) {
-    fs.mkdirSync(this.stateRoot, { recursive: true, mode: 0o700 });
-    const lock = `${this.file()}.lock`;
-    assertPlainPath(lock);
-    const fd = fs.openSync(lock, "wx", 0o600);
-    try {
+    return this.withLock(() => {
       let runKey = record.runKey;
       if (!runKey)
         try {
+          assertPlainPath(`${record.logPath}.job.json`);
           runKey = JSON.parse(
             fs.readFileSync(`${record.logPath}.job.json`, "utf8"),
           ).runKey;
@@ -349,10 +427,7 @@ export class ProcessRegistry {
         ),
       );
       return stored;
-    } finally {
-      fs.closeSync(fd);
-      fs.unlinkSync(lock);
-    }
+    });
   }
   tracePath(id: string) {
     if (!/^proc-[A-Za-z0-9-]+$/.test(id)) throw new Error("Invalid process id");

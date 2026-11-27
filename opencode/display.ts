@@ -2,13 +2,70 @@
  * Display and host-command helpers for visual attestations.
  *
  * A capture is one window, never the desktop. A recorded trace is shown in
- * the operator's terminal when a display exists, or printed otherwise.
+ * an isolated Xvfb terminal when available (or the operator's terminal if
+ * Xvfb is disabled), or printed otherwise. Isolated browser captures run in
+ * a dedicated temporary profile under Xvfb or headless mode without touching
+ * the operator's personal browser or foreground focus.
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { coreRoot } from "./paths";
+import { assertPlainPath } from "../src/util";
+
+function findExecutable(
+  candidates: readonly string[],
+  names: readonly string[],
+): string | undefined {
+  const isExe = (file: string) => {
+    try {
+      const stat = fs.statSync(file);
+      if (!stat.isFile()) return false;
+      return process.platform === "win32" || (stat.mode & 0o111) !== 0;
+    } catch {
+      return false;
+    }
+  };
+  for (const candidate of candidates) {
+    if (isExe(candidate)) return candidate;
+  }
+  const pathDirs = (process.env.PATH || "").split(path.delimiter).filter(Boolean);
+  const exts =
+    process.platform === "win32"
+      ? (process.env.PATHEXT || ".EXE;.CMD;.BAT").split(";").filter(Boolean)
+      : [""];
+  for (const dir of pathDirs) {
+    for (const name of names) {
+      for (const ext of exts) {
+        const candidate = path.join(dir, name + ext);
+        if (isExe(candidate)) return candidate;
+      }
+    }
+  }
+  return undefined;
+}
+
+export function hasXvfb(): boolean {
+  if (process.platform === "win32") return false;
+  if ((process.env.HARNESS_CAPTURE_XVFB ?? "auto").trim() === "off")
+    return false;
+  return Boolean(
+    findExecutable(["/usr/bin/xvfb-run", "/usr/local/bin/xvfb-run"], ["xvfb-run"]),
+  );
+}
+
+export function findBrowserExecutable(): string | undefined {
+  return findExecutable(
+    [
+      "/usr/bin/chromium",
+      "/usr/bin/chromium-browser",
+      "/usr/bin/google-chrome",
+      "/opt/google/chrome/chrome",
+    ],
+    ["chromium", "chromium-browser", "google-chrome"],
+  );
+}
 
 /** A command of the host, with its output. */
 export function runCommand(
@@ -38,10 +95,10 @@ export function runCommand(
 /**
  * Render a recorded trace the way a report can print it.
  *
- * On the operator's display the trace is shown in their own terminal, with
- * their theme, then the window is captured and closed. Without a display, or
- * when the terminal is switched off, a printed rendering is produced instead.
- * Neither path runs the command again.
+ * Runs inside an isolated Xvfb terminal when available (or on the operator's
+ * display if Xvfb is disabled), then captures and closes the window. Without a
+ * display/Xvfb, or when the terminal is switched off, a printed rendering is
+ * produced instead. Neither path runs the command again.
  */
 export function renderTrace(
   text: string,
@@ -52,10 +109,12 @@ export function renderTrace(
 ): "qterminal" | "printed" {
   const display = process.env.DISPLAY?.trim();
   const mode = (process.env.HARNESS_CAPTURE_TERMINAL ?? "auto").trim();
-  const terminal = ["/usr/bin/qterminal", "/usr/local/bin/qterminal"].find(
-    (file) => fs.existsSync(file),
+  const terminal = findExecutable(
+    ["/usr/bin/qterminal", "/usr/local/bin/qterminal"],
+    ["qterminal"],
   );
-  if (mode !== "off" && display && terminal) {
+  const xvfb = hasXvfb();
+  if (mode !== "off" && terminal && (xvfb || display)) {
     const source = path.join(path.dirname(dest), `.trace-${randomUUID()}.txt`);
     fs.writeFileSync(source, `$ ${command}\n\n${text}\n`, { mode: 0o600 });
     try {
@@ -63,7 +122,7 @@ export function renderTrace(
         "sh",
         [
           path.join(coreRoot(), "scripts", "capture_terminal.sh"),
-          display,
+          display ?? "",
           cwd,
           title,
           source,
@@ -99,6 +158,63 @@ export function renderTrace(
   return "printed";
 }
 
+export interface IsolatedBrowserCaptureOptions {
+  url: string;
+  dest: string;
+  timeoutMs?: number;
+}
+
+export interface IsolatedBrowserCaptureResult {
+  url: string;
+  title: string;
+  bytes: number;
+  isolated: boolean;
+}
+
+/**
+ * Capture a browser page inside a fresh temporary profile (never the personal
+ * browser) and an isolated Xvfb display or headless mode.
+ */
+export function captureBrowserIsolated(
+  options: IsolatedBrowserCaptureOptions,
+): IsolatedBrowserCaptureResult {
+  const rawUrl = String(options.url ?? "").trim();
+  if (!rawUrl) throw new Error("A URL is required for isolated browser capture");
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error("Invalid URL for isolated browser capture");
+  }
+  if (!["http:", "https:", "data:", "about:"].includes(parsed.protocol))
+    throw new Error("Unsupported URL scheme for isolated browser capture");
+  const dest = path.resolve(String(options.dest ?? ""));
+  if (!String(options.dest ?? "").trim())
+    throw new Error("A destination path is required");
+  assertPlainPath(dest);
+  const timeoutMs =
+    options.timeoutMs !== undefined &&
+    Number.isFinite(options.timeoutMs) &&
+    options.timeoutMs > 0
+      ? Math.min(Math.round(options.timeoutMs), 120000)
+      : 30000;
+  const script = path.join(coreRoot(), "scripts", "capture_browser.mjs");
+  const stdout = runCommand(
+    process.execPath,
+    [
+      script,
+      dest,
+      "--isolated",
+      "--launch",
+      rawUrl,
+      "--timeout",
+      String(timeoutMs),
+    ],
+    timeoutMs + 10000,
+  );
+  return { ...JSON.parse(stdout), isolated: true };
+}
+
 export function commandArguments(value: unknown): string[] {
   if (
     !Array.isArray(value) ||
@@ -113,19 +229,6 @@ export function commandArguments(value: unknown): string[] {
   )
     throw new Error("argv must contain 1..256 valid command arguments");
   return value;
-}
-
-export function waitForTerminalCommand(session: string, marker: string): void {
-  for (let attempt = 0; attempt < 300; attempt++) {
-    const pane = runCommand(
-      "tmux",
-      ["capture-pane", "-p", "-t", session],
-      10000,
-    );
-    if (pane.split("\n").some((line) => line.trim() === `${marker}:0`)) return;
-    spawnSync("sleep", ["0.1"]);
-  }
-  throw new Error("the evidence command did not finish within 30 seconds");
 }
 
 /**

@@ -15,6 +15,11 @@ const CORE = path.resolve(__dirname, "..");
 const PLUGIN = path.join(CORE, "opencode", "plugin.ts");
 
 module.exports = async ({ assert, jiti, skip }) => {
+  const savedEnv = {
+    HARNESS_STATE_ROOT: process.env.HARNESS_STATE_ROOT,
+    HARNESS_CORE: process.env.HARNESS_CORE,
+    HARNESS_CAPTURE_TERMINAL: process.env.HARNESS_CAPTURE_TERMINAL,
+  };
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "harness-capture-"));
   const state = path.join(workspace, "state");
   fs.mkdirSync(state, { recursive: true });
@@ -61,16 +66,41 @@ module.exports = async ({ assert, jiti, skip }) => {
     "the window is chosen by its id",
   );
 
-  // The desktop is never a subject.
+  // The desktop is never a subject, regardless of hex/decimal formatting.
   assert.throws(
     () => assertNotRoot("0x4dd", "0x4dd"),
     /desktop is not a subject/,
     "the root window is refused",
   );
   assert.throws(
+    () => assertNotRoot("0x4dd", "1245"),
+    /desktop is not a subject/,
+    "the decimal equivalent of the hex root window is refused",
+  );
+  assert.throws(
+    () => assertNotRoot("0x4dd", "0x04dd"),
+    /desktop is not a subject/,
+    "the zero-padded hex root window is refused",
+  );
+  assert.throws(
+    () => assertNotRoot("1245", "0x4dd"),
+    /desktop is not a subject/,
+    "the hex equivalent of a decimal root window is refused",
+  );
+  assert.throws(
     () => assertNotRoot("0x4dd", "0x0"),
     /desktop is not a subject/,
     "the zero id is refused",
+  );
+  assert.throws(
+    () => assertNotRoot("0x4dd", "0"),
+    /desktop is not a subject/,
+    "the decimal zero id is refused",
+  );
+  assert.throws(
+    () => assertNotRoot("0x4dd", "0x00"),
+    /desktop is not a subject/,
+    "the zero-padded zero id is refused",
   );
   assert.doesNotThrow(() => assertNotRoot("0x4dd", "0x4600095"));
 
@@ -312,119 +342,129 @@ module.exports = async ({ assert, jiti, skip }) => {
   );
   store.close();
 
-  const display = process.env.DISPLAY;
-  if (!display) {
-    console.log("  note: no display, the capture of a real window is not exercised");
-  } else {
-    // The windows of the operator, before the harness does anything.
-    const before = JSON.parse((await call({ action: "windows" })).content);
-    assert.ok(Array.isArray(before), "the windows are listed");
-    assert.equal(
-      before.filter((window) => window.title === "harness-evidence").length,
-      0,
-      "no terminal of the harness is on the display of the operator",
+  try {
+    // Browser capture: register an existing PNG file as evidence.
+    // Create a minimal valid PNG (1×1 white pixel) for testing.
+    const pngHeader = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, // PNG signature
+      0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, // IHDR chunk
+      0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, // 1×1
+      0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, // 8-bit RGB
+      0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, // IDAT
+      0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
+      0x00, 0x00, 0x02, 0x00, 0x01, 0xe2, 0x21, 0xbc,
+      0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, // IEND
+      0x44, 0xae, 0x42, 0x60, 0x82,
+    ]);
+    const testPng = path.join(workspace, "test-browser-capture.png");
+    fs.writeFileSync(testPng, pngHeader);
+    const browserShot = JSON.parse(
+      (
+        await call({
+          action: "browser",
+          file: testPng,
+          observationId: readObservation,
+          label: "browser-test",
+        })
+      ).content,
+    );
+    assert.equal(browserShot.kind, "browser-capture", "browser capture has the right kind");
+    assert.equal(browserShot.observationId, readObservation, "browser capture links to the observation");
+    assert.ok(browserShot.sha256 && browserShot.sha256.length === 64, "browser capture has a hash");
+    assert.ok(fs.existsSync(browserShot.path), "browser capture file exists on disk");
+    assert.ok(
+      browserShot.path.includes("captures"),
+      "browser capture lands in the captures directory",
     );
 
-    // The desktop is refused, even when it is asked for by name.
-    const rootWindow = /Window id:\s*(0x[0-9a-f]+)/i.exec(
-      spawnSync("xwininfo", ["-root"], { encoding: "utf8" }).stdout ?? "",
+    // Browser capture rejects a non-PNG file.
+    const fakePng = path.join(workspace, "not-a-png.png");
+    fs.writeFileSync(fakePng, "this is not a PNG");
+    await assert.rejects(
+      () =>
+        call({
+          action: "browser",
+          file: fakePng,
+          observationId: readObservation,
+          label: "fake",
+        }),
+      /not a valid PNG/,
+      "browser capture rejects a non-PNG file",
     );
-    if (rootWindow) {
+
+    // Browser capture requires an observation.
+    await assert.rejects(
+      () => call({ action: "browser", file: testPng }),
+      /observation/,
+      "browser capture requires an observation",
+    );
+
+    // Browser capture rejects a missing file.
+    await assert.rejects(
+      () =>
+        call({
+          action: "browser",
+          file: "/nonexistent/file.png",
+          observationId: readObservation,
+        }),
+      /does not exist/,
+      "browser capture rejects a missing file",
+    );
+
+    // The browser capture is in the audit log.
+    const store2 = new KnowledgeStore(path.join(state, "knowledge.sqlite"));
+    const audits2 = store2.audits(scope, "capture", 10);
+    assert.ok(
+      audits2.some((a) => a.detail.includes("browser-capture")),
+      "the browser capture is in the audit log",
+    );
+    store2.close();
+
+    const display = process.env.DISPLAY;
+    if (!display) {
+      skip("no display; real window capture is not exercised");
+    } else {
+      // The windows of the operator, before the harness does anything.
+      const before = JSON.parse((await call({ action: "windows" })).content);
+      assert.ok(Array.isArray(before), "the windows are listed");
+      assert.equal(
+        before.filter((window) => window.title === "harness-evidence").length,
+        0,
+        "no terminal of the harness is on the display of the operator",
+      );
+
+      // The desktop is refused, even when it is asked for by name or decimal id.
+      const rootWindow = /Window id:\s*(0x[0-9a-f]+)/i.exec(
+        spawnSync("xwininfo", ["-root"], { encoding: "utf8" }).stdout ?? "",
+      );
+      assert.ok(rootWindow, "xwininfo reports the root window id");
       await assert.rejects(
         () => call({ action: "shot", window: rootWindow[1] }),
         /desktop is not a subject/,
         "the desktop is refused as a subject",
       );
+      await assert.rejects(
+        () => call({ action: "shot", window: String(parseInt(rootWindow[1], 16)) }),
+        /desktop is not a subject/,
+        "the decimal root id is refused as a subject",
+      );
+
+      // Nothing appeared on the display of the operator.
+      const after = JSON.parse((await call({ action: "windows" })).content);
+      assert.equal(
+        after.filter((window) => window.title === "harness-evidence").length,
+        0,
+        "the harness leaves no window on the display of the operator",
+      );
     }
-
-    // Nothing appeared on the display of the operator.
-    const after = JSON.parse((await call({ action: "windows" })).content);
-    assert.equal(
-      after.filter((window) => window.title === "harness-evidence").length,
-      0,
-      "the harness leaves no window on the display of the operator",
-    );
+  } finally {
+    // The plugin goes away; the rendered images stay on disk.
+    if (typeof unload === "function") unload();
+    await unloadPlugins();
+    for (const [key, val] of Object.entries(savedEnv)) {
+      if (val === undefined) delete process.env[key];
+      else process.env[key] = val;
+    }
+    fs.rmSync(workspace, { recursive: true, force: true });
   }
-
-  // Browser capture: register an existing PNG file as evidence.
-  // Create a minimal valid PNG (1×1 white pixel) for testing.
-  const pngHeader = Buffer.from([
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, // PNG signature
-    0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, // IHDR chunk
-    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, // 1×1
-    0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, // 8-bit RGB
-    0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, // IDAT
-    0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
-    0x00, 0x00, 0x02, 0x00, 0x01, 0xe2, 0x21, 0xbc,
-    0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, // IEND
-    0x44, 0xae, 0x42, 0x60, 0x82,
-  ]);
-  const testPng = path.join(workspace, "test-browser-capture.png");
-  fs.writeFileSync(testPng, pngHeader);
-  const browserShot = JSON.parse(
-    (
-      await call({
-        action: "browser",
-        file: testPng,
-        observationId: readObservation,
-        label: "browser-test",
-      })
-    ).content,
-  );
-  assert.equal(browserShot.kind, "browser-capture", "browser capture has the right kind");
-  assert.equal(browserShot.observationId, readObservation, "browser capture links to the observation");
-  assert.ok(browserShot.sha256 && browserShot.sha256.length === 64, "browser capture has a hash");
-  assert.ok(fs.existsSync(browserShot.path), "browser capture file exists on disk");
-  assert.ok(
-    browserShot.path.includes("captures"),
-    "browser capture lands in the captures directory",
-  );
-
-  // Browser capture rejects a non-PNG file.
-  const fakePng = path.join(workspace, "not-a-png.png");
-  fs.writeFileSync(fakePng, "this is not a PNG");
-  await assert.rejects(
-    () =>
-      call({
-        action: "browser",
-        file: fakePng,
-        observationId: readObservation,
-        label: "fake",
-      }),
-    /not a valid PNG/,
-    "browser capture rejects a non-PNG file",
-  );
-
-  // Browser capture requires an observation.
-  await assert.rejects(
-    () => call({ action: "browser", file: testPng }),
-    /observation/,
-    "browser capture requires an observation",
-  );
-
-  // Browser capture rejects a missing file.
-  await assert.rejects(
-    () =>
-      call({
-        action: "browser",
-        file: "/nonexistent/file.png",
-        observationId: readObservation,
-      }),
-    /does not exist/,
-    "browser capture rejects a missing file",
-  );
-
-  // The browser capture is in the audit log.
-  const store2 = new KnowledgeStore(path.join(state, "knowledge.sqlite"));
-  const audits2 = store2.audits(scope, "capture", 10);
-  assert.ok(
-    audits2.some((a) => a.detail.includes("browser-capture")),
-    "the browser capture is in the audit log",
-  );
-  store2.close();
-
-  // The plugin goes away; the rendered images stay on disk.
-  if (typeof unload === "function") unload();
-  await unloadPlugins();
-  fs.rmSync(workspace, { recursive: true, force: true });
 };

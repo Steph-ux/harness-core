@@ -5,11 +5,14 @@ const path = require("node:path");
 function auditSkills(root) {
   const errors = [];
   const skills = fs
-    .readdirSync(root)
+    .readdirSync(root, { withFileTypes: true })
     .filter(
-      (name) =>
-        name.startsWith("harness-") && name !== "harness-cyber-playbooks",
+      (entry) =>
+        entry.isDirectory() &&
+        entry.name.startsWith("harness-") &&
+        entry.name !== "harness-cyber-playbooks",
     )
+    .map((entry) => entry.name)
     .sort()
     .map((name) => {
       const file = path.join(root, name, "SKILL.md");

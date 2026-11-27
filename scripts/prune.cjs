@@ -9,6 +9,7 @@
  * Usage:
  *   node scripts/prune.cjs [--messages-days 180] [--dry-run]
  */
+const os = require("node:os");
 const path = require("node:path");
 const { createJiti } = require(path.join(__dirname, "..", "node_modules/jiti"));
 const jiti = createJiti(__filename);
@@ -16,14 +17,33 @@ const { KnowledgeStore } = jiti(
   path.join(__dirname, "..", "src", "store.ts"),
 );
 
-const state =
-  process.env.HARNESS_STATE_ROOT ||
-  path.join(process.env.HOME || process.env.USERPROFILE, ".local", "share", "harness-core", "state");
-const file = process.env.HARNESS_KNOWLEDGE || path.join(state, "knowledge.sqlite");
+const resolveStateRoot = () => {
+  const stateOverride = process.env.HARNESS_STATE_ROOT?.trim();
+  if (stateOverride) return path.resolve(stateOverride);
+  const homeOverride = process.env.HARNESS_HOME?.trim();
+  if (homeOverride) return path.join(path.resolve(homeOverride), "state");
+  let userHome = (process.env.HOME || process.env.USERPROFILE || "").trim();
+  if (!userHome) {
+    try {
+      userHome = os.homedir();
+    } catch {
+      userHome = "";
+    }
+  }
+  if (!userHome)
+    throw new Error("Cannot determine harness home: set HARNESS_STATE_ROOT, HARNESS_HOME, or HOME");
+  return path.join(path.resolve(userHome), ".local", "share", "harness-core", "state");
+};
+
+const state = resolveStateRoot();
+const knowledgeOverride = process.env.HARNESS_KNOWLEDGE?.trim();
+const file = knowledgeOverride ? path.resolve(knowledgeOverride) : path.join(state, "knowledge.sqlite");
 
 const value = (name, fallback) => {
   const index = process.argv.indexOf(name);
   if (index < 0) return fallback;
+  if (index + 1 >= process.argv.length || !String(process.argv[index + 1]).trim())
+    throw new Error(`Invalid ${name}`);
   const parsed = Number(process.argv[index + 1]);
   if (!Number.isFinite(parsed)) throw new Error(`Invalid ${name}`);
   return parsed;

@@ -39,9 +39,10 @@ Le dossier d'une version de rapport est créé par `cyber_report action=snapshot
 
 Aucune capture ne doit montrer la mention « Chrome est contrôlé par un logiciel de test automatisé », ni son équivalent dans un autre navigateur. Une image qui porte ce bandeau est refusée : elle prouve l'outillage, pas la page.
 
-- Chromium, Chrome et Edge : lancer avec `--test-type`, qui supprime précisément ce bandeau. Jamais `--no-sandbox`.
-- Playwright ou Puppeteer : `ignoreDefaultArgs: ["--enable-automation"]` (le pilote ajoute ce drapeau par défaut), ou `--test-type` dans les `args`.
-- Firefox et Safari n'affichent pas ce bandeau ; vérifier quand même l'image.
+- **Isolation obligatoire du profil** : toute capture ou navigation automatisée doit utiliser un profil temporaire isolé (`--user-data-dir=/tmp/...`, serveur MCP en mode `--isolated` ou lancement isolé sous `Xvfb`), et **jamais** le navigateur personnel de l'opérateur ni son profil par défaut (`~/.config/google-chrome`, `~/.config/chromium`). Ne jamais réutiliser un port de débogage distant appartenant à une session personnelle ; fermer le processus et supprimer le profil temporaire après la capture (`scripts/capture_browser.mjs --isolated --launch <url>`).
+- Chromium, Chrome et Edge : lancer avec `--test-type --no-first-run --no-default-browser-check --disable-default-apps`, qui supprime précisément ce bandeau. Jamais `--no-sandbox`.
+- Playwright ou Puppeteer : `ignoreDefaultArgs: ["--enable-automation"]` (le pilote ajoute ce drapeau par défaut), ou `--test-type` dans les `args`, toujours avec un contexte/profil isolé (`--isolated`).
+- Firefox et Safari n'affichent pas ce bandeau ; vérifier quand même l'image et isoler le profil temporaire.
 - Ne jamais rogner l'image pour faire disparaître le bandeau : la barre d'adresse reste visible, elle porte l'URL de la preuve.
 - Relire l'image après la capture. Si le bandeau est présent, relancer avec le bon drapeau et reprendre la capture.
 
