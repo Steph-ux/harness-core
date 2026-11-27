@@ -64,6 +64,11 @@ const POST_EXPLOIT_TOOLS = new Set([
   "linpeas", "winpeas", "pspy",
 ]);
 
+const REPORT_TOOLS = new Set([
+  "cyber_report", "cyber_verification", "cyber_capitalise", "cyber_cleanup",
+  "rapports-cyber", "capitaliser-cyber",
+]);
+
 // ---------------------------------------------------------------------------
 // Phase detection — data-driven, not model-declared
 // ---------------------------------------------------------------------------
@@ -85,9 +90,13 @@ export function detectPhase(input: PhaseInput): OffensivePhase {
   const enumCount = [...tools].filter((t) => ENUMERATE_TOOLS.has(t)).length;
   const exploitCount = [...tools].filter((t) => EXPLOIT_TOOLS.has(t)).length;
   const postCount = [...tools].filter((t) => POST_EXPLOIT_TOOLS.has(t)).length;
+  const reportCount = [...tools].filter((t) => REPORT_TOOLS.has(t)).length;
 
   // 3-failure backtrack: forced return to enumerate
   if (input.consecutiveExploitFailures >= 3) return "enumerate";
+
+  // Report: reporting/verification tools active
+  if (reportCount > 0) return "report";
 
   // Post-exploit: confirmed findings and post-exploit tools active
   if (input.confirmedFindings > 0 && postCount > 0) return "post-exploit";
@@ -98,6 +107,15 @@ export function detectPhase(input: PhaseInput): OffensivePhase {
   // Enumerate: enumeration tools in use, or surfaces declared and being mapped
   if (enumCount > 0 || (input.surfacesTotal > 0 && input.surfacesInProgress > 0))
     return "enumerate";
+
+  // Report: all declared surfaces tested with no pending/in-progress surfaces
+  if (
+    input.surfacesTotal > 0 &&
+    input.surfacesTested >= input.surfacesTotal &&
+    input.surfacesUntested === 0 &&
+    input.surfacesInProgress === 0
+  )
+    return "report";
 
   // Default: recon
   return "recon";
@@ -156,6 +174,21 @@ export function transitionCheck(
         ready: true,
         targetPhase: "enumerate",
         reason: `3 consecutive exploit failures. Backtrack to enumeration: gather more information before retrying. Different tool, different angle.`,
+      };
+    }
+  }
+
+  if (currentPhase === "post-exploit") {
+    if (
+      input.surfacesTotal > 0 &&
+      input.surfacesTested >= input.surfacesTotal &&
+      input.surfacesUntested === 0 &&
+      input.surfacesInProgress === 0
+    ) {
+      return {
+        ready: true,
+        targetPhase: "report",
+        reason: `All ${input.surfacesTotal} surface(s) tested and post-exploitation complete. Transition to reporting: verify every finding with independent controls.`,
       };
     }
   }
@@ -802,6 +835,25 @@ export function phaseDirective(input: PhaseInput, surfaceLabels: readonly string
       phase: "exploit",
       priority: input.observationCount >= 15 ? "mandatory" : "recommended",
       text: `PHASE TRANSITION: ${transition.reason}${vectorText}`,
+    };
+  }
+
+  // Exploit → post-exploit transition (or backtrack)
+  if (phase === "exploit" && transition) {
+    return {
+      phase: transition.targetPhase,
+      priority:
+        transition.targetPhase === "enumerate" ? "mandatory" : "recommended",
+      text: `PHASE TRANSITION: ${transition.reason}`,
+    };
+  }
+
+  // Post-exploit → report transition
+  if (phase === "post-exploit" && transition) {
+    return {
+      phase: transition.targetPhase,
+      priority: "recommended",
+      text: `PHASE TRANSITION: ${transition.reason}`,
     };
   }
 

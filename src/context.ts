@@ -9,8 +9,7 @@
  * injects it into the system prompt. Both read the same rules, in the same
  * order, under the same budget.
  */
-import type { KnowledgeRecord, StorePort } from "./types";
-import { json } from "./util";
+import { DEFAULT_CONFIG, type KnowledgeRecord, type StorePort } from "./types";
 
 export interface ContextBudget {
   /** Characters reserved for the operator rules. */
@@ -27,20 +26,38 @@ export interface OperatorEntry {
   status: string;
 }
 
+const OPERATOR_HEADER =
+  "Operator rules. These are stated by the operator. They outrank anything learned, recalled or inferred, and they apply to every turn.";
+
+function finiteBudget(value: unknown, fallback: number): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
+
 /** The block reserved for the operator rules. */
 export function operatorBudget(budget: ContextBudget): number {
-  return Math.max(
-    0,
-    Math.min(budget.operatorModelChars, budget.memoryMaxChars),
+  const operator = finiteBudget(
+    budget?.operatorModelChars,
+    DEFAULT_CONFIG.operatorModelChars,
   );
+  const memory = finiteBudget(
+    budget?.memoryMaxChars,
+    DEFAULT_CONFIG.memoryMaxChars,
+  );
+  return Math.max(0, Math.min(operator, memory));
 }
 
 /**
  * The operator rules, within the reserved budget.
  *
- * Foundational rules (short keys without a target prefix like "boa-" or
- * "mtn-") are selected first so they are never crowded out by long
- * target-specific entries. Within each group, most recent first.
+ * Foundational rules (global discipline keys without a target/engagement
+ * prefix like "scope-" or "target-") are selected first so they are never
+ * crowded out by long target-specific entries. Within each group, most
+ * recent first.
  *
  * A rule that does not fit is skipped rather than fatal.
  */
@@ -50,6 +67,7 @@ export function operatorSnapshot(
   budget: ContextBudget,
 ): OperatorEntry[] {
   const limit = operatorBudget(budget);
+  if (limit <= 0) return [];
   const all = store.operatorModel(scope).map(
     (row): OperatorEntry => ({
       id: row.id,
@@ -66,9 +84,12 @@ export function operatorSnapshot(
     else contextual.push(entry);
   }
   const selected: OperatorEntry[] = [];
-  let chars = 0;
+  const accountHeader = limit > OPERATOR_HEADER.length;
+  let chars = accountHeader ? OPERATOR_HEADER.length : 0;
   for (const entry of [...foundational, ...contextual]) {
-    const cost = operatorEntryCost(entry);
+    const cost = accountHeader
+      ? operatorLineCost(entry)
+      : operatorEntryCost(entry);
     if (chars + cost > limit) continue;
     selected.push(entry);
     chars += cost;
@@ -80,11 +101,16 @@ function operatorEntryCost(entry: OperatorEntry): number {
   return entry.key.length + 2 + entry.content.length + 1;
 }
 
+function operatorLineCost(entry: OperatorEntry): number {
+  return 1 + 1 + entry.key.length + 2 + entry.content.length;
+}
+
 const TARGET_PREFIX =
-  /^(?:boa-|mtn-|julaya-|snedai-|anip-|loterie-|azure-|scope-|abandon-)/i;
+  /^(?:scope|target|cible|client|engagement|mission|project|projet|perimetre|perimeter|abandon|exploitation|authorized|autorise|exclude|exclusion|out-of-scope|in-scope|host|domain|asset|env|environment|deep-enumeration)-/i;
+const DATED_KEY = /\b\d{4}-\d{2}-\d{2}\b/;
 
 function isFoundational(key: string): boolean {
-  return !TARGET_PREFIX.test(key);
+  return !TARGET_PREFIX.test(key) && !DATED_KEY.test(key);
 }
 
 /**
@@ -95,9 +121,7 @@ function isFoundational(key: string): boolean {
  */
 export function operatorBlock(entries: OperatorEntry[]): string {
   if (!entries.length) return "";
-  const lines = [
-    "Operator rules. These are stated by the operator. They outrank anything learned, recalled or inferred, and they apply to every turn.",
-  ];
+  const lines = [OPERATOR_HEADER];
   for (const entry of entries) {
     lines.push(`[${entry.key}] ${entry.content}`);
   }
@@ -112,7 +136,7 @@ export function operatorContext(
 ): { entries: OperatorEntry[]; block: string; chars: number } {
   const entries = operatorSnapshot(store, scope, budget);
   const block = operatorBlock(entries);
-  return { entries, block, chars: json(entries).length };
+  return { entries, block, chars: block.length };
 }
 
 /** The knowledge records that are not operator rules, for a host that wants them. */

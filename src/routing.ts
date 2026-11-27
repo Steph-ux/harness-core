@@ -1062,17 +1062,27 @@ function normalise(text: string): string {
     .toLowerCase();
 }
 
-function hit(haystack: string, trigger: string): boolean {
+function matchSpans(haystack: string, trigger: string): [number, number][] {
   const needle = normalise(trigger);
-  if (!needle || NOISE.has(needle)) return false;
-  // A trigger made of several words is matched as a phrase; a single word is
-  // matched on boundaries so "api" does not fire on "capital".
-  if (needle.includes(" ")) return haystack.includes(needle);
-  const index = haystack.indexOf(needle);
-  if (index < 0) return false;
-  const before = index === 0 ? " " : haystack[index - 1];
-  const after = haystack[index + needle.length] ?? " ";
-  return !/[a-z0-9]/.test(before) && !/[a-z0-9]/.test(after);
+  if (!needle || NOISE.has(needle)) return [];
+  const needStart = /[a-z0-9]/.test(needle[0]);
+  const needEnd = /[a-z0-9]/.test(needle[needle.length - 1]);
+  const spans: [number, number][] = [];
+  let from = 0;
+  while (true) {
+    const index = haystack.indexOf(needle, from);
+    if (index < 0) break;
+    const before = index === 0 ? " " : haystack[index - 1];
+    const after = haystack[index + needle.length] ?? " ";
+    if ((!needStart || !/[a-z0-9]/.test(before)) && (!needEnd || !/[a-z0-9]/.test(after)))
+      spans.push([index, index + needle.length]);
+    from = index + 1;
+  }
+  return spans;
+}
+
+function hit(haystack: string, trigger: string): boolean {
+  return matchSpans(haystack, trigger).length > 0;
 }
 
 /**
@@ -1083,17 +1093,24 @@ function hit(haystack: string, trigger: string): boolean {
 export function requestText(event: any): string {
   const out: string[] = [];
   const push = (value: unknown) => {
-    if (typeof value === "string" && value.trim())
+    if (out.length < 3 && typeof value === "string" && value.trim())
       out.push(value.slice(0, 4000));
+  };
+  const pushParts = (parts: unknown) => {
+    if (!Array.isArray(parts)) return;
+    for (const part of parts) {
+      if (out.length >= 3) break;
+      if (typeof part === "string") push(part);
+      else if (part?.type === "text" || part?.type === "input_text")
+        push(part.text ?? part.content);
+    }
   };
 
   for (const key of ["prompt", "text", "message"]) push(event?.[key]);
 
   push(event?.prompt?.text);
-  for (const part of Array.isArray(event?.prompt?.parts)
-    ? event.prompt.parts
-    : [])
-    if (part?.type === "text") push(part.text);
+  pushParts(event?.prompt?.parts);
+  pushParts(event?.message?.content);
   const messages = Array.isArray(event?.messages) ? event.messages : [];
   for (
     let index = messages.length - 1;
@@ -1102,13 +1119,10 @@ export function requestText(event: any): string {
   ) {
     const message = messages[index];
     const role = message?.info?.role ?? message?.role;
-    if (role && role !== "user") continue;
+    if (role !== "user") continue;
     push(message?.content);
-    const parts = Array.isArray(message?.parts) ? message.parts : [];
-    for (const part of parts) {
-      if (part?.type === "text" || part?.type === "input_text")
-        push(part.text ?? part.content);
-    }
+    pushParts(message?.content);
+    pushParts(message?.parts);
   }
   return out.join("\n");
 }
@@ -1122,13 +1136,81 @@ export interface Routing {
   block: string;
 }
 
+function deduplicateMatches(haystack: string, triggers: readonly string[]): string[] {
+  const withSpans = [...new Set(triggers)]
+    .map((trigger) => ({ trigger, normLen: normalise(trigger).length, spans: matchSpans(haystack, trigger) }))
+    .filter((entry) => entry.spans.length > 0)
+    .sort((a, b) => b.normLen - a.normLen);
+  const covered: [number, number][] = [];
+  const kept: string[] = [];
+  for (const entry of withSpans) {
+    const independent = entry.spans.filter(
+      ([s, e]) => !covered.some(([cs, ce]) => s >= cs && e <= ce),
+    );
+    if (!independent.length) continue;
+    kept.push(entry.trigger);
+    covered.push(...independent);
+  }
+  return kept;
+}
+
+function formatRouteLine(route: Route, detail: "full" | "no-chain" | "hint-only" | "compact"): string {
+  const skills = route.skills.join(", ");
+  if (detail === "compact") return `- ${route.label}: load ${skills}.`;
+  if (detail === "hint-only") return `- ${route.label}: load ${skills}. ${route.hint}`;
+  const tools = route.tools.length ? ` Tools: ${route.tools.join(", ")}.` : "";
+  if (detail === "no-chain") return `- ${route.label}: load ${skills}. ${route.hint}${tools}`;
+  const chainRoutes = (route.chain ?? [])
+    .map((id) => ROUTES.find((r) => r.id === id))
+    .filter(Boolean) as Route[];
+  const chain = chainRoutes.length
+    ? ` Next: ${chainRoutes.map((r) => r.label).join(" → ")}.`
+    : "";
+  return `- ${route.label}: load ${skills}. ${route.hint}${tools}${chain}`;
+}
+
+function renderMatchedBlock(chosen: Route[]): { block: string; included: Route[] } {
+  const header =
+    chosen.length === 1
+      ? `${ROUTER_MARKER} One method covers this request. Call the skill tool with its id before you answer or run a command: the skill carries the procedure and the evidence format this ledger accepts.`
+      : `${ROUTER_MARKER} Matched methods cover this request. Call the skill tool with each id before you answer or run a command: the skills carry the procedure and the evidence format this ledger accepts.`;
+  const footer =
+    "Load the skill before acting; a 200 is not a finding without an observation id.";
+  const budget = 900;
+  for (const detail of ["full", "no-chain", "hint-only", "compact"] as const) {
+    const block = [
+      header,
+      ...chosen.map((route) => formatRouteLine(route, detail)),
+      footer,
+    ].join("\n");
+    if (block.length <= budget) return { block, included: chosen };
+  }
+  // If many routes were requested, keep as many compact lines as fit without ever cutting the closing imperative.
+  const lines: string[] = [];
+  const included: Route[] = [];
+  for (const route of chosen) {
+    const candidate = formatRouteLine(route, "compact");
+    const test = [header, ...lines, candidate, footer].join("\n");
+    if (test.length <= budget) {
+      lines.push(candidate);
+      included.push(route);
+    } else if (!lines.length) {
+      const avail = Math.max(20, budget - header.length - footer.length - 3);
+      lines.push(candidate.slice(0, avail));
+      included.push(route);
+      break;
+    } else {
+      break;
+    }
+  }
+  return { block: [header, ...lines, footer].join("\n"), included };
+}
+
 /** One row, so the injection stays a decision and not a library. */
 export function routeFor(text: string, limit = 1): Routing {
   const haystack = normalise(text.replace(/\s+/g, " ").slice(0, 4000));
   const scored = ROUTES.map((route) => {
-    const matched = [
-      ...new Set(route.triggers.filter((trigger) => hit(haystack, trigger))),
-    ];
+    const matched = deduplicateMatches(haystack, route.triggers);
     return {
       route,
       hits: matched.length,
@@ -1148,43 +1230,27 @@ export function routeFor(text: string, limit = 1): Routing {
   // a header, a phone number next to "reverse". One hit inside a long text is
   // noise: the map stays available, no skill is forced.
   const noise = haystack.length > 800 && (scored[0]?.hits ?? 0) < 2;
+  const maxRoutes = Number.isSafeInteger(limit) ? Math.max(1, limit) : 1;
 
   const chosen = noise
     ? []
-    : scored.slice(0, Math.max(1, limit)).map((entry) => entry.route);
+    : scored.slice(0, maxRoutes).map((entry) => entry.route);
   if (!chosen.length) {
     return { ids: [], skills: [], required: [], block: routingTable() };
   }
 
-  const lines = chosen.map((route) => {
-    const skills = route.skills.join(", ");
-    const tools = route.tools.length
-      ? ` Tools: ${route.tools.join(", ")}.`
-      : "";
-    const chainRoutes = (route.chain ?? [])
-      .map((id) => ROUTES.find((r) => r.id === id))
-      .filter(Boolean) as Route[];
-    const chain = chainRoutes.length
-      ? ` Next: ${chainRoutes.map((r) => r.label).join(" → ")}.`
-      : "";
-    return `- ${route.label}: load ${skills}. ${route.hint}${tools}${chain}`;
-  });
-  const block = [
-    `${ROUTER_MARKER} One method covers this request. Call the skill tool with its id before you answer or run a command: the skill carries the procedure and the evidence format this ledger accepts.`,
-    ...lines,
-    "Load the skill before acting; a 200 is not a finding without an observation id.",
-  ].join("\n");
+  const { block, included } = renderMatchedBlock(chosen);
   return {
-    ids: chosen.map((route) => route.id),
-    skills: [...new Set(chosen.flatMap((route) => route.skills))],
+    ids: included.map((route) => route.id),
+    skills: [...new Set(included.flatMap((route) => route.skills))],
     required: [
       ...new Set(
-        chosen
+        included
           .filter((route) => route.enforce)
           .flatMap((route) => route.skills),
       ),
     ],
-    block: block.slice(0, 900),
+    block,
   };
 }
 

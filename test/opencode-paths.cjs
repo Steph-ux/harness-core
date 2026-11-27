@@ -98,26 +98,44 @@ module.exports = async ({ assert, jiti }) => {
     // A hard link is refused: the file is reachable under another name.
     const hard = path.join(real, "hard.sqlite");
     fs.writeFileSync(hard, "x");
+    const hardLink = path.join(real, "hard-link.sqlite");
+    let linked = false;
     try {
-      fs.linkSync(hard, path.join(real, "hard-link.sqlite"));
-      made.push(path.join(real, "hard-link.sqlite"));
+      fs.linkSync(hard, hardLink);
+      linked = true;
+    } catch {
+      // A filesystem without hard links cannot show the case.
+    }
+    if (linked) {
+      made.push(hardLink);
       assert.throws(
-        () => assertPlainPath(path.join(real, "hard-link.sqlite")),
+        () => assertPlainPath(hardLink),
         /Linked or special harness paths are not allowed/,
         "a hard-linked file is refused",
       );
-    } catch (error) {
-      // A filesystem without hard links cannot show the case.
     }
 
     // The short name of a directory is an alias, not a redirection. The
     // case exists where the platform keeps one; where it does not, the
     // check is exercised through the resolved spelling above.
-    const short = os.tmpdir();
-    if (path.resolve(short) !== path.resolve(real)) {
+    const shortRoot = os.tmpdir();
+    const realRoot = fs.realpathSync.native(shortRoot);
+    if (
+      path.resolve(shortRoot) !== path.resolve(realRoot) &&
+      !fs.lstatSync(shortRoot).isSymbolicLink()
+    ) {
       assert.doesNotThrow(
-        () => assertPlainPath(path.join(short, "probe.sqlite")),
+        () => assertPlainPath(path.join(shortRoot, "probe.sqlite")),
         "a short directory name is an alias and is accepted",
+      );
+    }
+    if (
+      path.resolve(workspace) !== path.resolve(real) &&
+      !fs.lstatSync(workspace).isSymbolicLink()
+    ) {
+      assert.doesNotThrow(
+        () => assertPlainPath(path.join(workspace, "probe.sqlite")),
+        "an aliased workspace directory is accepted",
       );
     }
   } finally {

@@ -26,6 +26,8 @@ export interface InstallEntry {
   method: InstallMethod;
   package: string;
   description: string;
+  /** Alternative executable names installed by this package when the package name itself is not a binary. */
+  binaries?: string[];
   /** Extra env vars for the install command. */
   env?: Record<string, string>;
 }
@@ -60,7 +62,20 @@ const CATALOG: InstallEntry[] = [
   { name: "semgrep", method: "pipx", package: "semgrep", description: "Static analysis for code and config" },
   { name: "prowler", method: "pipx", package: "prowler", description: "Cloud security posture assessment" },
   { name: "pacu", method: "pipx", package: "pacu", description: "AWS exploitation framework" },
-  { name: "impacket", method: "pipx", package: "impacket", description: "Network protocol toolkit for Windows services" },
+  {
+    name: "impacket",
+    method: "pipx",
+    package: "impacket",
+    description: "Network protocol toolkit for Windows services",
+    binaries: [
+      "impacket-secretsdump",
+      "impacket-psexec",
+      "impacket-wmiexec",
+      "impacket-smbclient",
+      "secretsdump.py",
+      "GetUserSPNs.py",
+    ],
+  },
 
   // --- APT (Kali/Debian) ---
   { name: "nmap", method: "apt", package: "nmap", description: "Port, service and NSE script scanning" },
@@ -136,7 +151,10 @@ export function isPresent(name: string): boolean {
 
 function isFile(candidate: string): boolean {
   try {
-    return fs.statSync(candidate).isFile();
+    const stat = fs.statSync(candidate);
+    if (!stat.isFile()) return false;
+    if (process.platform !== "win32") return Boolean(stat.mode & 0o111);
+    return true;
   } catch {
     return false;
   }
@@ -146,10 +164,28 @@ function which(name: string): boolean {
   return isPresent(name);
 }
 
+function isInstalled(entry: InstallEntry): boolean {
+  if (which(entry.name)) return true;
+  return Boolean(entry.binaries?.some((bin) => which(bin)));
+}
+
 function installCommand(entry: InstallEntry): { cmd: string; args: string[] } {
   switch (entry.method) {
     case "apt":
-      return { cmd: "sudo", args: ["apt-get", "install", "-y", entry.package] };
+      if (typeof process.getuid === "function" && process.getuid() === 0)
+        return { cmd: "apt-get", args: ["install", "-y", entry.package] };
+      return {
+        cmd: "sudo",
+        args: [
+          "-n",
+          "env",
+          "DEBIAN_FRONTEND=noninteractive",
+          "apt-get",
+          "install",
+          "-y",
+          entry.package,
+        ],
+      };
     case "pipx":
       return { cmd: "pipx", args: ["install", entry.package] };
     case "pip":
@@ -174,26 +210,36 @@ export interface EnsureResult {
 }
 
 export function ensure(name: string, timeout = 300_000): EnsureResult {
-  if (which(name)) return { name, wasPresent: true, installed: true };
   const entry = INDEX.get(name);
+  if (entry ? isInstalled(entry) : which(name))
+    return { name, wasPresent: true, installed: true };
   if (!entry) return { name, wasPresent: false, installed: false, error: "Unknown tool — not in installable catalog" };
   const { cmd, args } = installCommand(entry);
-  const prereqOk = which(cmd === "sudo" ? "apt-get" : cmd);
-  if (!prereqOk)
+  const missingPrereq =
+    entry.method === "apt" && cmd === "sudo"
+      ? (!which("sudo") ? "sudo" : !which("apt-get") ? "apt-get" : null)
+      : !which(cmd)
+        ? cmd
+        : null;
+  if (missingPrereq)
     return { name, wasPresent: false, installed: false, method: entry.method,
-      error: `Install method "${entry.method}" unavailable: ${cmd} not found` };
+      error: `Install method "${entry.method}" unavailable: ${missingPrereq} not found` };
   const result = spawnSync(cmd, args, {
     timeout,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, ...(entry.env ?? {}) },
+    env: {
+      ...process.env,
+      ...(entry.method === "apt" ? { DEBIAN_FRONTEND: "noninteractive" } : {}),
+      ...(entry.env ?? {}),
+    },
   });
   if (result.error || result.status !== 0) {
     const stderr = String(result.stderr ?? result.error?.message ?? "").slice(0, 500);
     return { name, wasPresent: false, installed: false, method: entry.method,
       error: `Install failed (exit ${result.status}): ${stderr}` };
   }
-  const present = which(name);
+  const present = isInstalled(entry);
   return { name, wasPresent: false, installed: present, method: entry.method,
     ...(present ? {} : { error: "Install command succeeded but binary not found in PATH" }) };
 }
