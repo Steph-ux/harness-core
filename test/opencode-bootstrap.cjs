@@ -15,6 +15,7 @@ const PLUGIN = path.join(CORE, "opencode", "plugin.ts");
 
 module.exports = async ({ assert, jiti }) => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "harness-bootstrap-"));
+  const savedStateRoot = process.env.HARNESS_STATE_ROOT;
   process.env.HARNESS_STATE_ROOT = path.join(workspace, "state");
   const saved = process.env.HARNESS_CORE;
   delete process.env.HARNESS_CORE;
@@ -31,6 +32,8 @@ module.exports = async ({ assert, jiti }) => {
       "the core modules resolve from the plugin's own file",
     );
   } finally {
+    if (savedStateRoot === undefined) delete process.env.HARNESS_STATE_ROOT;
+    else process.env.HARNESS_STATE_ROOT = savedStateRoot;
     if (saved === undefined) delete process.env.HARNESS_CORE;
     else process.env.HARNESS_CORE = saved;
     await unloadPlugins();

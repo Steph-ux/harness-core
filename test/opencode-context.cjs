@@ -14,6 +14,10 @@ const CORE = path.resolve(__dirname, "..");
 const PLUGIN = path.join(CORE, "opencode", "plugin.ts");
 
 module.exports = async ({ assert, jiti }) => {
+  const savedEnv = {
+    HARNESS_STATE_ROOT: process.env.HARNESS_STATE_ROOT,
+    HARNESS_CORE: process.env.HARNESS_CORE,
+  };
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "harness-context-"));
   const state = path.join(workspace, "state");
   fs.mkdirSync(state, { recursive: true });
@@ -29,6 +33,7 @@ module.exports = async ({ assert, jiti }) => {
   const { DEFAULT_CONFIG } = jiti(path.join(CORE, "src", "types.ts"));
 
   const store = new KnowledgeStore(path.join(state, "knowledge.sqlite"));
+  try {
   const scope = scopeFor(workspace);
 
   store.setOperatorRule(scope, {
@@ -195,7 +200,9 @@ module.exports = async ({ assert, jiti }) => {
 
   // The block is empty when there is nothing to state.
   const other = scopeFor(path.join(workspace, "empty"));
-  assert.equal(operatorBlock([]), "", "no rule means no block");
+  const emptyRules = operatorSnapshot(store, other, DEFAULT_CONFIG);
+  assert.deepEqual(emptyRules, [], "an empty scope has no rules");
+  assert.equal(operatorBlock(emptyRules), "", "no rule means no block");
 
   // The block is injected once per request, even if the prompt already
   // carries it.
@@ -223,7 +230,13 @@ module.exports = async ({ assert, jiti }) => {
     "degraded continuity is explicit",
   );
 
-  store.close();
-  await unloadPlugins();
-  fs.rmSync(workspace, { recursive: true, force: true });
+  } finally {
+    store.close();
+    await unloadPlugins();
+    for (const [key, val] of Object.entries(savedEnv)) {
+      if (val === undefined) delete process.env[key];
+      else process.env[key] = val;
+    }
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
 };

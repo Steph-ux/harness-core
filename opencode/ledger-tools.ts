@@ -5,8 +5,16 @@
  * only with a reproduction and a negative control that observe different
  * outputs. The stores stay in the core; this file only registers the tools.
  */
-import * as fs from "node:fs";
 import * as path from "node:path";
+import { assertPlainPath, atomicWrite } from "../src/util";
+
+const LEDGER_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/;
+
+function assertOptionalLedgerId(value: unknown, kind: string): void {
+  if (value === undefined) return;
+  if (typeof value !== "string" || !LEDGER_ID_RE.test(value))
+    throw new Error(`Invalid ${kind} id`);
+}
 
 export function addLedgerTools(editor: any, s: any) {
   editor.add({
@@ -100,12 +108,17 @@ export function addLedgerTools(editor: any, s: any) {
           throw new Error(
             "An engagement root is required to write the coverage map",
           );
+        assertPlainPath(root);
         const file = path.join(root, "couverture.md");
-        fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-        fs.writeFileSync(file, s.taskStore.markdown(scope), { mode: 0o600 });
+        assertPlainPath(file);
+        atomicWrite(file, s.taskStore.markdown(scope));
         return { content: JSON.stringify({ path: file }) };
       }
       if (action === "assets") {
+        const existing = new Set(
+          s.taskStore.list(scope).map((entry: any) => entry.title),
+        );
+        const seen = new Set<string>();
         const assets = [
           "host",
           "domain",
@@ -120,14 +133,16 @@ export function addLedgerTools(editor: any, s: any) {
           "person",
         ]
           .flatMap((type) => s.platform.entities(scope, { type, limit: 100 }))
+          .filter((asset: any) => {
+            const title = `${asset.type}:${asset.key}`.slice(0, 200);
+            if (existing.has(title) || seen.has(title)) return false;
+            seen.add(title);
+            return true;
+          })
           .slice(0, 50);
-        const existing = new Set(
-          s.taskStore.list(scope).map((entry: any) => entry.title),
-        );
         const created: string[] = [];
         for (const asset of assets) {
           const title = `${asset.type}:${asset.key}`.slice(0, 200);
-          if (existing.has(title)) continue;
           const parent = s.taskStore.add(scope, { title });
           created.push(parent.id);
           for (const step of s.assetSteps(asset.type))
@@ -335,6 +350,7 @@ export function addLedgerTools(editor: any, s: any) {
         if (op === "propose") {
           if (!input.text)
             throw new Error("propose requires a hypothesis text");
+          assertOptionalLedgerId(input.id, "hypothesis");
           return {
             content: JSON.stringify(
               s.investigation.proposeHypothesis(scope, input.text, input.id),
@@ -401,6 +417,7 @@ export function addLedgerTools(editor: any, s: any) {
         }
         if (op === "add") {
           if (!input.label) throw new Error("add requires a surface label");
+          assertOptionalLedgerId(input.id, "surface");
           const id = input.id ?? `surface-${Date.now().toString(36)}`;
           s.investigation.addSurface(scope, id, input.label);
           return { content: JSON.stringify({ added: id }) };
@@ -420,9 +437,9 @@ export function addLedgerTools(editor: any, s: any) {
           if (!input.evidence?.length)
             throw new Error("a tested surface requires observation ids");
           const proven = s.knowledge.evidence(scope, input.evidence);
-          if (!proven.some((item: any) => item.success))
+          if (!proven.length || !proven.every((item: any) => item.success))
             throw new Error(
-              "surface evidence must include a successful observation",
+              "surface evidence must be successful observations",
             );
           s.investigation.completeSurface(scope, input.id, input.evidence);
           return { content: JSON.stringify({ tested: input.id }) };

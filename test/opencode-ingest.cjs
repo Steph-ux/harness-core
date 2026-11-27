@@ -7,7 +7,7 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { makeContext } = require("./opencode-fixture.cjs");
+const { makeContext, unloadPlugins } = require("./opencode-fixture.cjs");
 
 const CORE = path.resolve(__dirname, "..");
 
@@ -62,6 +62,11 @@ module.exports = async ({ assert, jiti }) => {
   assert.equal(json.skipped, 2, "unknown and incomplete rows are skipped");
   assert.throws(() => planIngest("json", "not json"), /not valid JSON/);
 
+  const savedEnv = {
+    HARNESS_STATE_ROOT: process.env.HARNESS_STATE_ROOT,
+    HARNESS_CORE: process.env.HARNESS_CORE,
+    HARNESS_CAPTURE_TERMINAL: process.env.HARNESS_CAPTURE_TERMINAL,
+  };
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "harness-ingest-"));
   const state = path.join(workspace, "state");
   const engagement = path.join(workspace, "engagement");
@@ -177,6 +182,11 @@ module.exports = async ({ assert, jiti }) => {
   } finally {
     platform.close();
     store.close();
+    await unloadPlugins();
+    for (const [key, val] of Object.entries(savedEnv)) {
+      if (val === undefined) delete process.env[key];
+      else process.env[key] = val;
+    }
     fs.rmSync(workspace, { recursive: true, force: true });
   }
 };

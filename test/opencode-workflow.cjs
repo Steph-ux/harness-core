@@ -481,6 +481,11 @@ module.exports = async ({ assert, jiti, skip }) => {
       () => call("cyber_cleanup", { action: "verify", id: cleanup.id }),
       /Invalid cleanup transition/,
     );
+    await assert.rejects(
+      () => call("cyber_cleanup", { action: "result", id: cleanup.id }),
+      /not been started/,
+      "cleanup result rejects planned state clearly",
+    );
     assert.equal(fs.existsSync(target), true);
     const { DatabaseSync } = require("node:sqlite"),
       fault = new DatabaseSync(path.join(state, "platform.sqlite"));
@@ -520,6 +525,12 @@ module.exports = async ({ assert, jiti, skip }) => {
     );
     await call("cyber_cleanup", { action: "result", id: cleanup.id });
     assert.equal(workflow.cleanup(scope, cleanup.id).status, "completed");
+    await assert.rejects(
+      () => call("cyber_cleanup", { action: "result", id: cleanup.id }),
+      /already settled/,
+      "cleanup result rejects terminal completed state clearly",
+    );
+    const samePos = obs("obs-cap-same", "POSITIF résultat observé", "ses_verifier");
     assert.throws(
       () =>
         workflow.capitalization(scope, m.id, {
@@ -529,6 +540,45 @@ module.exports = async ({ assert, jiti, skip }) => {
           tests: [],
         }),
       /distinct/,
+    );
+    assert.throws(
+      () =>
+        workflow.capitalization(scope, m.id, {
+          outcome: "validated",
+          reason: "Two positives without negative",
+          artifactIds: [doc.id],
+          tests: [
+            { observationId: va.id, contains: "POSITIF résultat", kind: "positive" },
+            { observationId: samePos.id, contains: "POSITIF résultat", kind: "positive" },
+          ],
+        }),
+      /distinct/,
+    );
+    assert.throws(
+      () =>
+        workflow.capitalization(scope, m.id, {
+          outcome: "validated",
+          reason: "Duplicate observation reused as negative",
+          artifactIds: [doc.id],
+          tests: [
+            { observationId: va.id, contains: "POSITIF résultat", kind: "positive" },
+            { observationId: va.id, contains: "POSITIF résultat", kind: "negative" },
+          ],
+        }),
+      /distinct/,
+    );
+    assert.throws(
+      () =>
+        workflow.capitalization(scope, m.id, {
+          outcome: "validated",
+          reason: "Identical positive and negative outputs",
+          artifactIds: [doc.id],
+          tests: [
+            { observationId: va.id, contains: "POSITIF résultat", kind: "positive" },
+            { observationId: samePos.id, contains: "POSITIF résultat", kind: "negative" },
+          ],
+        }),
+      /different output/,
     );
     const none = workflow.capitalization(scope, m.id, {
       outcome: "none",
@@ -738,9 +788,37 @@ module.exports = async ({ assert, jiti, skip }) => {
       /rapport-vN/,
       "a report artifact outside the report folder is refused",
     );
+    const topLevelReport = path.join(engagement, "rapport-v1");
+    fs.copyFileSync(docx, topLevelReport);
+    await assert.rejects(
+      () =>
+        artifactTool({
+          action: "artifact",
+          path: topLevelReport,
+          kind: "report-docx",
+          observationIds: [okay.id],
+        }),
+      /rapport-vN/,
+      "a top-level file named rapport-v1 is not a rapport-vN directory",
+    );
+    fs.rmSync(topLevelReport, { force: true });
     const inFolder = path.join(engagement, "rapport-v1", "rapport.docx");
     fs.mkdirSync(path.dirname(inFolder), { recursive: true });
     fs.copyFileSync(docx, inFolder);
+    const symReport = path.join(engagement, "rapport-v1", "sym.docx");
+    fs.symlinkSync(inFolder, symReport);
+    await assert.rejects(
+      () =>
+        artifactTool({
+          action: "artifact",
+          path: symReport,
+          kind: "report-docx",
+          observationIds: [okay.id],
+        }),
+      /Linked or special/,
+      "a symlinked report artifact is refused",
+    );
+    fs.rmSync(symReport, { force: true });
     const registered = JSON.parse(
       (
         await artifactTool({

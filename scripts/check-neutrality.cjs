@@ -65,10 +65,7 @@ function extractImports(code) {
 }
 
 function checkNeutrality(sourceRoot = defaultSourceRoot, options = {}) {
-  const checkClientPrefixes =
-    Boolean(options.checkClientPrefixes) ||
-    process.argv.includes("--strict-prefixes") ||
-    process.env.HARNESS_CHECK_CLIENT_PREFIXES === "1";
+  const checkClientPrefixes = options.checkClientPrefixes !== false;
 
   const files = collectSourceFiles(sourceRoot);
   const known = new Set();

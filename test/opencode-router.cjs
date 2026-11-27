@@ -13,11 +13,17 @@ const CORE = path.resolve(__dirname, "..");
 const PLUGIN = path.join(CORE, "opencode", "plugin.ts");
 
 module.exports = async ({ assert, jiti }) => {
+  const savedEnv = {
+    HARNESS_STATE_ROOT: process.env.HARNESS_STATE_ROOT,
+    HARNESS_CORE: process.env.HARNESS_CORE,
+  };
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "harness-routing-"));
   const state = path.join(workspace, "state");
   fs.mkdirSync(state, { recursive: true });
   process.env.HARNESS_STATE_ROOT = state;
   process.env.HARNESS_CORE = CORE;
+
+  try {
 
   const { ROUTES, ROUTER_MARKER, routeFor, routingTable, requestText } = jiti(
     path.join(CORE, "src", "routing.ts"),
@@ -178,4 +184,12 @@ module.exports = async ({ assert, jiti }) => {
     String(entry.text).startsWith(ROUTER_MARKER),
   ).length;
   assert.equal(count, 1, "the route is carried once per request");
+  } finally {
+    await unloadPlugins();
+    for (const [key, val] of Object.entries(savedEnv)) {
+      if (val === undefined) delete process.env[key];
+      else process.env[key] = val;
+    }
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
 };

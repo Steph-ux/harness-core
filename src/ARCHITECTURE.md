@@ -26,30 +26,53 @@ database, so a test can hand it a stub and a host can hand it the real store.
 
 | Module | Enforces |
 |---|---|
-| `store.ts` | An observation is written once and never edited; a finding cites only evidence from its own scope; operator rules override inferred knowledge |
-| `platform-store.ts` | A mission takes its stages in order; a scope is approved before work is dispatched; a finding is verified by an observation that is not its own evidence, and its negative control observes something else; entities and relations form the scope-local pivot graph |
-| `tasks.ts` | Mutations are locked; `complete` takes evidence ids resolved by the host, all successful; `block` requires a reason; the tree nests to a bounded depth, a branch closes after its sub-steps are completed or blocked with a reason, and the tree exports a coverage map |
-| `investigation.ts` | The signal functions are pure and read-only; a hypothesis confirms only with a reproduction and a negative control that observe different outputs, and a refuted one is closed; a surface is tested only with evidence; addressed coverage counts tested plus blocked-with-reason; the host injects mandatory directives on a loop, stagnation, stale hypotheses or a conclusion under 60% coverage, and `closingGate` turns the same signals into hard blockers — silence while the work progresses |
-| `capsule.ts` | The returning session gets the exact state: open steps, blocked steps with reasons, the mission stage, pending approvals, commands the harness still owns. `closingGate` answers "are we done?" from that state alone |
-| `skills.ts` | A method becomes active only with support from two sessions and confidence ≥ 0.75; a global method is promotion-only, evidence-free, identifier-free, and visible from every project (project shadows global) |
-| `routing.ts` | One route per request, weighted triggers, an anti-noise guard (a single hit on a long text is not a route), and the declared method catalogue |
-| `lessons.ts` | The extractor proposes; the ordinary gates dispose. A proposal without a successful observation is refused |
-| `process.ts` | A long command is owned: full output to a named file, detached lifetime, stop by id |
-| `capture.ts` | A visual attestation is one window, framed, never the desktop; a recorded trace is captured in the operator's terminal when a display exists, or printed otherwise |
-| `memory-ranking.ts` | Operator rules keep a reserved budget (`operatorModelChars`) and learned facts never crowd them out |
-| `util.ts` | The scope slug (`project-<24 hex>`), hashing, the text redaction used before anything reaches an audit row, and the path guard that compares a component by the object it denotes |
+| `index.ts` | Re-exports the host-neutral core surface so hosts import one module without runtime coupling |
+| `types.ts` | Shared interfaces, `DEFAULT_CONFIG`, learning categories, skill domains, and the `StorePort` boundary |
+| `platform-types.ts` | Engagement stage order (`STAGES`), mission/finding/source shapes, and `ENTITY_TYPES` vocabulary |
+| `skill-trace.ts` | Host-neutral `SkillTrace` and `SkillActivation` types describing which skills loaded or were skipped |
+| `paths.ts` | Resolves `HARNESS_HOME` and `HARNESS_STATE_ROOT` outside host directories so stores outlive hosts |
+| `observation-id.ts` | Derives deterministic observation IDs from `[sessionId, toolCallId]` using a prefix-free JSON hash |
+| `store.ts` | SQLite knowledge store: transactional writes, immutable observations, scope isolation, and operator-rule authority over learned facts |
+| `platform-store.ts` | Transactional engagement ledger: ordered stages, scope approval gates, independent finding verification with distinct negative controls, FTS search, and secret redaction |
+| `tasks.ts` | Locked read-modify-write task tree with stale-lock recovery, bounded depth, dependency validation, reason-required blocks, and successful-evidence closure |
+| `engagement-workflow.ts` | Immutable typed artifacts with alias-safe root confinement, versioned report snapshots, reviewed-before-restitution, post-restitution two-process cleanup (with retry/supersede), and bounded capitalization |
+| `investigation.ts` | Pure signal functions (excluding `cyber_process` non-`read` actions from stagnation), hypothesis confirmation with distinct negative controls, non-blank block reasons, locked `InvestigationStore`, and `investigationBlock` formatting |
+| `phases.ts` | Tool-derived offensive phase detection, transition directives, surface attack vectors, and the unconditional Counter-Logic Gauntlet |
+| `capsule.ts` | Derives session continuity (`capsule`) with deduplicated observations and evaluates `closingGate` blockers from store state alone |
+| `context.ts` | Selects operator rules under `operatorBudget` (foundational discipline ahead of target/dated keys) and separates learned knowledge |
+| `skills.ts` | Locked learned-method lifecycle (`SkillUpdater`): 2-session and ≥0.75 confidence activation, deactivation on failure, idle archiving (including `global`), and identifier-free global promotion |
+| `routing.ts` | Deterministic weighted keyword router (`routeFor`, `routingTable`), word-boundary/anti-noise matching, and declared method catalogue (`EXTERNAL_METHODS`, `HOST_METHODS`, `SHIPPED_METHODS`) |
+| `lessons.ts` | End-of-session extraction prompt, proposal parser, evidence-gated application, and guarded `publishToolImprovements` journal updates |
+| `memory-ranking.ts` | Bilingual NFD/FTS5-aligned tokenization, synonym query expansion, fragment deduplication, and TF-IDF-style candidate ranking |
+| `process.ts` | Launches and tracks detached supervised commands (`spawnTraced`), verifies full trace hashes (`verifiedOutcome`), and manages `ProcessRegistry` locks and archiving |
+| `process-supervisor.cjs` | Standalone process-group supervisor writing nonce-bound terminal result files and exact hashed `traceBytes` independently of the host |
+| `process-evidence.ts` | Helpers to normalize background process handoffs and record/verify linked final process observations |
+| `capture.ts` | Visual attestation framing (`isFramed`), canonical hex/decimal root-window exclusion (`assertNotRoot`), and plain-path capture destinations |
+| `tool-registry.ts` | Locked registry for proposed/validated/active custom scripts (`argv` and `command` invocation, distinct positive/negative tests, path/script-header scanning) |
+| `tool-catalog.ts` | Static security binary notes (`TOOL_NOTES`), `SECURITY_SHORT_TERMS`, and synonym expansion (`expandSecurityTerms`) |
+| `tool-gap.ts` | Matches declared assessment objectives against discovered inventory without treating keyword matches as coverage |
+| `installable.ts` | Static installable security tool catalog (`CATALOG`), executable `isPresent` checks, and non-interactive `ensure` wrappers |
+| `techniques.ts` | Structured technique cards (`TECHNIQUES`) and capability gaps (`techniqueGaps`) across offensive phases |
+| `osv.ts` | Bounded, stable normalizer (`summarizeOsv`) and `OSV_ECOSYSTEMS` list for OSV vulnerability queries |
+| `cve-sources.ts` | Multi-source CVE/exploit lookup (`queryNvd`, `querySearchsploit`, `multiSourceLookup`) with bounded reads and flag-injection guards |
+| `reference-search.ts` | Bounded read-only FTS search across operator-provided reference SQLite indexes with `-wal`/`-shm` plain-path checks and redaction |
+| `sources.ts` | SSRF-guarded HTTP(S) and root-confined folder/file ingestion (`SourceSynchronizer`) producing immutable source chunks |
+| `osint-ingest.ts` | Pure line/httpx/JSON dump parser (`planIngest`) validating hosts/IPs/URLs and stripping credentials before entity/relation upsert |
+| `coverage-roles.ts` | Per-asset-kind checklist templates (`ASSET_STEPS`, `assetSteps`) with `Object.hasOwn` lookup safety |
+| `coverage-profiles.ts` | Bounded deep coverage checklists and contracts (`COVERAGE_PROFILES`, `COVERAGE_CONTRACTS`) for mobile, cloud, harness, and gaps |
+| `util.ts` | Scope slugging (`scopeFor`), SHA-256 hashing, secret redaction (`redactText`/`redact`), learning-text guards, `atomicWrite`, and `assertPlainPath` |
 
 ## Where the host plugs in
 
-`opencode/plugin.ts` and the modules next to it (`permissions.ts`, `display.ts`, `workflow-tools.ts`, `ledger-tools.ts`) form the host boundary. They register:
+`opencode/plugin.ts` and the modules next to it (`permissions.ts`, `display.ts`, `workflow-tools.ts`, `ledger-tools.ts`, `paths.ts`) form the host boundary. They register:
 
 - `context` — injects continuity, the routing table and the closing gate; starts
   the background lesson extraction for pending sessions.
 - `tool.execute.after` — records the observation, including failures.
-- `cyber_finding create` — refuses a finding whose enforced method was not successfully loaded.
+- `cyber_finding create` — refuses a finding whose enforced method was not successfully loaded (unless `HARNESS_ROUTER=off`).
 - tools `cyber_*` — tasks, findings, sources, missions, approvals, processes,
-  memory, methods, reviews, captures.
-- `skill.transform` — serves authored project procedures and active learned methods.
+  memory, methods, reviews, captures, toolbox, investigation, entities, CVEs, reporting, capitalization, cleanup.
+- `skill.transform` — serves all authored `.opencode/skills/` procedures and active learned methods across active session scopes and `instanceCwd`.
 - `prompt` — retains request text for routing in the following context hook.
 
 The native context event omits prompt text. The prompt hook retains the latest
@@ -82,9 +105,12 @@ is the arbiter that reads the state and tells the model so.
 - `InvestigationStore` persists both per scope (locked, atomic, read on every use),
   so a resumed session finds them.
 - The host assembles the state on every context turn and injects the resulting
-  block after the closing gate. Mandatory directives fire on a tool loop, repeated
-  failure, no progress, stale hypotheses, or a conclusion under 60% coverage. The
-  block is empty while the work progresses, so a healthy session is never nagged.
+  block after the closing gate. `investigationBlock(ds)` returns an empty string
+  only when given an empty directive list `[]`; `directives(state)` emits
+  stagnation, coverage, and phase directives conditionally while always appending
+  the Counter-Logic Gauntlet. `detectStagnation()` excludes `cyber_process`
+  non-`read` actions (`run`, `list`, `stop`, `prune`), which intentionally record
+  `evidenceSuccess: false`.
 - The same signals are hard blockers, not only advice: the capsule carries an
   `investigation` summary and `closingGate` refuses a conclusion while a declared
   surface is untouched, a hypothesis is stale, or addressed coverage is under the

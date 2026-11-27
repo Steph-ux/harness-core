@@ -1,7 +1,7 @@
 /** Native permission boundary for reporting, capitalization and post-restitution cleanup. */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { json } from "../src/util";
+import { assertPlainPath, json } from "../src/util";
 export function addWorkflowTools(editor: any, s: any) {
   const str = { type: "string" },
     strings = { type: "array", items: str };
@@ -77,13 +77,30 @@ export function addWorkflowTools(editor: any, s: any) {
       if (i.action === "snapshot")
         return s.workflow.snapshot(scope, i.missionId, i.config);
       if (i.action === "artifact") {
+        if (typeof i.path !== "string" || !i.path.trim())
+          throw new Error("Artifact path is required");
+        assertPlainPath(i.path);
         const engagement = s.platform.missionRoot(scope, i.missionId);
         // The three deliverables live in a folder of their own, inside the
         // engagement, so a report is never a loose file next to the notes.
         if (engagement && String(i.kind ?? "").startsWith("report-")) {
+          assertPlainPath(engagement);
           const file = path.resolve(i.path);
-          const top = path.relative(engagement, file).split(path.sep)[0];
-          if (!/^rapport(-v\d+)?$/.test(top))
+          const realRoot = fs.realpathSync.native(engagement);
+          const parentDir = path.dirname(file);
+          const realParent = fs.existsSync(parentDir)
+            ? fs.realpathSync.native(parentDir)
+            : parentDir;
+          const realFile = path.join(realParent, path.basename(file));
+          const rel = path.relative(realRoot, realFile);
+          const parts = rel.split(path.sep).filter(Boolean);
+          if (
+            !rel ||
+            rel.startsWith("..") ||
+            path.isAbsolute(rel) ||
+            parts.length < 2 ||
+            !/^rapport(?:-v\d+)?$/.test(parts[0])
+          )
             throw new Error(
               "Report artifacts belong in <engagement>/rapport-vN",
             );
@@ -195,12 +212,21 @@ export function addWorkflowTools(editor: any, s: any) {
         return safe;
       }
       if (i.action === "result") {
-        const record = s.processes.get(
-            scope,
-            cleanup.status === "verifying"
-              ? cleanup.verificationProcessId
-              : cleanup.processId,
-          ),
+        if (cleanup.status === "planned")
+          throw new Error(
+            "Cleanup has not been started yet; run it before reading its result",
+          );
+        if (!["running", "verifying"].includes(cleanup.status))
+          throw new Error(
+            `Cleanup already settled with status "${cleanup.status}"`,
+          );
+        const processId =
+          cleanup.status === "verifying"
+            ? cleanup.verificationProcessId
+            : cleanup.processId;
+        if (!processId)
+          throw new Error("Cleanup has no active process to inspect");
+        const record = s.processes.get(scope, processId),
           outcome = s.verifiedOutcome(record);
         if (!outcome || outcome.status === "running")
           return {

@@ -156,6 +156,54 @@ module.exports = async ({ assert, jiti }) => {
       proofs.map((proof) => ({
         ...proof, input: { command: "node " + candidate.file + "; echo PASS" },
       }))), /exact candidate/, "chained commands cannot validate");
+    assert.throws(
+      () =>
+        registry.validate(
+          scope,
+          candidate.id,
+          [
+            { observationId: "good", contains: "positive case passed", kind: "positive" },
+            { observationId: "good2", contains: "positive case passed", kind: "positive" },
+          ],
+          () => [
+            proofs[0],
+            { ...proofs[0], id: "good2" },
+          ],
+        ),
+      /positive and negative/,
+      "two positives without a negative test cannot validate",
+    );
+    assert.throws(
+      () =>
+        registry.validate(
+          scope,
+          candidate.id,
+          [
+            { observationId: "good", contains: "positive case passed", kind: "positive" },
+            { observationId: "good", contains: "positive case passed", kind: "negative" },
+          ],
+          () => proofs,
+        ),
+      /Distinct positive and negative/,
+      "duplicate observationId across positive and negative tests is refused",
+    );
+    assert.throws(
+      () =>
+        registry.validate(
+          scope,
+          candidate.id,
+          [
+            { observationId: "good", contains: "positive case passed", kind: "positive" },
+            { observationId: "bad", contains: "positive case passed", kind: "negative" },
+          ],
+          () => [
+            proofs[0],
+            { ...proofs[1], output: proofs[0].output },
+          ],
+        ),
+      /different outputs/,
+      "identical positive and negative outputs cannot validate",
+    );
     const valid = registry.validate(scope, candidate.id, tests, () => proofs);
     assert.equal(valid.status, "validated");
     const active = registry.activate(scope, candidate.id);
@@ -312,9 +360,29 @@ module.exports = async ({ assert, jiti }) => {
       sessionID: "ses_toolbox", agent: "build", messageID: "msg_toolbox",
       id: "call_toolbox", signal: new AbortController().signal, progress: () => {},
     };
+    let explicitCalls = 0;
     fixture.ctx.permission = {
-      explicit: async () => "always",
+      explicit: async () => {
+        explicitCalls += 1;
+        return "always";
+      },
     };
+    await assert.rejects(
+      () => toolbox.execute({ action: "promote" }, context),
+      /candidateId/,
+      "promote validates candidateId before operator prompt",
+    );
+    await assert.rejects(
+      () => toolbox.execute({ action: "rollback", name: "fixture-validator" }, context),
+      /version/,
+      "rollback validates version before operator prompt",
+    );
+    await assert.rejects(
+      () => toolbox.execute({ action: "retire", name: "" }, context),
+      /tool name/,
+      "retire validates tool name before operator prompt",
+    );
+    assert.equal(explicitCalls, 0, "invalid toolbox inputs never prompt operator");
     await assert.rejects(
       () => toolbox.execute({ action: "ensure", name: "nmap" }, context),
       /explicit operator decision|once/,

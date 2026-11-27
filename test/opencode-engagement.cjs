@@ -316,6 +316,16 @@ module.exports = async ({ assert, jiti }) => {
   });
   const createdFinding = JSON.parse((await finding(proposal)).content);
   assert.equal(createdFinding.status, "unverified", "a finding starts unverified");
+  await assert.rejects(
+    () =>
+      finding({
+        ...proposal,
+        title: "Reflected XSS in search parameter",
+        description: "The search parameter reflects an unescaped XSS payload.",
+      }),
+    /harness-xss/,
+    "an earlier loaded skill from another route does not bypass a newly matched enforced route",
+  );
   assert.ok(
     createdFinding.confidence <= 0.75,
     "the confidence of a finding is bounded",
@@ -353,6 +363,51 @@ module.exports = async ({ assert, jiti }) => {
   // differ from the reproduction it refutes, as the finding's own control
   // does. The marker each one carries is the one the finding declared.
   const checks=proposal.checks.map((check,index)=>{const id=`obs-independent-${index}`;knowledge.recordObservation({id,sessionId:"ses_independent",scope,tool:"shell",input:{},output:check.purpose==="negative-control"?`${check.contains} (control)`:check.contains,success:true,timestamp:new Date().toISOString()});return {...check,observationId:id};});
+  // Negative-control distinctness on cyber_verification attest & platform.verificationPayload:
+  const dupVerifObs = "obs-independent-0";
+  await assert.rejects(
+    () =>
+      fixture.tools.get("cyber_verification").execute(
+        {
+          action: "attest",
+          findingId: createdFinding.id,
+          checks: [
+            { observationId: dupVerifObs, contains: "XSS confirmed", purpose: "reproduction" },
+            { observationId: dupVerifObs, contains: "XSS confirmed", purpose: "negative-control" },
+          ],
+        },
+        { sessionID: "ses_independent", agent: "build", messageID: "msg_verify_dup", id: "call_verify_dup" },
+      ),
+    /must observe a different output/,
+    "cyber_verification attest refuses negative-control reusing reproduction observation",
+  );
+  const twinVerifId = "obs-independent-twin";
+  knowledge.recordObservation({
+    id: twinVerifId,
+    sessionId: "ses_independent",
+    scope,
+    tool: "shell",
+    input: {},
+    output: "XSS confirmed",
+    success: true,
+    timestamp: new Date().toISOString(),
+  });
+  await assert.rejects(
+    () =>
+      fixture.tools.get("cyber_verification").execute(
+        {
+          action: "attest",
+          findingId: createdFinding.id,
+          checks: [
+            { observationId: dupVerifObs, contains: "XSS confirmed", purpose: "reproduction" },
+            { observationId: twinVerifId, contains: "XSS confirmed", purpose: "negative-control" },
+          ],
+        },
+        { sessionID: "ses_independent", agent: "build", messageID: "msg_verify_twin", id: "call_verify_twin" },
+      ),
+    /must observe a different output/,
+    "cyber_verification attest refuses negative-control replaying identical output",
+  );
   verification=JSON.parse((await fixture.tools.get("cyber_verification").execute({action:"attest",findingId:createdFinding.id,checks},{sessionID:"ses_independent",agent:"build",messageID:"msg_verify",id:"call_verify"})).content);
   // The verification gate refuses a finding whose declared control cites the
   // reproduction's observation. The creation gate refuses such a finding, so

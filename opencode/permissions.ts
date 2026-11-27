@@ -38,6 +38,74 @@ async function localApi(args: string[], signal?: AbortSignal): Promise<any> {
   });
 }
 
+/** Wait for a decision promise without hanging indefinitely if subscribe ignores AbortSignal. */
+async function settleDecision(
+  decision: Promise<unknown>,
+  timeoutMs = 200,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      decision.catch(() => {}),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** Race a permission decision against signal abortion so hung iterators cancel promptly. */
+function awaitDecisionWithSignal(
+  decision: Promise<{ reply?: string; error?: unknown }>,
+  signal: AbortSignal,
+): Promise<{ reply?: string; error?: unknown }> {
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve({ error: signal.reason ?? new Error("Aborted") });
+      return;
+    }
+    const onAbort = () =>
+      resolve({ error: signal.reason ?? new Error("Aborted") });
+    signal.addEventListener("abort", onAbort, { once: true });
+    decision.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve({ error });
+      },
+    );
+  });
+}
+
+function subscribePermissionReply(
+  ctx: any,
+  sessionID: string,
+  requestID: string,
+  signal: AbortSignal,
+  closedMessage: string,
+): Promise<{ reply?: string; error?: unknown }> {
+  return (async () => {
+    try {
+      for await (const event of ctx.event.subscribe({ signal })) {
+        if (
+          event.type === "permission.replied" &&
+          event.data?.sessionID === sessionID &&
+          event.data.requestID === requestID
+        )
+          return { reply: event.data.reply };
+      }
+      return { error: new Error(closedMessage) };
+    } catch (error) {
+      return { error };
+    }
+  })();
+}
+
 /** 2.0.26 exposes permission.create over HTTP, but not assert in the plugin. */
 export async function assertProcessPermission(
   ctx: any,
@@ -71,23 +139,13 @@ export async function assertProcessPermission(
     ? AbortSignal.any([controller.signal, context.signal])
     : controller.signal;
   // Listen before creating the request so a fast human response is not lost.
-  const decision = (async () => {
-    try {
-      for await (const event of ctx.event.subscribe({ signal })) {
-        if (
-          event.type === "permission.replied" &&
-          event.data?.sessionID === context.sessionID &&
-          event.data.requestID === id
-        )
-          return { reply: event.data.reply };
-      }
-      return {
-        error: new Error("Permission event stream closed; command refused"),
-      };
-    } catch (error) {
-      return { error };
-    }
-  })();
+  const decision = subscribePermissionReply(
+    ctx,
+    context.sessionID,
+    id,
+    signal,
+    "Permission event stream closed; command refused",
+  );
   try {
     const { sessionID, ...payload } = input;
     const response = await request(
@@ -104,14 +162,14 @@ export async function assertProcessPermission(
       throw new Error("Permission request identity mismatch");
     if (result.effect === "allow") return;
     if (result.effect !== "ask") throw new Error("Shell permission denied");
-    const outcome = await decision;
+    const outcome = await awaitDecisionWithSignal(decision, signal);
     signal.throwIfAborted();
     if (outcome.error) throw outcome.error;
     if (outcome.reply !== "once" && outcome.reply !== "always")
       throw new Error("Shell permission rejected");
   } finally {
     controller.abort();
-    await decision;
+    await settleDecision(decision);
   }
 }
 
@@ -141,23 +199,13 @@ export async function assertOperatorDecision(
   const signal = context.signal
     ? AbortSignal.any([controller.signal, context.signal])
     : controller.signal;
-  const decision = (async () => {
-    try {
-      for await (const event of ctx.event.subscribe({ signal })) {
-        if (
-          event.type === "permission.replied" &&
-          event.data?.sessionID === context.sessionID &&
-          event.data.requestID === id
-        )
-          return { reply: event.data.reply };
-      }
-      return {
-        error: new Error("Permission event stream closed; decision refused"),
-      };
-    } catch (error) {
-      return { error };
-    }
-  })();
+  const decision = subscribePermissionReply(
+    ctx,
+    context.sessionID,
+    id,
+    signal,
+    "Permission event stream closed; decision refused",
+  );
   try {
     const response = await request(
       [
@@ -186,13 +234,13 @@ export async function assertOperatorDecision(
       throw new Error(
         "harness_operator must be configured as ask; decision refused",
       );
-    const outcome = await decision;
+    const outcome = await awaitDecisionWithSignal(decision, signal);
     signal.throwIfAborted();
     if (outcome.error) throw outcome.error;
     if (outcome.reply !== "once")
       throw new Error("The operator must approve this transition once");
   } finally {
     controller.abort();
-    await decision;
+    await settleDecision(decision);
   }
 }

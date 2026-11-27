@@ -15,6 +15,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { coreRoot } from "./paths";
 import {
@@ -22,13 +23,13 @@ import {
   assertProcessPermission,
 } from "./permissions";
 import {
+  captureBrowserIsolated,
   captureWindow,
   commandArguments,
   listWindows,
   quoteArgument,
   renderTrace,
   rootWindowId,
-  runCommand,
   windowGeometry,
 } from "./display";
 
@@ -162,8 +163,11 @@ function succeeded(event: any): boolean {
   if (metadata.status === "error" || metadata.status === "failed") return false;
   if (typeof metadata.exit === "number" && metadata.exit !== 0) return false;
   const output = event.result?.output;
-  if (output && typeof output === "object")
+  if (output && typeof output === "object") {
     if (output.status === "error" || output.status === "failed") return false;
+    if (typeof output.exit === "number" && output.exit !== 0) return false;
+  }
+  if (metadata.exit === 0) return true;
   const match = /Exited with code (\d+)/.exec(outputText(event.result));
   if (match && Number(match[1]) !== 0) return false;
   return true;
@@ -188,7 +192,7 @@ export default {
     const { observationId } = await import(
       path.join(coreRoot(), "src", "observation-id.ts")
     );
-    const { scopeFor, hash } = await import(
+    const { assertPlainPath, scopeFor, hash } = await import(
       path.join(coreRoot(), "src", "util.ts")
     );
     const { operatorContext } = await import(
@@ -212,7 +216,7 @@ export default {
       investigationBlock,
       INVESTIGATION_MARKER,
     } = await import(path.join(coreRoot(), "src", "investigation.ts"));
-    const { routeFor, requestText, ROUTER_MARKER } = await import(
+    const { ROUTES, routeFor, requestText, ROUTER_MARKER } = await import(
       path.join(coreRoot(), "src", "routing.ts")
     );
     const {
@@ -227,7 +231,7 @@ export default {
       spawnTraced,
       stopProcess,
     } = await import(path.join(coreRoot(), "src", "process.ts"));
-    const { SkillUpdater } = await import(
+    const { GLOBAL_SCOPE, SkillUpdater } = await import(
       path.join(coreRoot(), "src", "skills.ts")
     );
     const { ToolRegistry } = await import(
@@ -239,7 +243,7 @@ export default {
     const { PlatformStore } = await import(
       path.join(coreRoot(), "src", "platform-store.ts")
     );
-    const { summarizeOsv } = await import(
+    const { OSV_ECOSYSTEMS, summarizeOsv } = await import(
       path.join(coreRoot(), "src", "osv.ts")
     );
     const { multiSourceLookup } = await import(
@@ -299,10 +303,43 @@ export default {
     const scopeCache = new Map<string, string>();
     const sessionCwd = new Map<string, string>();
     const registered = new Map<string, string>();
-    // The skills the current turn routed to, per session. A finding for that
-    // request needs the method loaded, not merely named in the prompt.
-    const routedRequired = new Map<string, string[]>();
+    // The skills the current turn routed to, per session, grouped by enforced route.
+    // A finding for that request needs >= 1 loaded method per matched enforced route.
+    const routedRequiredGroups = new Map<string, string[][]>();
+    const loadedMethodsBySession = new Map<string, Set<string>>();
     const requestBySession = new Map<string, string>();
+    const isRouterOff = () =>
+      (process.env.HARNESS_ROUTER ?? "").trim().toLowerCase() === "off";
+    const enforcedGroups = (routing: { ids: string[] }): string[][] =>
+      routing.ids
+        .map((id) => ROUTES.find((route) => route.id === id))
+        .filter(
+          (route): route is (typeof ROUTES)[number] =>
+            Boolean(route?.enforce && route.skills.length),
+        )
+        .map((route) => [...route.skills]);
+    const recordLoadedMethod = (
+      scope: string,
+      proofSessionID: string,
+      name: string,
+    ) => {
+      const key = `${proofSessionID}\0${scope}`;
+      let set = loadedMethodsBySession.get(key);
+      if (!set) {
+        set = new Set<string>();
+        loadedMethodsBySession.set(key, set);
+      }
+      set.add(name);
+      set.add(`${LEARNED_PREFIX}${name}`);
+      try {
+        knowledge.audit(scope, "skill.loaded", {
+          sessionID: proofSessionID,
+          name,
+        });
+      } catch {
+        /* Audit failure must not block skill loading. */
+      }
+    };
     // Host-provided tools are discovered through the host, not invented in a prompt.
     const hostTools = async () => {
       try {
@@ -325,6 +362,22 @@ export default {
     const lessonChecked = new Map<string, number>();
     let lessonRunning = false;
 
+    function sessionSnapshot(scope: string, sessionID: string) {
+      const observations = knowledge.observationsForSession(
+        sessionID,
+        scope,
+        100,
+      );
+      const digest = hash(
+        JSON.stringify({
+          scope,
+          sessionID,
+          observations: observations.map((item: any) => [item.id, item.hash]),
+        }),
+      );
+      return { observations, digest };
+    }
+
     /**
      * What a session teaches.
      *
@@ -342,18 +395,7 @@ export default {
       skills: number;
       rejected: string[];
     }> {
-      const observations = knowledge.observationsForSession(
-        sessionID,
-        scope,
-        100,
-      );
-      const digest = hash(
-        JSON.stringify({
-          scope,
-          sessionID,
-          observations: observations.map((item: any) => [item.id, item.hash]),
-        }),
-      );
+      const { observations, digest } = sessionSnapshot(scope, sessionID);
       if (!observations.length) {
         // Nothing to read. It is written down anyway, so the session is not
         // read again and again.
@@ -479,16 +521,6 @@ export default {
             }
           }),
       );
-      const snapshotDigest = (id: string) =>
-        hash(
-          JSON.stringify({
-            scope,
-            sessionID: id,
-            observations: knowledge
-              .observationsForSession(id, scope, 100)
-              .map((o: any) => [o.id, o.hash]),
-          }),
-        );
       // A session is read by a later one. "Later" is a matter of time, not of
       // status: a host that never marked a session closed leaves it active
       // forever, and its work stays unread.
@@ -498,7 +530,7 @@ export default {
         .filter(
           (row: any) =>
             row.id !== current &&
-            !reviewed.has(snapshotDigest(row.id)) &&
+            !reviewed.has(sessionSnapshot(scope, row.id).digest) &&
             Date.now() - (lessonChecked.get(row.id) ?? 0) > 60000 &&
             Number.isFinite(Date.parse(row.updatedAt)) &&
             Date.parse(row.updatedAt) < cutoff,
@@ -518,15 +550,17 @@ export default {
     }
 
     // A learned method nobody used is archived, like on the Pi host.
-    try {
-      const archived = skills.archiveUnused(
-        scopeFor(instanceCwd),
-        knowledge.audits(scopeFor(instanceCwd), "skills.exposure", 200),
-      );
-      if (archived.length)
-        debug(`archived learned methods: ${archived.join(", ")}`);
-    } catch (error) {
-      debug(`archive failed: ${String(error)}`);
+    for (const targetScope of [scopeFor(instanceCwd), GLOBAL_SCOPE]) {
+      try {
+        const archived = skills.archiveUnused(
+          targetScope,
+          knowledge.audits(targetScope, "skills.exposure", 200),
+        );
+        if (archived.length)
+          debug(`archived learned methods (${targetScope}): ${archived.join(", ")}`);
+      } catch (error) {
+        debug(`archive failed (${targetScope}): ${String(error)}`);
+      }
     }
 
     /**
@@ -904,30 +938,6 @@ export default {
         });
         const continuity = capsuleText(state);
 
-        // The block is injected once per request. If the host ever hands over
-        // a prompt that already carries it, it is left alone.
-        const carried = event.system.filter(
-          (block: any) =>
-            typeof block?.text === "string" &&
-            block.text.startsWith(OPERATOR_MARKER),
-        ).length;
-        if (carried) {
-          debug(`context block already present (carried})`);
-        } else {
-          const { entries, block } = operatorContext(knowledge, scope, budget);
-          if (block) {
-            // The block goes right after the host prompt, so it precedes every
-            // other block the harness, the skills or the memory plugin add.
-            event.system.splice(1, 0, { type: "text", text: block });
-            knowledge.audit(scope, "context.injected", {
-              sessionID: event.sessionID,
-              agent: event.agent,
-              rules: entries.map((entry) => entry.key),
-              chars: block.length,
-            });
-          }
-        }
-
         if (continuity) {
           const at = event.system.findIndex(
             (block: any) =>
@@ -955,10 +965,12 @@ export default {
         );
         // HARNESS_ROUTER=off is the control arm of the A/B: the same request
         // without the map, and without the load the map would require.
-        const routerOff =
-          (process.env.HARNESS_ROUTER ?? "").toLowerCase() === "off";
+        const routerOff = isRouterOff();
         // The methods this turn must have loaded before a finding is recorded.
-        routedRequired.set(event.sessionID, routerOff ? [] : routing.required);
+        routedRequiredGroups.set(
+          event.sessionID,
+          routerOff ? [] : enforcedGroups(routing),
+        );
         if (
           !routerOff &&
           !event.system.some(
@@ -1086,16 +1098,27 @@ export default {
 
         // What the learned methods offered this turn. It is what tells the
         // curator which methods are still used.
-        const learned = skills
-          .active(scope)
-          .map((entry) => ({
-            name: entry.revision.name,
-            file: entry.filePath,
-          }));
+        const activeLearned = skills.active(scope);
+        const learned = activeLearned.map((entry) => ({
+          name: entry.revision.name,
+          file: entry.filePath,
+        }));
         if (learned.length)
           knowledge.audit(scope, "skills.exposure", {
             sessionID: event.sessionID,
             skills: learned,
+          });
+        const globalLearned = activeLearned
+          .filter((entry) => entry.revision.scope === GLOBAL_SCOPE)
+          .map((entry) => ({
+            name: entry.revision.name,
+            file: entry.filePath,
+          }));
+        if (globalLearned.length)
+          knowledge.audit(GLOBAL_SCOPE, "skills.exposure", {
+            sessionID: event.sessionID,
+            projectScope: scope,
+            skills: globalLearned,
           });
 
         // What the previous sessions of this scope taught, read once. The
@@ -1138,9 +1161,7 @@ export default {
                       ) {
                         knowledge.audit(scope, "lessons.extracted", {
                           sessionID,
-                          digest: hash(
-                            JSON.stringify({ scope, sessionID, skipped: true }),
-                          ),
+                          digest: sessionSnapshot(scope, sessionID).digest,
                           skipped: String(error).slice(0, 200),
                         });
                       }
@@ -1183,40 +1204,79 @@ export default {
      * nobody used is archived.
      */
     await ctx.skill.transform((editor: any) => {
-      for (const name of ["capitaliser-cyber", "rapports-cyber"]) {
-        const file = path.join(
-          coreRoot(),
-          ".opencode",
-          "skills",
-          name,
-          "SKILL.md",
-        );
-        if (fs.existsSync(file)) {
-          const raw = fs.readFileSync(file, "utf8");
+      const skillsDir = path.join(coreRoot(), ".opencode", "skills");
+      const unquoteYaml = (value: string) => {
+        if (
+          value.startsWith('"') &&
+          value.endsWith('"') &&
+          value.length >= 2
+        ) {
+          try {
+            return String(JSON.parse(value));
+          } catch {
+            return value.slice(1, -1);
+          }
+        }
+        if (value.startsWith("'") && value.endsWith("'") && value.length >= 2)
+          return value.slice(1, -1).replace(/''/g, "'");
+        return value;
+      };
+      if (fs.existsSync(skillsDir)) {
+        const dirs = fs
+          .readdirSync(skillsDir, { withFileTypes: true })
+          .filter((entry) => entry.isDirectory())
+          .sort((a, b) => a.name.localeCompare(b.name));
+        for (const entry of dirs) {
+          const file = path.join(skillsDir, entry.name, "SKILL.md");
+          if (!fs.existsSync(file)) continue;
+          try {
+            if (!fs.statSync(file).isFile()) continue;
+          } catch {
+            continue;
+          }
+          const raw = fs.readFileSync(file, "utf8").replace(/\r\n/g, "\n");
+          const fm = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(raw);
+          if (!fm) continue;
+          const frontmatter = fm[1];
+          const rawName = /^name:\s*(.+)$/m.exec(frontmatter)?.[1]?.trim();
+          if (!rawName) continue;
+          const id = unquoteYaml(rawName) || entry.name;
+          const rawDesc = /^description:\s*(.+)$/m
+            .exec(frontmatter)?.[1]
+            ?.trim();
+          const description = rawDesc ? unquoteYaml(rawDesc) : id;
           editor.add({
-            id: name,
-            name,
-            description: /^description:\s*(.+)$/m.exec(raw)?.[1] ?? name,
+            id,
+            name: id,
+            description,
             path: file,
-            content: raw.replace(/^---[\s\S]*?---\s*/, ""),
+            content: raw.slice(fm[0].length).replace(/^\s+/, ""),
           });
         }
       }
-      const scope = scopeFor(instanceCwd);
-      const active = skills.active(scope);
-      const wanted = new Set(active.map((entry) => entry.revision.name));
+      const scopes = new Set<string>([
+        ...scopeCache.values(),
+        scopeFor(instanceCwd),
+      ]);
+      const wanted = new Map<
+        string,
+        { scope: string; entry: ReturnType<typeof skills.active>[number] }
+      >();
+      for (const scope of scopes) {
+        for (const entry of skills.active(scope)) {
+          const id = `${LEARNED_PREFIX}${entry.revision.name}`;
+          if (!wanted.has(id)) wanted.set(id, { scope, entry });
+        }
+      }
       for (const existing of editor.list()) {
         const id = String(existing.id ?? "");
-        if (
-          id.startsWith(LEARNED_PREFIX) &&
-          !wanted.has(id.slice(LEARNED_PREFIX.length))
-        )
+        if (id.startsWith(LEARNED_PREFIX) && !wanted.has(id))
           editor.remove(id);
       }
-      for (const entry of active) {
+      for (const [id, { scope, entry }] of wanted) {
         const loaded = skills.load(scope, entry.revision.name);
         editor.add({
-          id: `${LEARNED_PREFIX}${entry.revision.name}`,
+          id,
           name: entry.revision.name,
           description: entry.revision.description,
           path: entry.filePath,
@@ -1395,6 +1455,8 @@ export default {
             return { content: JSON.stringify(candidate) };
           }
           if (action === "activate" || action === "promote") {
+            if (typeof input.candidateId !== "string" || !input.candidateId.trim())
+              throw new Error(`${action} requires a candidateId`);
             if (action === "promote")
               await assertOperatorDecision(ctx, context, "promote-tool:" + input.candidateId);
             const active = toolRegistry.activate(scope, input.candidateId, action === "promote");
@@ -1407,6 +1469,10 @@ export default {
             }) };
           }
           if (action === "rollback") {
+            if (typeof input.name !== "string" || !input.name.trim())
+              throw new Error("rollback requires a tool name");
+            if (!Number.isInteger(input.version) || input.version < 1)
+              throw new Error("rollback requires a positive integer version");
             await assertOperatorDecision(ctx, context, "rollback-tool:" + input.name);
             const restored = toolRegistry.rollback(
               scope, input.name, input.version, input.global === true,
@@ -1427,6 +1493,8 @@ export default {
             return { content: JSON.stringify(result) };
           }
           if (action === "retire") {
+            if (typeof input.name !== "string" || !input.name.trim())
+              throw new Error("retire requires a tool name");
             await assertOperatorDecision(
               ctx, context, "retire-tool:" + (input.global ? "global:" : "local:") + input.name,
             );
@@ -1564,10 +1632,49 @@ export default {
           additionalProperties: false,
         },
         execute: async (input: any) => {
+          const validPackageName = (pkg: string) =>
+            /^[A-Za-z0-9@][A-Za-z0-9._/@+-]{0,200}$/.test(pkg);
+          const validPackageVersion = (ver: string) =>
+            Boolean(ver.trim()) &&
+            ver.length <= 100 &&
+            !/[\s\u0000-\u001f]/.test(ver);
           if (input.action === "search") {
-            const tech = String(input.technology ?? "").trim();
-            if (!tech || tech.length > 200) throw new Error("search requires a technology name (max 200 chars)");
-            const version = input.version ? String(input.version).trim() : undefined;
+            const tech =
+              typeof input.technology === "string"
+                ? input.technology.trim()
+                : "";
+            if (!tech || tech.length > 200)
+              throw new Error(
+                "search requires a technology name (max 200 chars)",
+              );
+            if (/[\u0000-\u001f\u007f]/.test(tech))
+              throw new Error("Invalid search technology characters");
+            const techTokens = tech.split(/\s+/).filter(Boolean);
+            if (
+              techTokens.length > 15 ||
+              techTokens.some((t) => t.startsWith("-"))
+            )
+              throw new Error(
+                "Search technology tokens cannot start with '-'",
+              );
+            let version: string | undefined;
+            if (input.version !== undefined) {
+              const rawVer = String(input.version).trim();
+              if (rawVer) {
+                if (
+                  rawVer.length > 100 ||
+                  /[\u0000-\u001f\u007f]/.test(rawVer)
+                )
+                  throw new Error("Invalid search version");
+                const verTokens = rawVer.split(/\s+/).filter(Boolean);
+                if (
+                  verTokens.length > 10 ||
+                  verTokens.some((t) => t.startsWith("-"))
+                )
+                  throw new Error("Search version tokens cannot start with '-'");
+                version = rawVer;
+              }
+            }
             const result = await multiSourceLookup(tech, version);
             return { content: JSON.stringify(result) };
           }
@@ -1575,17 +1682,27 @@ export default {
             const items = Array.isArray(input.packages) ? input.packages : [];
             if (!items.length) throw new Error("batch requires a packages array");
             if (items.length > 20) throw new Error("batch is limited to 20 packages");
-            const ecosystems = [
-              "PyPI", "npm", "Go", "Debian", "Ubuntu", "Alpine", "Packagist",
-              "Maven", "NuGet", "RubyGems", "crates.io", "Hex", "GitHub Actions",
-            ];
             const results = [];
             for (const item of items) {
+              if (!item || typeof item !== "object") {
+                results.push({ ecosystem: "", package: "", version: null, error: "invalid" });
+                continue;
+              }
               const eco = String(item.ecosystem ?? "");
               const pkg = String(item.package ?? "").trim();
-              const ver = item.version ? String(item.version) : undefined;
-              if (!ecosystems.includes(eco) || !pkg) {
-                results.push({ ecosystem: eco, package: pkg, version: ver ?? null, error: "invalid" });
+              const ver =
+                item.version === undefined ? undefined : String(item.version);
+              if (
+                !OSV_ECOSYSTEMS.includes(eco as any) ||
+                !validPackageName(pkg) ||
+                (ver !== undefined && !validPackageVersion(ver))
+              ) {
+                results.push({
+                  ecosystem: eco,
+                  package: pkg,
+                  version: ver ?? null,
+                  error: "invalid",
+                });
                 continue;
               }
               try {
@@ -1603,6 +1720,10 @@ export default {
                   continue;
                 }
                 const text = await resp.text();
+                if (Buffer.byteLength(text, "utf8") > 512000) {
+                  results.push({ ecosystem: eco, package: pkg, version: ver ?? null, error: "osv-too-large" });
+                  continue;
+                }
                 results.push({
                   ecosystem: eco,
                   package: pkg,
@@ -1616,24 +1737,15 @@ export default {
             return { content: JSON.stringify({ batch: results }) };
           }
           if (input.action !== "lookup") throw new Error("Unknown CVE action");
-          const ecosystems = [
-            "PyPI", "npm", "Go", "Debian", "Ubuntu", "Alpine", "Packagist",
-            "Maven", "NuGet", "RubyGems", "crates.io", "Hex", "GitHub Actions",
-          ];
           const ecosystem = String(input.ecosystem ?? "");
-          if (!ecosystems.includes(ecosystem))
+          if (!OSV_ECOSYSTEMS.includes(ecosystem as any))
             throw new Error("Unsupported OSV ecosystem");
           const name = String(input.package ?? "").trim();
-          if (!/^[A-Za-z0-9@][A-Za-z0-9._/@+-]{0,200}$/.test(name))
+          if (!validPackageName(name))
             throw new Error("Invalid package name");
           const version =
             input.version === undefined ? undefined : String(input.version);
-          if (
-            version !== undefined &&
-            (!version.trim() ||
-              version.length > 100 ||
-              /[\s\u0000-\u001f]/.test(version))
-          )
+          if (version !== undefined && !validPackageVersion(version))
             throw new Error("Invalid package version");
           const response = await fetch("https://api.osv.dev/v1/query", {
             method: "POST",
@@ -1647,7 +1759,7 @@ export default {
           if (!response.ok)
             throw new Error(`OSV refused the lookup (${response.status})`);
           const text = await response.text();
-          if (text.length > 512000)
+          if (Buffer.byteLength(text, "utf8") > 512000)
             throw new Error("OSV response is too large");
           return {
             content: JSON.stringify({
@@ -2179,36 +2291,88 @@ export default {
             // session: recording a finding is where the harness refuses to take
             // the model's memory for a procedure. The host hands the context
             // hook no request text, so the finding's own content is routed too.
-            const routed = routeFor(
-              [input.title, input.description, input.limitations]
-                .filter((value: unknown) => typeof value === "string")
-                .join("\n"),
-            );
-            const required = [
-              ...new Set([
-                ...(routedRequired.get(context.sessionID) ?? []),
-                ...routed.required,
-              ]),
-            ];
-            if (required.length) {
-              const proofSessionID = ensureSession(context.sessionID, scope);
-              const seen = knowledge.observationsForSession(
-                proofSessionID,
-                scope,
-                200,
+            if (!isRouterOff()) {
+              const routed = routeFor(
+                [input.title, input.description, input.limitations]
+                  .filter((value: unknown) => typeof value === "string")
+                  .join("\n"),
               );
-              const loaded = new Set(
-                seen
-                  .filter((row: any) => row.tool === "skill" && row.success)
-                  .map((row: any) => String(row.input?.id ?? "")),
-              );
-              const missing = required.filter((id) => !loaded.has(id));
-              // A row may name two methods that cover the same request; one of
-              // them loaded is what the ledger needs.
-              if (missing.length === required.length)
-                throw new Error(
-                  `The method ${required.join(" or ")} covers this request and none of them was loaded in this session. Call the skill tool with id ${required[0]} first, then record the finding from what it had you observe.`,
+              const rawGroups = [
+                ...(routedRequiredGroups.get(context.sessionID) ?? []),
+                ...enforcedGroups(routed),
+              ];
+              const seenGroupKeys = new Set<string>();
+              const groups: string[][] = [];
+              for (const group of rawGroups) {
+                const key = group.join("\0");
+                if (!key || seenGroupKeys.has(key)) continue;
+                seenGroupKeys.add(key);
+                groups.push(group);
+              }
+              if (groups.length) {
+                const proofSessionID = ensureSession(context.sessionID, scope);
+                const loaded = new Set<string>();
+                let cursor = 0;
+                for (;;) {
+                  const page = knowledge.observationsAfter(scope, cursor, 200);
+                  if (!page.length) break;
+                  for (const { observation: row } of page) {
+                    if (row.sessionId !== proofSessionID || !row.success)
+                      continue;
+                    if (
+                      row.tool === "skill" &&
+                      row.input &&
+                      typeof row.input === "object"
+                    ) {
+                      const id = String(
+                        (row.input as any).id ?? (row.input as any).name ?? "",
+                      );
+                      if (id) loaded.add(id);
+                    } else if (
+                      row.tool === "cyber_method" &&
+                      row.input &&
+                      typeof row.input === "object" &&
+                      (row.input as any).action === "load"
+                    ) {
+                      const name = String((row.input as any).name ?? "");
+                      if (name) {
+                        loaded.add(name);
+                        loaded.add(`${LEARNED_PREFIX}${name}`);
+                      }
+                    }
+                  }
+                  if (page.length < 200) break;
+                  cursor = page[page.length - 1].cursor;
+                }
+                for (const id of loadedMethodsBySession.get(
+                  `${proofSessionID}\0${scope}`,
+                ) ?? [])
+                  loaded.add(id);
+                for (const row of knowledge.audits(scope, "skill.loaded", 200)) {
+                  try {
+                    const detail = JSON.parse(row.detail);
+                    if (
+                      detail?.sessionID === proofSessionID &&
+                      typeof detail.name === "string" &&
+                      detail.name
+                    ) {
+                      loaded.add(detail.name);
+                      loaded.add(`${LEARNED_PREFIX}${detail.name}`);
+                    }
+                  } catch {
+                    /* ignore malformed audit detail */
+                  }
+                }
+                const unsatisfied = groups.filter(
+                  (group) => !group.some((id) => loaded.has(id)),
                 );
+                // Each matched enforced route requires >= 1 of its skills loaded;
+                // an unrelated skill loaded earlier never satisfies a new route.
+                if (unsatisfied.length > 0)
+                  throw new Error(
+                    `The method ${unsatisfied.map((g) => g.join(" or ")).join(" and ")} covers this request and none of them was loaded in this session. Call the skill tool with id ${unsatisfied[0][0]} first, then record the finding from what it had you observe.`,
+                  );
+              }
             }
             return {
               content: JSON.stringify(
@@ -2337,6 +2501,7 @@ export default {
                 "An import needs the observation that produced the dump",
               );
             const file = path.resolve(String(input.path));
+            assertPlainPath(file);
             let stat;
             try {
               stat = fs.statSync(file);
@@ -2350,10 +2515,16 @@ export default {
                 ? platform.missionRoot(scope, mission.id)
                 : undefined;
             if (root) {
-              const allowed = fs.realpathSync(root);
-              if (!fs.realpathSync(file).startsWith(allowed + path.sep))
+              assertPlainPath(root);
+              const allowed = fs.realpathSync.native(root);
+              if (
+                !fs.realpathSync
+                  .native(file)
+                  .startsWith(allowed + path.sep)
+              )
                 throw new Error("The dump must stay inside the engagement");
             }
+            knowledge.evidence(scope, input.observationIds);
             const plan = planIngest(
               format as any,
               fs.readFileSync(file, "utf8"),
@@ -2486,10 +2657,12 @@ export default {
             const command = argv.map(quoteArgument).join(" ");
             await assertProcessPermission(ctx, context, command);
             context.signal?.throwIfAborted();
-            const session = await ctx.session.get({
-              sessionID: context.sessionID,
-            });
-            const cwd = sessionDirectory(session) ?? instanceCwd;
+            const cwd =
+              sessionCwd.get(context.sessionID) ??
+              sessionDirectory(
+                await ctx.session.get({ sessionID: context.sessionID }),
+              ) ??
+              instanceCwd;
             const record = processes.prepare(
               scope,
               context.sessionID,
@@ -2545,8 +2718,28 @@ export default {
               metadata: { evidenceSuccess: false },
             };
           }
-          const record = processes.get(scope, input.id),
+          const record = processes.get(scope, input.id);
+          const proofSessionID = ensureSession(context.sessionID, scope);
+          let outcome: ReturnType<typeof verifiedOutcome> | undefined;
+          let integrityError: string | undefined;
+          try {
             outcome = verifiedOutcome(record);
+          } catch (error) {
+            integrityError =
+              error instanceof Error ? error.message : String(error);
+          }
+          if (integrityError) {
+            return {
+              content: JSON.stringify({
+                ...publicProcess(record),
+                status: "unknown",
+                observationId: observationId(context.sessionID, context.id),
+                diagnosis: `Trace integrity check failed: ${integrityError}`,
+                trace: "",
+              }),
+              metadata: { evidenceSuccess: false },
+            };
+          }
           const { runKey, ...result } = outcome ?? ({} as any);
           const trace = readTrace(record.logPath, input.tail ?? 200),
             seen = outcome ?? processOutcome(record);
@@ -2620,12 +2813,22 @@ export default {
               "lessons are extracted only from a previous inactive session",
             );
           const target = knowledge
-            .sessionsForScope(scope, 100)
+            .sessionsForScope(scope, 200)
             .find((row: any) => row.id === sessionID);
-          if (!target || target.status === "active")
+          if (!target)
             throw new Error(
               "lessons are extracted only from an inactive scoped session",
             );
+          if (target.status === "active") {
+            const updated = Date.parse(target.updatedAt);
+            const isIdle =
+              Number.isFinite(updated) &&
+              Date.now() - updated >= LESSON_IDLE_MS;
+            if (!isIdle)
+              throw new Error(
+                "lessons are extracted only from an inactive scoped session",
+              );
+          }
           const outcome = await extractLessons(
             scope,
             sessionID,
@@ -2724,8 +2927,15 @@ export default {
               throw new Error(
                 "Capture requires the observation of this process read",
               );
-            const record = processes.get(scope, input.processId),
+            const record = processes.get(scope, input.processId);
+            let outcome: ReturnType<typeof verifiedOutcome> | undefined;
+            try {
               outcome = verifiedOutcome(record);
+            } catch (error) {
+              throw new Error(
+                `A capture requires an untampered verified trace (${error instanceof Error ? error.message : String(error)})`,
+              );
+            }
             if (!outcome || outcome.status === "running")
               throw new Error("A capture requires a finished, verified trace");
             const name = captureName(
@@ -2784,34 +2994,111 @@ export default {
             );
             const root = captureRoot(scope);
             const dest = captureDestination(root, name);
+            const hasValidPng = (buf: Buffer) =>
+              buf.length >= 24 &&
+              buf[0] === 0x89 &&
+              buf[1] === 0x50 &&
+              buf[2] === 0x4e &&
+              buf[3] === 0x47 &&
+              buf[4] === 0x0d &&
+              buf[5] === 0x0a &&
+              buf[6] === 0x1a &&
+              buf[7] === 0x0a &&
+              buf.readUInt32BE(8) === 13 &&
+              buf.subarray(12, 16).toString("ascii") === "IHDR" &&
+              buf.readUInt32BE(16) > 0 &&
+              buf.readUInt32BE(20) > 0;
+            let isolated = false;
             if (input.file) {
               // Register an existing screenshot file as evidence.
-              const src = path.resolve(input.file);
-              if (!fs.existsSync(src))
+              const src = path.resolve(String(input.file));
+              assertPlainPath(src);
+              let stat: fs.Stats;
+              try {
+                stat = fs.statSync(src);
+              } catch {
                 throw new Error("the file does not exist: " + src);
-              const header = Buffer.alloc(8);
+              }
+              if (!stat.isFile())
+                throw new Error("the file is not a regular file: " + src);
+              if (stat.size > 25 * 1024 * 1024)
+                throw new Error("the browser capture file exceeds 25 MB limit");
+              if (stat.size < 24)
+                throw new Error("the file is not a valid PNG");
+              const header = Buffer.alloc(24);
               const fd = fs.openSync(src, "r");
-              fs.readSync(fd, header, 0, 8, 0);
-              fs.closeSync(fd);
-              if (header[0] !== 0x89 || header[1] !== 0x50 || header[2] !== 0x4e || header[3] !== 0x47)
+              let bytesRead = 0;
+              try {
+                bytesRead = fs.readSync(fd, header, 0, 24, 0);
+              } finally {
+                fs.closeSync(fd);
+              }
+              if (!hasValidPng(header.subarray(0, bytesRead)))
                 throw new Error("the file is not a valid PNG");
               fs.copyFileSync(src, dest);
-            } else {
-              // Take a screenshot via Chrome DevTools Protocol.
-              const cdpPort = String(input.port ?? 9222);
+            } else if (input.port !== undefined) {
+              const port = Number(input.port);
+              if (!Number.isInteger(port) || port < 1 || port > 65535)
+                throw new Error("Invalid CDP port (must be integer 1..65535)");
               const script = path.join(coreRoot(), "scripts", "capture_browser.mjs");
-              const args = [script, dest, "--port", cdpPort];
-              if (input.url) args.push("--url", input.url);
-              runCommand("node", args, 20000);
+              const args = [script, dest, "--port", String(port)];
+              if (input.url) args.push("--url", String(input.url));
+              await new Promise<void>((resolve, reject) => {
+                const child = spawn(process.execPath, args, {
+                  stdio: ["ignore", "pipe", "pipe"],
+                  signal: context?.signal,
+                });
+                let output = "";
+                const timer = setTimeout(() => {
+                  child.kill("SIGTERM");
+                }, 25000);
+                child.stdout?.on("data", (chunk) => {
+                  output += String(chunk);
+                });
+                child.stderr?.on("data", (chunk) => {
+                  output += String(chunk);
+                });
+                child.on("error", (error) => {
+                  clearTimeout(timer);
+                  reject(new Error(`${process.execPath} failed: ${error.message}`));
+                });
+                child.on("close", (code) => {
+                  clearTimeout(timer);
+                  if (code === 0) return resolve();
+                  reject(new Error(`${process.execPath} failed: ${output.slice(0, 300)}`));
+                });
+              });
+            } else if (typeof input.url === "string" && input.url.trim()) {
+              captureBrowserIsolated({
+                url: input.url.trim(),
+                dest,
+                timeoutMs: 25000,
+              });
+              isolated = true;
+            } else {
+              throw new Error(
+                "a browser capture requires file, url (for isolated capture), or port",
+              );
             }
-            if (!fs.existsSync(dest) || fs.statSync(dest).size < 32)
+            if (!fs.existsSync(dest) || fs.statSync(dest).size < 32) {
+              try {
+                fs.rmSync(dest, { force: true });
+              } catch {}
               throw new Error("the browser capture is empty or failed");
+            }
             const image = fs.readFileSync(dest);
+            if (!hasValidPng(image)) {
+              try {
+                fs.rmSync(dest, { force: true });
+              } catch {}
+              throw new Error("the browser capture is not a valid PNG");
+            }
             const link = {
               kind: "browser-capture",
               observationId: input.observationId ?? "",
               path: dest,
               url: input.url ?? "",
+              ...(isolated ? { isolated: true } : {}),
               width: image.readUInt32BE(16),
               height: image.readUInt32BE(20),
               bytes: image.length,
@@ -2842,10 +3129,14 @@ export default {
           const root = captureRoot(scope);
           const dest = captureDestination(root, name);
           const capture = captureWindow(target.id, dest);
-          if (!isFramed(capture, geometry))
+          if (!isFramed(capture, geometry)) {
+            try {
+              fs.rmSync(dest, { force: true });
+            } catch {}
             throw new Error(
               "the capture does not match the window it claims to show, so it is refused",
             );
+          }
           const link = {
             observationId: input.observationId ?? "",
             path: dest,
@@ -2965,17 +3256,21 @@ export default {
           if (input.action === "list")
             return { content: JSON.stringify(skills.list(scope)) };
           if (input.action === "load") {
-            if (!input.name) throw new Error("load requires a method name");
+            if (typeof input.name !== "string" || !input.name.trim())
+              throw new Error("load requires a method name");
             const loaded = skills.load(scope, input.name);
+            const proofSessionID = ensureSession(context.sessionID, scope);
+            recordLoadedMethod(scope, proofSessionID, input.name);
             return { content: JSON.stringify(loaded) };
           }
           if (input.action === "promote") {
+            if (typeof input.name !== "string" || !input.name.trim())
+              throw new Error("promote requires a method name");
             await assertOperatorDecision(
               ctx,
               context,
               `promote-global:${input.name}`,
             );
-            if (!input.name) throw new Error("promote requires a method name");
             const revision = skills.promote(scope, input.name);
             if (typeof ctx.skill?.reload === "function")
               await ctx.skill.reload();
@@ -3280,9 +3575,9 @@ export default {
                 knowledge.getKnowledge(scope, input.query),
               ),
             };
+          const proofSessionID = ensureSession(context.sessionID, scope);
           const recent = knowledge.observationsForSession(
-            registered.get(`${context.sessionID}\0${scope}`) ??
-              context.sessionID,
+            proofSessionID,
             scope,
             input.limit ?? 20,
           );

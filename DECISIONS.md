@@ -4,6 +4,55 @@ One entry per decision that is expensive to reverse. Each states what was
 decided, why, and what it costs. New entries go at the top.
 
 
+## 2026-11-27 — Tool registry `argv` validation, gap expansion, and technique cards
+
+**Decision.** `ToolRegistry.validate` and `matchExecution` accept both
+`cyber_process` `argv` arrays and shell `command`/`cmd` strings, require distinct
+positive/negative outputs and non-trivial `contains` checks, and strip project
+tests on global promotion. `context()` prioritizes local and managed tools ahead
+of noisy MCP tools; `tool-catalog` and `tool-gap` preserve two-character security
+terms and synonym aliases; `techniques.ts` defines structured technique cards and
+tracks uncarded gaps.
+**Why.** Managed scripts could never validate against `cyber_process` (`argv`
+only), identical or trivial outputs allowed vacuous validation, and MCP tool
+prefixes crowded out local CLI binaries and short security terms (`ad`, `js`,
+`ip`, `s3`).
+**Cost.** Inline evaluation flags (`-e`, `-c`) and shell redirections are refused
+during validation; technique cards require explicit maintenance in `techniques.ts`.
+
+
+## 2026-11-27 — Isolated Xvfb and temporary-profile browser captures
+
+**Decision.** Terminal trace captures (`scripts/capture_terminal.sh`) and
+isolated browser captures (`scripts/capture_browser.mjs --isolated --launch`,
+`captureBrowserIsolated`) run under `xvfb-run` or `--headless=new` with a fresh
+temporary `--user-data-dir` and `--test-type`, never attaching to the operator's
+personal browser profile or live desktop focus. `assertNotRoot` normalizes hex
+and decimal window IDs, and `cyber_capture` verifies PNG/IHDR headers, valid
+ports (`1..65535`), and removes rejected `shot` files.
+**Why.** Capturing on the live X11 display stole window focus, failed on
+minimized or occluded windows, interpolated titles into `sh -c`, and opened
+engagement URLs in the operator's personal browser with automation banners.
+**Cost.** Isolated captures depend on `xvfb-run` or headless Chromium and launch
+a fresh browser instance per unported URL capture.
+
+
+## 2026-11-27 — Repo-wide skill serving and `cyber_process` stagnation exclusion
+
+**Decision.** `ctx.skill.transform` registers all `.opencode/skills/` directories
+containing `SKILL.md` frontmatter alongside active learned methods across active
+session scopes and `instanceCwd` (deduplicated by ID), and `archiveUnused` also
+curates `GLOBAL_SCOPE`. `detectStagnation()` excludes `cyber_process` non-`read`
+actions (`run`, `list`, `stop`, `prune`), while `cyber_finding` checks full
+session skill/`cyber_method` loads unless `HARNESS_ROUTER=off`.
+**Why.** Registering only two shipped skills left 60 `harness-*` procedures and
+playbooks stale or absent in host copies, and counting intentional
+`evidenceSuccess: false` launches as stagnation penalized models for using
+`cyber_process`.
+**Cost.** The host plugin indexes the full repository skill catalogue and scans
+paged session observations when gating enforced findings.
+
+
 ## 2026-11-24 — Installing a tool is an operator decision, not a launch
 
 **Decision.** `cyber_process run` never installs a binary. A missing executable
