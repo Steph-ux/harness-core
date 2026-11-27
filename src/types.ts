@@ -53,7 +53,7 @@ export interface KnowledgeRecord extends Omit<KnowledgeProposal, "kind"> {
   scope: string;
   /** Stored rows also carry the rules the operator set, which a proposal cannot claim. */
   kind: KnowledgeProposal["kind"] | "operator";
-  status: "active" | "pending";
+  status: "active" | "pending" | "retired" | "rejected";
   createdAt: string;
 }
 /** An operator-declared rule. Declared, not discovered: it needs no evidence. */

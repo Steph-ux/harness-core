@@ -9,7 +9,7 @@ import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { assertPlainPath, atomicWrite, hash, redactText } from "./util";
-import { toolNote } from "./tool-catalog";
+import { expandSecurityTerms, SECURITY_SHORT_TERMS, toolNote } from "./tool-catalog";
 
 export type ToolLanguage = "mjs" | "py" | "sh";
 export type ToolStatus = "candidate" | "validated" | "active" | "retired";
@@ -119,12 +119,28 @@ function scriptDescription(file: string): string | undefined {
   if (quote) {
     const end = body.indexOf(quote, quote.length);
     if (end > quote.length) collected.push(body.slice(quote.length, end));
+  } else if (body.startsWith("/*")) {
+    const end = body.indexOf("*/", 2);
+    if (end > 2) {
+      for (const rawLine of body.slice(2, end).split(/\r?\n/)) {
+        const cleaned = rawLine.replace(/^\s*\*\s?/, "").trim();
+        if (!cleaned) {
+          if (collected.length) break;
+          continue;
+        }
+        if (cleaned.startsWith("@") && collected.length) break;
+        collected.push(cleaned);
+      }
+    }
   }
   if (!collected.length)
     for (const line of kept) {
-      const comment = line.match(/^\s*#\s?(.*)$/);
-      if (comment) collected.push(comment[1]);
-      else if (line.trim()) break;
+      const comment = line.match(/^\s*(?:#|\/\/)\s?(.*)$/);
+      if (comment) {
+        const text = comment[1].trim();
+        if (!text && collected.length) break;
+        if (text) collected.push(text);
+      } else if (line.trim()) break;
       else if (collected.length) break;
     }
   const description = collected.join(" ").replace(/\s+/g, " ").trim();
@@ -152,35 +168,154 @@ function checkName(name: string): void {
   if (!VALID_NAME.test(name) || name.length > 48 || name.includes(".."))
     throw new Error("Invalid tool name");
 }
+const GENERIC_PATH_DESC = "Executable from PATH or explicitly configured directory";
 function terms(text: string): string[] {
-  return [...new Set(text.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length > 2 && !STOP.has(word)))];
+  return [
+    ...new Set(
+      text
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter(
+          (word) =>
+            (word.length > 2 || SECURITY_SHORT_TERMS.has(word)) &&
+            !STOP.has(word),
+        ),
+    ),
+  ];
 }
 function relevance(query: string, item: ToolCapability): number {
-  if (!query.trim()) return 1;
-  const normalized = query.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase().replace(/\bsous[\s-]+domaines?\b|\bsubdomains?\b/g, "subdomain");
+  if (!query.trim()) {
+    return item.description && item.description !== GENERIC_PATH_DESC ? 2 : 1;
+  }
+  const normalized = query
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\bsous[\s-]+domaines?\b|\bsubdomains?\b/g, "subdomain");
   const tokens = terms(normalized);
   const title = terms(item.name);
   const description = terms(item.description);
-  return tokens.reduce((score, word) => score +
-    (title.includes(word) ? 5 : title.some((t) => t.startsWith(word)) ? 3 :
-      description.includes(word) ? 1 :
-      word === "subdomain" && description.some((t) => t.startsWith("transparen")) ? 1 : 0), 0);
+  let score = tokens.reduce(
+    (sum, word) =>
+      sum +
+      (title.includes(word)
+        ? 5
+        : title.some((t) => t.startsWith(word))
+          ? 3
+          : description.includes(word)
+            ? 2
+            : word === "subdomain" &&
+                description.some((t) => t.startsWith("transparen"))
+              ? 1
+              : 0),
+    0,
+  );
+  if (score === 0) {
+    const aliases = expandSecurityTerms(tokens);
+    for (const alias of aliases) {
+      if (tokens.includes(alias)) continue;
+      if (title.includes(alias)) score += 2;
+      else if (description.includes(alias)) score += 1;
+    }
+  }
+  return score;
 }
 function commandFor(item: ToolRevision): string {
   return LANG[item.language] + " " + JSON.stringify(item.file);
 }
+function splitCommandArgs(line: string): string[] | null {
+  const args: string[] = [];
+  let current = "";
+  let quote: '"' | "'" | null = null;
+  let hasToken = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (quote) {
+      if (ch === quote) {
+        quote = null;
+      } else {
+        current += ch;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      hasToken = true;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (hasToken) {
+        args.push(current);
+        current = "";
+        hasToken = false;
+      }
+      continue;
+    }
+    current += ch;
+    hasToken = true;
+  }
+  if (quote !== null) return null;
+  if (hasToken) args.push(current);
+  return args;
+}
+function invocationFromInput(input: unknown): unknown {
+  if (!input || typeof input !== "object" || Array.isArray(input))
+    return undefined;
+  const source = input as Record<string, unknown>;
+  if (Array.isArray(source.argv)) return source.argv;
+  return source.command ?? source.cmd;
+}
 /** Conservative direct invocation check (not proof of successful effects). */
-function directInvocation(command: unknown, script: string): boolean {
-  if (typeof command !== "string") return false;
-  const line = command.trim();
-  if (/[;|&\x60]/.test(line) || line.includes("$(") || line.includes("\n"))
+function directInvocation(invocation: unknown, script: string): boolean {
+  let args: string[];
+  if (Array.isArray(invocation)) {
+    if (
+      !invocation.length ||
+      invocation.length > 256 ||
+      !invocation.every((part) => typeof part === "string")
+    )
+      return false;
+    if (
+      invocation.some(
+        (part) =>
+          /[\0\r\n<>]/.test(part) ||
+          part.includes("$(") ||
+          part.includes("${"),
+      )
+    )
+      return false;
+    args = invocation;
+  } else if (typeof invocation === "string") {
+    if (/[\0\r\n]/.test(invocation)) return false;
+    const line = invocation.trim();
+    if (
+      !line ||
+      /[;|&\x60<>]/.test(line) ||
+      line.includes("$(") ||
+      line.includes("${")
+    )
+      return false;
+    const parsed = splitCommandArgs(line);
+    if (!parsed) return false;
+    args = parsed;
+  } else {
     return false;
-  if (!/^(?:\/?[\w./-]+\/)?(?:node|nodejs|python|python3|bash|sh)\s+/.test(line))
+  }
+  if (args.length < 2) return false;
+  const runner = path.basename(args[0]).toLowerCase();
+  if (!/^(?:node|nodejs|python|python3|bash|sh)(?:\.exe)?$/.test(runner))
     return false;
-  const args = line.match(/(?:"[^"]*"|'[^']*'|\S+)/g) ?? [];
-  return args.slice(1).some((part) => part.replace(/^["']|["']$/g, "") === script);
+  let targetIndex = 1;
+  if (args[1] === "--") {
+    if (args.length < 3) return false;
+    targetIndex = 2;
+  }
+  const executed = args[targetIndex];
+  if (executed === "-e" || executed === "-c" || executed.startsWith("-"))
+    return false;
+  return executed === script;
 }
 function safeSource(source: string): void {
   if (typeof source !== "string" || !source.trim() || source.length > 80000 ||
@@ -221,8 +356,86 @@ function checkProvenance(value: unknown): ToolProvenance | undefined {
   };
 }
 
-function globallyReusable(source: string): void {  if (/(?:https?:\/\/|\b(?:\d{1,3}\.){3}\d{1,3}\b|\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b|\/home\/[^/\s]+\/|\/Users\/[^/\s]+\/)/i.test(source))
-    throw new Error("Global scripts must not contain target/customer identifiers or user-specific paths");
+const GLOBAL_URL = /\b[a-z][a-z0-9+.-]*:\/\//i;
+const GLOBAL_WWW = /(?<![a-z0-9-])www\.[a-z0-9-]+/i;
+const GLOBAL_IPV4 = /\b\d{1,3}(?:\.\d{1,3}){3}\b/;
+const GLOBAL_IPV6 =
+  /(?<![0-9A-Za-z:])(?:\[(?:(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:(?:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){0,6})?|:(?::[0-9a-fA-F]{1,4}){1,7})(?:%[A-Za-z0-9._-]+)?\]|(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:(?:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){0,6})?|:(?::[0-9a-fA-F]{1,4}){1,7})(?![0-9A-Za-z:])/;
+const GLOBAL_EMAIL = /\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/i;
+const GLOBAL_LOCAL_PATH =
+  /\/home\/[^/\s]+\/|\/Users\/[^/\s]+\/|\b[A-Za-z]:\\[^\s"']+|\\\\[A-Za-z0-9._-]+\\[^\s"']+/i;
+const GLOBAL_HASH = /\b[A-Fa-f0-9]{32,}\b/;
+const GLOBAL_TOKEN = /\b[A-Za-z0-9+/_-]{32,}={0,2}\b/g;
+const DOMAIN_TLDS = new Set([
+  "com", "net", "org", "edu", "gov", "mil", "int", "info", "biz", "name",
+  "pro", "arpa", "local", "internal", "corp", "lan", "home", "test", "example",
+  "invalid", "onion", "cloud", "dev", "app", "tech", "online", "site", "store",
+  "xyz", "io", "ai", "co", "uk", "de", "fr", "ca", "au", "jp", "cn", "ru",
+  "br", "in", "nl", "se", "no", "fi", "dk", "ch", "at", "be", "es", "it",
+  "pt", "pl", "cz", "ua", "ro", "hu", "gr", "tr", "za", "ng", "ke", "gh",
+  "ci", "sn", "bj", "tg", "ml", "bf", "ne", "cm", "ma", "tn", "dz", "eg",
+  "ae", "sa", "il", "sg", "hk", "tw", "kr", "id", "my", "th", "vn", "ph",
+  "mx", "ar", "cl", "pe", "ve", "nz", "ie", "eu", "us", "rs", "py", "sh",
+]);
+const BARE_DOMAIN = /\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+([a-z]{2,24})\b/gi;
+
+function isIdentifierOrHeader(token: string): boolean {
+  if (/^[A-Z0-9_]+$/.test(token) && token.includes("_")) return true;
+  if (/[\d_+=]/.test(token)) return false;
+  const parts = token.split(/[-/]/);
+  return (
+    parts.length >= 3 &&
+    parts.every((part) => /^(?:[a-z]{1,24}|[A-Z][a-z]{1,24}|[A-Z]{1,10})$/.test(part))
+  );
+}
+
+function globallyReusable(
+  source: string,
+  description = "",
+  tests: readonly ToolTest[] = [],
+): void {
+  const combined = [source, description, ...tests.map((test) => test.contains)].join("\n");
+  if (
+    GLOBAL_URL.test(combined) ||
+    GLOBAL_WWW.test(combined) ||
+    GLOBAL_IPV4.test(combined) ||
+    GLOBAL_IPV6.test(combined) ||
+    GLOBAL_EMAIL.test(combined) ||
+    GLOBAL_LOCAL_PATH.test(combined) ||
+    GLOBAL_HASH.test(combined) ||
+    redactText(combined) !== combined
+  )
+    throw new Error(
+      "Global scripts must not contain target/customer identifiers, tokens or user-specific paths",
+    );
+  for (const match of combined.matchAll(GLOBAL_TOKEN)) {
+    if (!isIdentifierOrHeader(match[0]))
+      throw new Error(
+        "Global scripts must not contain target/customer identifiers, tokens or user-specific paths",
+      );
+  }
+  for (const match of combined.matchAll(BARE_DOMAIN)) {
+    const token = match[0];
+    const tld = match[1].toLowerCase();
+    const index = match.index ?? 0;
+    const after = combined.slice(index + token.length, index + token.length + 12);
+    const before = combined.slice(Math.max(0, index - 40), index);
+    if (/^[([\s]*=/.test(after) || after.startsWith("(") || after.startsWith("["))
+      continue;
+    if (/^(?:e\.g|i\.e)$/i.test(token)) continue;
+    if (["rs", "py", "sh"].includes(tld)) {
+      const hostCtx =
+        /^:\d{1,5}(?:\b|$)/.test(after) ||
+        (/^\/[A-Za-z0-9_.-]/.test(after) && !/[\\/~.]$/.test(before)) ||
+        /(?:^|[\s(,;])(?:host(?:name)?|domain|fqdn|vhost|cname|dig|curl)\s*(?:[:=]\s*|\s+(?:is|at|on|to)\s+|\s+)$/i.test(before) ||
+        /(?:^|[\s(,;])(?:server|origin|endpoint|target|url|uri)\s*[:=]\s*$/i.test(before);
+      if (!hostCtx) continue;
+    }
+    if (DOMAIN_TLDS.has(tld))
+      throw new Error(
+        "Global scripts must not contain target/customer identifiers, tokens or user-specific paths",
+      );
+  }
 }
 
 export class ToolRegistry {
@@ -277,15 +490,39 @@ export class ToolRegistry {
   }
   private syntax(item: ToolRevision): void {
     this.verifyFile(item);
-    let args: string[];
-    let binary: string;
-    if (item.language === "mjs") { binary = process.execPath; args = ["--check", item.file]; }
-    else if (item.language === "py") { binary = "python3"; args = ["-c", "import ast,sys; ast.parse(open(sys.argv[1], encoding='utf-8').read())", item.file]; }
-    else { binary = "bash"; args = ["-n", item.file]; }
-    const run = spawnSync(binary, args, { timeout: 5000, maxBuffer: 65536, encoding: "utf8" });
-    if (run.error || run.status !== 0)
-      throw new Error("Static syntax check failed: " + String(run.error?.message ?? run.stderr ?? "unknown").slice(0, 250));
-    this.verifyFile(item);
+    const pyArgs = [
+      "-c",
+      "import ast,sys; ast.parse(open(sys.argv[1], encoding='utf-8').read())",
+      item.file,
+    ];
+    const candidates: [string, string[]][] =
+      item.language === "mjs"
+        ? [[process.execPath, ["--check", item.file]]]
+        : item.language === "py"
+          ? (process.platform === "win32" ? ["python", "python3"] : ["python3", "python"]).map(
+              (bin) => [bin, pyArgs],
+            )
+          : [["bash", ["-n", item.file]]];
+    let lastError = "unknown";
+    for (let i = 0; i < candidates.length; i += 1) {
+      const [binary, args] = candidates[i];
+      const run = spawnSync(binary, args, {
+        timeout: 5000,
+        maxBuffer: 65536,
+        encoding: "utf8",
+      });
+      if (!run.error && run.status === 0) {
+        this.verifyFile(item);
+        return;
+      }
+      const errCode = (run.error as NodeJS.ErrnoException | undefined)?.code;
+      const missingBinary =
+        errCode === "ENOENT" ||
+        (process.platform === "win32" && run.status === 9009 && !String(run.stderr ?? "").trim());
+      lastError = String(run.error?.message ?? run.stderr ?? "unknown").slice(0, 250);
+      if (!missingBinary || i === candidates.length - 1) break;
+    }
+    throw new Error("Static syntax check failed: " + lastError);
   }
   private available(scope: string): ToolRevision[] {
     checkScope(scope);
@@ -363,19 +600,36 @@ export class ToolRegistry {
     if (!item || item.status !== "candidate") throw new Error("Tool candidate not found");
     this.syntax(item);
     const proofs = evidence(tests.map((test) => test.observationId));
+    const positiveOutputs: string[] = [];
+    const negativeOutputs: string[] = [];
     for (const test of tests) {
       const proof = proofs.find((entry) => entry.id === test.observationId);
-      const providedInput = proof?.input && typeof proof.input === "object"
-        ? proof.input as Record<string, unknown> : {};
       const executable = directInvocation(
-        providedInput.command ?? providedInput.cmd, item.file,
+        invocationFromInput(proof?.input),
+        item.file,
       );
       const executionTool = /(?:shell|bash|process|exec|terminal|command)/i.test(proof?.tool ?? "");
+      const meaningful =
+        typeof test.contains === "string" ? test.contains.trim() : "";
+      const nonTrivial =
+        meaningful.length >= 4 &&
+        (meaningful.match(/[\p{L}\p{N}]/gu) ?? []).length >= 3 &&
+        !/^(?:ok|true|false|null|undefined|success|done|pass|fail|failed|error)$/i.test(
+          meaningful,
+        );
       if (!proof || proof.scope !== scope || !proof.success ||
-          typeof test.contains !== "string" || test.contains.trim().length < 4 ||
+          !nonTrivial ||
           !proof.output.includes(test.contains) ||
           !executable || !executionTool)
         throw new Error("Test lacks successful, scope-bound execution of the exact candidate: " + test.observationId);
+      if (test.kind === "positive") positiveOutputs.push(proof.output);
+      else negativeOutputs.push(proof.output);
+    }
+    for (const pos of positiveOutputs) {
+      for (const neg of negativeOutputs) {
+        if (pos === neg)
+          throw new Error("Positive and negative tests must observe different outputs");
+      }
     }
     return this.mutate((state) => {
       const actual = state.revisions.find((entry) => entry.id === id && entry.scope === scope);
@@ -393,7 +647,12 @@ export class ToolRegistry {
       if (!item || (item.status !== "validated" && !(global && item.status === "active")))
         throw new Error("Validated candidate required");
       this.verifyFile(item);
-      if (global) globallyReusable(fs.readFileSync(item.file, "utf8"));
+      if (global)
+        globallyReusable(
+          fs.readFileSync(item.file, "utf8"),
+          item.description,
+          item.tests,
+        );
       const targetScope = global ? "global" : scope;
       const globalCounter = "global/" + item.name;
       const targetVersion = global
@@ -421,7 +680,15 @@ export class ToolRegistry {
       assertPlainPath(file);
       fs.mkdirSync(folder, { recursive: true, mode: 0o700 });
       fs.writeFileSync(file, fs.readFileSync(item.file, "utf8"), { mode: 0o600, flag: "wx" });
-      const shared = { ...item, scope: "global", id: idGlobal, version: targetVersion, file, status: "active" as const };
+      const shared: ToolRevision = {
+        ...item,
+        scope: "global",
+        id: idGlobal,
+        version: targetVersion,
+        file,
+        status: "active",
+        tests: [],
+      };
       state.revisions.push(shared);
       return { ...shared };
     });
@@ -431,7 +698,11 @@ export class ToolRegistry {
     const targetScope = global ? "global" : scope;
     return this.mutate((state) => {
       const candidate = state.revisions.find((item) => item.scope === targetScope && item.name === name && item.version === version);
-      if (!candidate || !["active", "retired"].includes(candidate.status) || !candidate.tests.length)
+      if (
+        !candidate ||
+        !["active", "retired"].includes(candidate.status) ||
+        (candidate.scope !== "global" && !candidate.tests.length)
+      )
         throw new Error("Only a previously validated active revision can be restored");
       this.verifyFile(candidate);
       for (const item of state.revisions)
@@ -501,13 +772,14 @@ export class ToolRegistry {
       ...(process.env.HARNESS_TOOL_PATHS ?? "").split(path.delimiter),
     ].filter((v): v is string => Boolean(v?.trim()));
     const inherited = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
-    const dirs = [...new Set([...inherited, ...configured].map((entry) => path.resolve(entry)))];
-    const key = JSON.stringify(dirs);
+    const explicitSet = new Set(configured.map((entry) => path.resolve(entry)));
+    const dirs = [...new Set([...configured, ...inherited].map((entry) => path.resolve(entry)))];
+    const key = JSON.stringify({ dirs, explicit: [...explicitSet].sort() });
     if (!refresh && this.cliCache?.key === key && this.cliCache.expires > Date.now())
       return [...this.cliCache.entries];
     if (dirs.length > MAX_DIRECTORY_COUNT)
       throw new Error("Too many tool directories; restrict PATH or HARNESS_TOOL_PATHS");
-    const explicit = new Set(configured.map((entry) => path.resolve(entry)));
+    const explicit = explicitSet;
     const found = new Map<string, ToolCapability>();
     const indexFile = (directory: string, name: string, category?: string) => {
       if (found.size >= MAX_SCAN) return;
@@ -619,9 +891,16 @@ export class ToolRegistry {
     checkScope(scope);
     if (refresh) this.cliCache = null;
     const entries = this.inventory(scope, host, includePath);
+    const originRank = (origin: ToolCapability["origin"]) =>
+      origin === "managed" ? 0 : origin === "path" ? 1 : 2;
     const scored = entries.map((item) => ({ item, score: relevance(query, item) }))
       .filter((entry) => !query.trim() || entry.score > 0)
-      .sort((a, b) => b.score - a.score || a.item.name.localeCompare(b.item.name));
+      .sort(
+        (a, b) =>
+          b.score - a.score ||
+          originRank(a.item.origin) - originRank(b.item.origin) ||
+          a.item.name.localeCompare(b.item.name, "en"),
+      );
     const start = Number.isSafeInteger(offset) ? Math.max(0, offset) : 0;
     const size = Number.isSafeInteger(limit) ? Math.max(1, Math.min(40, limit)) : 15;
     return {
@@ -630,18 +909,73 @@ export class ToolRegistry {
     };
   }
   context(scope: string, query: string, host: { name: string; description?: string }[] = []): string {
-    const result = this.discover(scope, query, host, 0, 6, false, false);
-    const rows = result.tools.map((item) =>
-      "- " + item.name + (item.version ? " v" + item.version : "") +
-      " [" + item.origin + "]: " +
-      (item.description || item.command || "").slice(0, 120));
-    return [
+    checkScope(scope);
+    const base = this.inventory(scope, host, false);
+    const seenNames = new Set(base.map((item) => item.name));
+    const cachedCli =
+      this.cliCache && this.cliCache.expires > Date.now()
+        ? this.cliCache.entries.filter((item) => !seenNames.has(item.name))
+        : [];
+    const allEntries = [...base, ...cachedCli];
+    const originRank = (origin: ToolCapability["origin"]) =>
+      origin === "managed" ? 0 : origin === "path" ? 1 : 2;
+    const rankList = (items: ToolCapability[], q: string) =>
+      items
+        .map((item) => ({ item, score: relevance(q, item) }))
+        .filter((entry) => !q.trim() || entry.score > 0)
+        .sort(
+          (a, b) =>
+            b.score - a.score ||
+            originRank(a.item.origin) - originRank(b.item.origin) ||
+            a.item.name.localeCompare(b.item.name, "en"),
+        )
+        .map((entry) => entry.item);
+    const matched = rankList(allEntries, query);
+    const pool = matched.length ? matched : rankList(allEntries, "");
+    const mcpNamespace = (name: string): string | null => {
+      const m = /^(?:mcp__([a-z0-9-]+)__|([a-z0-9-]+)\.|([a-z0-9-]+)_)/i.exec(name);
+      return m ? (m[1] ?? m[2] ?? m[3]).toLowerCase() : null;
+    };
+    const selected: ToolCapability[] = [];
+    const nsCounts = new Map<string, number>();
+    const contextLimit = 10;
+    for (const item of pool) {
+      if (selected.length >= contextLimit) break;
+      const ns = item.origin === "host" ? mcpNamespace(item.name) : null;
+      if (ns && (nsCounts.get(ns) ?? 0) >= 2) continue;
+      if (ns) nsCounts.set(ns, (nsCounts.get(ns) ?? 0) + 1);
+      selected.push(item);
+    }
+    const header = [
       "Harness capabilities. The inventory is live and is not proof of tool use.",
       "Before acting, compare applicable tools with cyber_toolbox discover; do not claim unavailable tools were executed.",
-      ...rows,
-      result.total === 0 ? "No indexed match. Use cyber_toolbox discover with another query or propose an improvement after checking existing tools." : "",
-      "A validated managed script is immediately callable via the normal permissioned shell/process tool; no new session required.",
-    ].filter(Boolean).join("\n").slice(0, 1500);
+    ];
+    const noMatchNote =
+      matched.length === 0
+        ? selected.length > 0
+          ? "No indexed match for query; top available tools:"
+          : "No indexed match. Use cyber_toolbox discover with another query or propose an improvement after checking existing tools."
+        : "";
+    const footer =
+      "A validated managed script is immediately callable via the normal permissioned shell/process tool; no new session required.";
+    const rows: string[] = [];
+    for (const item of selected) {
+      const line =
+        "- " +
+        item.name +
+        (item.version ? " v" + item.version : "") +
+        " [" +
+        item.origin +
+        "]: " +
+        (item.description || item.command || "").slice(0, 120);
+      const candidate = [...header, ...(noMatchNote ? [noMatchNote] : []), ...rows, line, footer]
+        .join("\n");
+      if (candidate.length > 1500) break;
+      rows.push(line);
+    }
+    return [...header, ...(noMatchNote ? [noMatchNote] : []), ...rows, footer]
+      .join("\n")
+      .slice(0, 1500);
   }
   /**
    * A conservative command-line hint. Mentions, comments and echo are never
@@ -651,11 +985,10 @@ export class ToolRegistry {
     { name: string; version: number; scope: string } | null {
     if (!/(?:shell|bash|process|exec|terminal|command)/i.test(tool))
       return null;
-    const source = input && typeof input === "object" ? input as Record<string, unknown> : {};
-    const command = source.command ?? source.cmd;
-    if (typeof command !== "string") return null;
+    const invocation = invocationFromInput(input);
+    if (!invocation) return null;
     for (const entry of this.available(scope)) {
-      if (directInvocation(command, entry.file))
+      if (directInvocation(invocation, entry.file))
         return { name: entry.name, version: entry.version, scope: entry.scope };
     }
     return null;

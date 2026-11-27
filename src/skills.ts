@@ -274,24 +274,64 @@ const FILE_EXTENSION =
   /\.(?:js|mjs|cjs|ts|tsx|jsx|json|jsonl|map|md|txt|log|html|htm|css|scss|py|sh|bash|ps1|yml|yaml|toml|ini|conf|cfg|xml|sql|db|sqlite|sqlite3|pem|crt|key|csv|tsv|pdf|docx|xlsx|pptx|zip|tar|gz|b64|apk|jar|so|dll|exe|bin|img|iso|png|jpe?g|gif|svg|webp|mp4|webm|wav|mp3|go|rs|java|rb|php|c|h|cpp|hpp|cs|kt|swift|dart)$/i;
 
 /** Things that make a method belong to one engagement and nowhere else. */
+const IPV6_PATTERN =
+  /(?<![0-9A-Za-z:])(?:\[(?:(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:(?:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){0,6})?|:(?::[0-9a-fA-F]{1,4}){1,7})(?:%[A-Za-z0-9._-]+)?\]|(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:(?:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){0,6})?|:(?::[0-9a-fA-F]{1,4}){1,7})(?![0-9A-Za-z:])/;
 const LOCAL_DETAIL: readonly [RegExp, string][] = [
-  [/\bhttps?:\/\//i, "a URL"],
-  [/\bwww\./i, "a URL"],
+  [/\b[a-z][a-z0-9+.-]*:\/\//i, "a URL"],
+  [/(?<![a-z0-9-])www\.[a-z0-9-]+/i, "a URL"],
   [/\b\d{1,3}(?:\.\d{1,3}){3}\b/, "an IP address"],
+  [IPV6_PATTERN, "an IP address"],
   [/\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/i, "an email address"],
   [/\b[A-Fa-f0-9]{32,}\b/, "a hash or a key"],
-  [/\b[A-Za-z0-9+/_-]{32,}={0,2}\b/, "a token"],
+  [
+    /\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}|(?:AKIA|ASIA)[A-Z0-9]{16})\b/,
+    "a token",
+  ],
 ];
+const TOKEN_CANDIDATE = /\b[A-Za-z0-9+/_-]{32,}={0,2}\b/g;
 const HOSTNAME = /\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}\b/gi;
+
+function isHeaderOrMime(token: string): boolean {
+  if (/[\d_+=]/.test(token)) return false;
+  const parts = token.split(/[-/]/);
+  return (
+    parts.length >= 3 &&
+    parts.every((part) => /^(?:[a-z]{1,24}|[A-Z][a-z]{1,24}|[A-Z]{1,10})$/.test(part))
+  );
+}
+
+function isHostUrlContext(text: string, index: number, length: number): boolean {
+  const before = text.slice(Math.max(0, index - 64), index);
+  const after = text.slice(index + length, index + length + 20);
+  if (/^:\d{1,5}(?:\b|$)/.test(after)) return true;
+  if (/^\/[A-Za-z0-9_.-]/.test(after) && !/[\\/~.]$/.test(before)) return true;
+  if (
+    /(?:^|[\s(,;])(?:host(?:name)?|domain|fqdn|vhost|cname|dig|nslookup|whois|curl)\s*(?:[:=]\s*|\s+(?:is|at|on|to)\s+|\s+)$/i.test(
+      before,
+    )
+  )
+    return true;
+  if (
+    /(?:^|[\s(,;])(?:server|origin|endpoint|target|url|uri)\s*(?:[:=]\s*|\s+(?:is|at|on|to)\s+)$/i.test(
+      before,
+    )
+  )
+    return true;
+  if (/\bconnect\s+to\s+$/i.test(before)) return true;
+  return false;
+}
 
 function hostnames(text: string): string[] {
   const found: string[] = [];
-  for (const token of text.match(HOSTNAME) ?? []) {
-    // A file name is not a host, and neither is an abbreviation or a version.
-    if (FILE_EXTENSION.test(token)) continue;
-    if (/^\d/.test(token)) continue;
+  for (const match of text.matchAll(HOSTNAME)) {
+    const token = match[0];
+    const index = match.index ?? 0;
+    // A local file name is not a host unless it appears in host/URL context.
+    if (FILE_EXTENSION.test(token) && !isHostUrlContext(text, index, token.length))
+      continue;
+    if (/^\d+\.\d+(?:\.(?:alpha|beta|rc\d*|dev|post\d*))?$/i.test(token))
+      continue;
     if (/^[a-z]\.[a-z]$/i.test(token)) continue;
-    if (/^(?:e\.g|i\.e|etc|cf|vs|ex)\./i.test(token)) continue;
     found.push(token);
   }
   return found;
@@ -315,6 +355,12 @@ export function assertGloballyReusable(revision: SkillProposal): void {
       throw new Error(
         `A global method cannot carry ${what}: it belongs to the project`,
       );
+  for (const match of text.matchAll(TOKEN_CANDIDATE)) {
+    if (!isHeaderOrMime(match[0]))
+      throw new Error(
+        "A global method cannot carry a token: it belongs to the project",
+      );
+  }
   const hosts = hostnames(text);
   if (hosts.length)
     throw new Error(
@@ -375,40 +421,53 @@ export class SkillUpdater {
       name: proposal.name,
       stated: operatorStated.slice(0, 500),
     });
-    let incoming = proposalCopy(proposal);
+    const baseProposal = proposalCopy(proposal);
     // Check the caller's evidence before merging: an old valid check must not mask a fabricated new one.
-    this.support(scope, incoming);
-    const state = this.state(scope, incoming.name);
-    if (state && state.category !== incoming.category)
-      throw new Error("A logical skill cannot change learning category");
-    this.checkRuntime(scope, incoming.name, incoming.category, state);
-    if (state && sameProcedure(state.latest, incoming)) {
-      incoming = proposalCopy({
-        ...incoming,
-        evidence: [
-          ...new Set([...state.latest.evidence, ...incoming.evidence]),
-        ],
-        validation: [...state.latest.validation, ...incoming.validation],
-      });
-    }
-    const support = this.support(scope, incoming);
-    if (support.supportingSessions < 1)
-      throw new Error("Unresolved failure is not a method");
-    const status = this.canActivate(support) ? "active" : "candidate";
-    if (
-      state &&
-      status === state.latest.status &&
-      JSON.stringify(proposalCopy(state.latest)) === JSON.stringify(incoming)
-    )
-      return state.latest;
-    const revision = this.revision(scope, incoming, status, support);
-    this.publish(revision, state);
-    this.store.audit(
-      scope,
-      status === "active" ? "skill.activated" : "skill.candidate",
-      this.auditDetail(revision),
-    );
-    return revision;
+    this.support(scope, baseProposal);
+    return this.withLock(() => {
+      let incoming = baseProposal;
+      const state = this.state(scope, incoming.name);
+      if (state && state.category !== incoming.category)
+        throw new Error("A logical skill cannot change learning category");
+      this.checkRuntime(scope, incoming.name, incoming.category, state);
+      if (
+        state &&
+        state.latest.status !== "deprecated" &&
+        sameProcedure(state.latest, incoming)
+      ) {
+        incoming = proposalCopy({
+          ...incoming,
+          evidence: [
+            ...new Set([...state.latest.evidence, ...incoming.evidence]),
+          ],
+          validation: [...state.latest.validation, ...incoming.validation],
+        });
+      }
+      const support = this.support(scope, incoming);
+      if (support.supportingSessions < 1)
+        throw new Error("Unresolved failure is not a method");
+      const status = this.canActivate(support) ? "active" : "candidate";
+      if (
+        state &&
+        status === state.latest.status &&
+        JSON.stringify(proposalCopy(state.latest)) === JSON.stringify(incoming)
+      )
+        return state.latest;
+      const deactivate = Boolean(
+        state?.active &&
+          status === "candidate" &&
+          support.failed &&
+          sameProcedure(state.active, incoming),
+      );
+      const revision = this.revision(scope, incoming, status, support);
+      this.publish(revision, state, deactivate);
+      this.store.audit(
+        scope,
+        status === "active" ? "skill.activated" : "skill.candidate",
+        this.auditDetail(revision),
+      );
+      return revision;
+    });
   }
 
   list(scope: string): SkillRevision[] {
@@ -461,54 +520,80 @@ export class SkillUpdater {
     if (scope === GLOBAL_SCOPE)
       throw new Error("A global method is already shared");
     validName(name);
-    const target = this.state(GLOBAL_SCOPE, name);
-    const state = this.state(scope, name);
-    if (!state?.active) {
-      // The method is visible here through the global scope only: it is
-      // already shared and there is nothing to promote.
-      if (target?.active) return target.active;
-      throw new Error(
-        "Only an active method can be promoted: a candidate has no confirmed use",
+    return this.withLock(() => {
+      const target = this.state(GLOBAL_SCOPE, name);
+      const state = this.state(scope, name);
+      if (!state?.active) {
+        // Only when there is no local skill shadowing the global one is it visible through global.
+        if (!state && target?.active) return target.active;
+        throw new Error(
+          "Only an active method can be promoted: a candidate has no confirmed use",
+        );
+      }
+      const active = state.active;
+      assertGloballyReusable(active);
+      const incoming = proposalCopy(
+        { ...active, evidence: [], validation: [] },
+        true,
       );
-    }
-    const active = state.active;
-    assertGloballyReusable(active);
-    const incoming = proposalCopy(
-      { ...active, evidence: [], validation: [] },
-      true,
-    );
-    if (target && target.category !== incoming.category)
-      throw new Error("A logical skill cannot change learning category");
-    if (
-      target &&
-      sameProcedure(target.latest, incoming) &&
-      target.latest.status === "active" &&
-      (target.latest.promotedFrom ?? []).includes(scope)
-    )
-      return target.latest;
-    const from = [...new Set([...(target?.latest.promotedFrom ?? []), scope])].sort();
-    const support: Support = {
-      confidence: Math.max(active.confidence, target?.latest.confidence ?? 0),
-      sourceSessions: [],
-      lastVerified: active.lastVerified,
-      failed: false,
-      supportingSessions: from.length,
-    };
-    const revision = this.revision(
-      GLOBAL_SCOPE,
-      incoming,
-      "active",
-      support,
-      from,
-    );
-    this.publish(revision, target);
-    this.store.audit(scope, "skill.promoted", {
-      name,
-      to: GLOBAL_SCOPE,
-      version: revision.version,
-      promotedFrom: from,
+      if (target) {
+        if (target.category !== incoming.category)
+          throw new Error("A logical skill cannot change learning category");
+        if (target.latest.status === "deprecated")
+          throw new Error(
+            "A deprecated global method cannot be reactivated by promotion",
+          );
+        if (!sameProcedure(target.latest, incoming)) {
+          const otherOwners = (target.latest.promotedFrom ?? []).filter(
+            (slug) => slug !== scope,
+          );
+          if (otherOwners.length > 0)
+            throw new Error(
+              "Cannot overwrite a global method from another project with a different procedure",
+            );
+        }
+      }
+      if (
+        target &&
+        sameProcedure(target.latest, incoming) &&
+        target.latest.status === "active" &&
+        (target.latest.promotedFrom ?? []).includes(scope)
+      )
+        return target.latest;
+      const from = [
+        ...new Set([...(target?.latest.promotedFrom ?? []), scope]),
+      ].sort();
+      const latestVerified =
+        [active.lastVerified, target?.latest.lastVerified]
+          .filter(
+            (value): value is string =>
+              typeof value === "string" && Number.isFinite(Date.parse(value)),
+          )
+          .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ??
+        null;
+      const support: Support = {
+        confidence: Math.max(active.confidence, target?.latest.confidence ?? 0),
+        sourceSessions: [],
+        lastVerified: latestVerified,
+        failed: false,
+        supportingSessions: from.length,
+      };
+      const revision = this.revision(
+        GLOBAL_SCOPE,
+        incoming,
+        "active",
+        support,
+        from,
+      );
+      this.publish(revision, target);
+      this.store.audit(scope, "skill.promoted", {
+        name,
+        to: GLOBAL_SCOPE,
+        version: revision.version,
+        promotedFrom: from,
+      });
+      return revision;
     });
-    return revision;
   }
 
   rollback(scope: string, name: string, version: number): SkillRevision {
@@ -518,32 +603,34 @@ export class SkillUpdater {
     validName(name);
     if (!Number.isSafeInteger(version) || version < 1)
       throw new Error("Invalid archived skill version");
-    const state = this.state(scope, name);
-    if (!state) throw new Error("No skill history to roll back");
-    this.checkRuntime(scope, name, state.category, state);
-    if (state.index.activeVersion === version)
-      throw new Error(
-        "Rollback requires an archived, not current, active version",
-      );
-    const archived = this.readRevision(scope, state.category, name, version);
-    if (archived.status !== "active")
-      throw new Error(
-        "Rollback requires a previously published active version",
-      );
-    const proposal = proposalCopy(archived);
-    const support = this.support(scope, proposal);
-    if (!this.canActivate(support))
-      throw new Error(
-        "Archived skill no longer has sufficient successful evidence",
-      );
-    const revision = this.revision(scope, proposal, "active", support);
-    this.publish(revision, state);
-    this.store.audit(scope, "skill.rollback", {
-      ...this.auditDetail(revision),
-      fromVersion: state.index.activeVersion,
-      archivedVersion: version,
+    return this.withLock(() => {
+      const state = this.state(scope, name);
+      if (!state) throw new Error("No skill history to roll back");
+      this.checkRuntime(scope, name, state.category, state);
+      if (state.index.activeVersion === version)
+        throw new Error(
+          "Rollback requires an archived, not current, active version",
+        );
+      const archived = this.readRevision(scope, state.category, name, version);
+      if (archived.status !== "active")
+        throw new Error(
+          "Rollback requires a previously published active version",
+        );
+      const proposal = proposalCopy(archived);
+      const support = this.support(scope, proposal);
+      if (!this.canActivate(support))
+        throw new Error(
+          "Archived skill no longer has sufficient successful evidence",
+        );
+      const revision = this.revision(scope, proposal, "active", support);
+      this.publish(revision, state);
+      this.store.audit(scope, "skill.rollback", {
+        ...this.auditDetail(revision),
+        fromVersion: state.index.activeVersion,
+        archivedVersion: version,
+      });
+      return revision;
     });
-    return revision;
   }
 
   /** Archive an active learned skill that has not been used inside the idle window. Never deletes the revision. */
@@ -584,13 +671,14 @@ export class SkillUpdater {
       );
       if (!latest || now - latest < idleMs) continue;
       try {
+        const name = state.active.name;
+        this.deprecate(scope, name);
         this.store.audit(scope, "skill.curator", {
-          name: state.active.name,
+          name,
           idleDays,
           lastSeen: new Date(latest).toISOString(),
         });
-        this.deprecate(scope, state.active.name);
-        archived.push(state.active.name);
+        archived.push(name);
       } catch {
         continue;
       }
@@ -601,27 +689,29 @@ export class SkillUpdater {
   deprecate(scope: string, name: string): void {
     this.begin(scope);
     validName(name);
-    const state = this.state(scope, name);
-    if (!state) throw new Error("No learned skill to deprecate");
-    this.checkRuntime(scope, name, state.category, state);
-    if (state.latest.status === "deprecated") return;
-    const previous = state.active ?? state.latest;
-    // Deprecation does not require available or still-successful evidence.
-    const revision = this.revision(
-      scope,
-      proposalCopy(previous, previous.scope === GLOBAL_SCOPE),
-      "deprecated",
-      {
-        confidence: previous.confidence,
-        sourceSessions: previous.sourceSessions,
-        lastVerified: previous.lastVerified,
-        failed: false,
-        supportingSessions: 0,
-      },
-      previous.promotedFrom ? [...previous.promotedFrom] : undefined,
-    );
-    this.publish(revision, state);
-    this.store.audit(scope, "skill.deprecated", this.auditDetail(revision));
+    this.withLock(() => {
+      const state = this.state(scope, name);
+      if (!state) throw new Error("No learned skill to deprecate");
+      this.checkRuntime(scope, name, state.category, state);
+      if (state.latest.status === "deprecated") return;
+      const previous = state.active ?? state.latest;
+      // Deprecation does not require available or still-successful evidence.
+      const revision = this.revision(
+        scope,
+        proposalCopy(previous, previous.scope === GLOBAL_SCOPE),
+        "deprecated",
+        {
+          confidence: previous.confidence,
+          sourceSessions: previous.sourceSessions,
+          lastVerified: previous.lastVerified,
+          failed: false,
+          supportingSessions: 0,
+        },
+        previous.promotedFrom ? [...previous.promotedFrom] : undefined,
+      );
+      this.publish(revision, state);
+      this.store.audit(scope, "skill.deprecated", this.auditDetail(revision));
+    });
   }
 
   private begin(scope: string): void {
@@ -766,14 +856,46 @@ export class SkillUpdater {
   private state(scope: string, name: string): State | null {
     let result: State | null = null;
     for (const category of CATEGORIES) {
-      const file = path.join(
-        this.archiveDirectory(scope, category, name),
-        "index.json",
-      );
-      if (!this.ownedStat(file)) continue;
+      const directory = this.archiveDirectory(scope, category, name);
+      const file = path.join(directory, "index.json");
+      const publishingFile = path.join(directory, "publishing.json");
+      const hasIndex = this.ownedStat(file);
+      const hasPublishing = this.ownedStat(publishingFile);
+      if (!hasIndex && !hasPublishing) continue;
       if (result)
         throw new Error("Logical skill has multiple learning categories");
-      const index = JSON.parse(this.readFile(file)) as Index;
+      let index = (hasIndex ? JSON.parse(this.readFile(file)) : null) as Index | null;
+      if (hasPublishing) {
+        try {
+          const pending = JSON.parse(this.readFile(publishingFile)) as Index;
+          if (
+            pending &&
+            Number.isSafeInteger(pending.latestVersion) &&
+            pending.latestVersion >= 1 &&
+            (pending.activeVersion === null ||
+              (Number.isSafeInteger(pending.activeVersion) &&
+                pending.activeVersion >= 1 &&
+                pending.activeVersion <= pending.latestVersion))
+          ) {
+            const pendingActive =
+              pending.activeVersion === null
+                ? null
+                : this.readRevision(scope, category, name, pending.activeVersion);
+            const runtimePath = this.runtimeFile(scope, category, name);
+            const runtimePresent = this.ownedStat(runtimePath);
+            const runtimeMatchesPending =
+              pendingActive === null
+                ? !runtimePresent
+                : Boolean(
+                    runtimePresent &&
+                      hash(this.readFile(runtimePath)) === pendingActive.contentHash,
+                  );
+            if (!index || runtimeMatchesPending) index = pending;
+          }
+        } catch {
+          /* Fall back to committed index.json if publishing marker is unreadable. */
+        }
+      }
       if (
         !index ||
         !Number.isSafeInteger(index.latestVersion) ||
@@ -926,7 +1048,41 @@ export class SkillUpdater {
       );
     return content;
   }
-  private publish(revision: SkillRevision, state: State | null): void {
+  private withLock<T>(fn: () => T): T {
+    this.createDirectory(this.root);
+    const lock = path.join(this.root, ".lock");
+    this.ownedStat(lock);
+    let fd: number;
+    try {
+      fd = fs.openSync(
+        lock,
+        fs.constants.O_WRONLY |
+          fs.constants.O_CREAT |
+          fs.constants.O_EXCL |
+          (fs.constants.O_NOFOLLOW ?? 0),
+        0o600,
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST")
+        throw new Error("Concurrent skill update; retry from the current state");
+      throw error;
+    }
+    try {
+      return fn();
+    } finally {
+      fs.closeSync(fd);
+      try {
+        fs.unlinkSync(lock);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }
+  }
+  private publish(
+    revision: SkillRevision,
+    state: State | null,
+    deactivateActive = false,
+  ): void {
     const { scope, category, name, version } = revision;
     this.guard();
     this.checkRuntime(scope, name, category, state);
@@ -940,31 +1096,57 @@ export class SkillUpdater {
       `${JSON.stringify(revision, null, 2)}\n`,
     );
     const candidate = this.candidateFile(scope, category, name);
-    if (revision.status === "active") {
-      this.writeMutable(this.runtimeFile(scope, category, name), content, () =>
-        this.checkRuntime(scope, name, category, state),
-      );
-      this.removeFile(candidate);
-    } else if (revision.status === "candidate") {
-      this.writeMutable(candidate, `${JSON.stringify(revision, null, 2)}\n`);
-    } else {
-      this.checkRuntime(scope, name, category, state);
-      this.removeFile(this.runtimeFile(scope, category, name));
-      this.removeFile(candidate);
-    }
+    const runtime = this.runtimeFile(scope, category, name);
+    const publishing = path.join(directory, "publishing.json");
     const index: Index = {
       latestVersion: version,
       activeVersion:
         revision.status === "active"
           ? version
-          : revision.status === "deprecated"
+          : revision.status === "deprecated" || deactivateActive
             ? null
             : (state?.index.activeVersion ?? null),
     };
-    this.writeMutable(
-      path.join(directory, "index.json"),
-      `${JSON.stringify(index)}\n`,
-    );
+    this.writeMutable(publishing, `${JSON.stringify(index)}\n`);
+    try {
+      if (revision.status === "active") {
+        this.writeMutable(runtime, content, () =>
+          this.checkRuntime(scope, name, category, state),
+        );
+        this.removeFile(candidate);
+      } else if (revision.status === "candidate") {
+        this.writeMutable(candidate, `${JSON.stringify(revision, null, 2)}\n`);
+        if (deactivateActive && state?.active) {
+          this.checkRuntime(scope, name, category, state);
+          this.removeFile(runtime);
+        }
+      } else {
+        this.checkRuntime(scope, name, category, state);
+        this.removeFile(runtime);
+        this.removeFile(candidate);
+      }
+      this.writeMutable(
+        path.join(directory, "index.json"),
+        `${JSON.stringify(index)}\n`,
+      );
+      this.removeFile(publishing);
+    } catch (error) {
+      try {
+        if (state?.active) {
+          this.writeMutable(runtime, render(state.active));
+        } else if (this.ownedStat(runtime)) {
+          this.removeFile(runtime);
+        }
+      } catch {
+        /* Preserve publishing marker for recovery if rollback fails. */
+      }
+      try {
+        this.removeFile(publishing);
+      } catch {
+        /* Ignore marker cleanup error during rollback. */
+      }
+      throw error;
+    }
   }
   private auditDetail(revision: SkillRevision): object {
     return {
@@ -994,8 +1176,19 @@ export class SkillUpdater {
     // Windows keeps a short name for the same directory, and that is an
     // alias rather than a redirection. lstat does not follow the last link,
     // so the two differ exactly when the component points elsewhere.
-    const canonical = fs.realpathSync.native(file);
-    const parent = fs.realpathSync.native(path.dirname(file));
+    let canonical: string;
+    let parent: string;
+    try {
+      canonical = fs.realpathSync.native(file);
+      parent = fs.realpathSync.native(path.dirname(file));
+    } catch (error) {
+      if (
+        path.basename(file) === ".lock" &&
+        (error as NodeJS.ErrnoException).code === "ENOENT"
+      )
+        return undefined;
+      throw error;
+    }
     const expected = path.join(parent, path.basename(file));
     const held = fs.lstatSync(expected, { throwIfNoEntry: false });
     const resolved = fs.lstatSync(canonical, { throwIfNoEntry: false });

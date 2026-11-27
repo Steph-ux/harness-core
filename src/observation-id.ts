@@ -7,5 +7,5 @@
 import { hash } from "./util";
 
 export function observationId(sessionId: string, toolCallId: string): string {
-  return `obs-${hash(`${sessionId}:${toolCallId}`).slice(0, 32)}`;
+  return `obs-${hash(JSON.stringify([sessionId, toolCallId])).slice(0, 32)}`;
 }
