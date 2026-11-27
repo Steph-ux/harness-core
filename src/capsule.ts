@@ -254,13 +254,19 @@ export function capsule(
     /* A session that has no row yet has no observation. */
   }
   const proofList = [...proofs.values()];
+  const mergedObservations = new Map<string, CapsuleObservation>();
+  for (const item of proofList) mergedObservations.set(item.id, item);
+  for (const item of recent) {
+    mergedObservations.delete(item.id);
+    mergedObservations.set(item.id, item);
+  }
   return {
     scope,
     sessionID,
     tasks,
     open: tasks.filter((task) => task.status !== "completed").length,
     blocked: tasks.filter((task) => task.status === "blocked").length,
-    observations: [...proofList, ...recent].slice(-MAX_OBSERVATIONS * 2),
+    observations: [...mergedObservations.values()].slice(-MAX_OBSERVATIONS * 2),
     ...(options.mission ? { mission: options.mission } : {}),
     ...(options.workflow ? { workflow: options.workflow } : {}),
     ...(options.approvals?.length ? { approvals: options.approvals } : {}),
@@ -420,7 +426,9 @@ export function closingGate(value: Capsule): string {
   if (value.processes?.length)
     blockers.push(`${value.processes.length} command(s) still owned`);
   const pendingCleanup =
-    value.workflow?.cleanup.filter((c) => c.status !== "completed") ?? [];
+    value.workflow?.cleanup.filter(
+      (c) => c.status !== "completed" && c.status !== "superseded",
+    ) ?? [];
   if (pendingCleanup.length)
     blockers.push(
       `${pendingCleanup.length} post-restitution cleanup action(s) not verified`,

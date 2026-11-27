@@ -169,6 +169,13 @@ export class EngagementWorkflow {
   close() {
     this.db.close();
   }
+  private rollback() {
+    try {
+      this.db.exec("ROLLBACK");
+    } catch {
+      /* SQLite may have already rolled back on error */
+    }
+  }
   private tx<T>(fn: () => T): T {
     this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -176,7 +183,7 @@ export class EngagementWorkflow {
       this.db.exec("COMMIT");
       return value;
     } catch (error) {
-      this.db.exec("ROLLBACK");
+      this.rollback();
       throw error;
     }
   }
@@ -203,14 +210,23 @@ export class EngagementWorkflow {
       if (!kinds.includes(input.kind))
         throw new Error("Unsupported artifact kind");
       const file = path.resolve(input.path),
-        allowed = fs.realpathSync(allowedRoot);
+        allowedPath = path.resolve(allowedRoot);
+      assertPlainPath(allowedPath);
       assertPlainPath(file);
-      if (file !== allowed && !file.startsWith(allowed + path.sep))
+      const canonicalFile = fs.realpathSync.native(file),
+        canonicalAllowed = fs.realpathSync.native(allowedPath),
+        norm = (p: string) =>
+          process.platform === "win32" ? p.toLowerCase() : p;
+      if (
+        norm(canonicalFile) !== norm(canonicalAllowed) &&
+        !norm(canonicalFile).startsWith(norm(canonicalAllowed) + path.sep)
+      )
         throw new Error("Artifact is outside the engagement directory");
       const stat = fs.statSync(file);
       if (!stat.isFile() || stat.size < 1 || stat.size > 100000000)
         throw new Error("Invalid artifact size");
-      const signature = fs.readFileSync(file).subarray(0, 8);
+      const contents = fs.readFileSync(file);
+      const signature = contents.subarray(0, 8);
       if (
         input.kind === "report-docx" &&
         signature.subarray(0, 4).toString("hex") !== "504b0304"
@@ -243,23 +259,34 @@ export class EngagementWorkflow {
       // A mission that declared its engagement owns a typed layout.
       const root = this.platform.missionRoot(scope, missionId),
         folder = ARTIFACT_DIR[input.kind];
-      if (root && folder) {
-        const expected = path.join(fs.realpathSync(root), folder);
-        if (!fs.realpathSync(file).startsWith(expected + path.sep))
-          throw new Error(
-            `A ${input.kind} artifact belongs in ${folder}`,
-          );
+      if (root) {
+        assertPlainPath(root);
+        const canonicalRoot = fs.realpathSync.native(root);
+        if (folder) {
+          const expected = path.join(canonicalRoot, folder);
+          if (!norm(canonicalFile).startsWith(norm(expected) + path.sep))
+            throw new Error(
+              `A ${input.kind} artifact belongs in ${folder}`,
+            );
+        } else if (input.kind.startsWith("report-")) {
+          const top = path.relative(canonicalRoot, canonicalFile).split(path.sep)[0];
+          if (!/^rapport(-v\d+)?$/.test(top))
+            throw new Error(
+              "Report artifacts belong in <engagement>/rapport-vN",
+            );
+        }
       }
       if (!Array.isArray(input.observationIds) || !input.observationIds.length)
         throw new Error("Artifact provenance needs observations");
       this.evidence.evidence(scope, input.observationIds);
+      const sha256 = createHash("sha256").update(contents).digest("hex");
       const value = {
         id: `artifact-${newId()}`,
         scope,
         missionId,
         kind: input.kind,
         path: file,
-        sha256: digestFile(file),
+        sha256,
         bytes: stat.size,
         observationIds: input.observationIds,
         caption: input.caption ? text(input.caption, 2000) : "",
@@ -492,11 +519,6 @@ export class EngagementWorkflow {
       throw new Error(
         "Report stage requires a registered, visually reviewed report artifact",
       );
-    for (const id of r.artifacts) {
-      const artifact = this.artifact(scope, id);
-      if (digestFile(artifact.path) !== artifact.sha256)
-        throw new Error("Reviewed report content changed");
-    }
     this.checkPages(r);
   }
   private current(r: any) {
@@ -520,23 +542,49 @@ export class EngagementWorkflow {
       this.artifact(r.scope, id),
     );
     const qa = artifacts.find((a: any) => a.kind === "report-qa");
-    if (!qa || !r.qa)
+    if (!qa || !r.qa || !Array.isArray(r.qa.pageImages))
       throw new Error(
         "Register generated files and rendered pages before review",
       );
     const root = path.dirname(qa.path);
     for (const image of r.qa.pageImages) {
+      if (
+        !image ||
+        typeof image.path !== "string" ||
+        !image.path.trim() ||
+        typeof image.sha256 !== "string"
+      )
+        throw new Error("Invalid report page entry");
       const file = path.resolve(root, image.path);
       if (!file.startsWith(root + path.sep))
         throw new Error("QA page path escaped");
       assertPlainPath(file);
-      if (digestFile(file) !== image.sha256)
+      const bytes = fs.readFileSync(file);
+      const sig = bytes.subarray(0, 4);
+      const isPng = sig.toString("hex") === "89504e47";
+      const isJpeg = sig.subarray(0, 3).toString("hex") === "ffd8ff";
+      if (!isPng && !isJpeg)
+        throw new Error("Rendered report page must be a PNG or JPEG image");
+      if (createHash("sha256").update(bytes).digest("hex") !== image.sha256)
         throw new Error("Rendered page changed after generation");
     }
+  }
+  private assertNotRestituted(scope: string, reportId: string) {
+    if (
+      this.db
+        .prepare(
+          "SELECT 1 FROM workflow_restitutions WHERE report_id=? AND scope=?",
+        )
+        .get(reportId, scope)
+    )
+      throw new Error(
+        "Report is already restituted; create a new report snapshot instead",
+      );
   }
   registerReport(scope: string, id: string, artifactIds: string[]) {
     return this.tx(() => {
       const r = this.report(scope, id);
+      this.assertNotRestituted(scope, id);
       this.current(r);
       if (!Array.isArray(artifactIds) || artifactIds.length !== 3)
         throw new Error("Exactly three report artifacts are required");
@@ -553,6 +601,8 @@ export class EngagementWorkflow {
         ),
       );
       if (
+        !qa ||
+        typeof qa !== "object" ||
         qa.snapshotId !== id ||
         qa.snapshotHash !== r.snapshotHash ||
         !Number.isInteger(qa.pages) ||
@@ -570,6 +620,13 @@ export class EngagementWorkflow {
       if (
         !Array.isArray(qa.pageImages) ||
         qa.pageImages.length !== qa.pages ||
+        qa.pageImages.some(
+          (i: any) =>
+            !i ||
+            typeof i.path !== "string" ||
+            !i.path.trim() ||
+            typeof i.sha256 !== "string",
+        ) ||
         new Set(qa.pageImages.map((i: any) => i.path)).size !== qa.pages
       )
         throw new Error(
@@ -607,6 +664,7 @@ export class EngagementWorkflow {
     },
   ) {
     const r = this.report(scope, id);
+    this.assertNotRestituted(scope, id);
     this.current(r);
     this.checkPages(r);
     const expected = Array.from({ length: r.qa.pages }, (_, i) => i + 1);
@@ -712,6 +770,23 @@ export class EngagementWorkflow {
       return value;
     });
   }
+  private assertCleanupReportReady(scope: string, reportId: string) {
+    const r = this.report(scope, reportId);
+    this.current(r);
+    const restitutionRow = this.db
+      .prepare(
+        "SELECT payload FROM workflow_restitutions WHERE report_id=? AND scope=?",
+      )
+      .get(reportId, scope) as { payload: string } | undefined;
+    if (!restitutionRow)
+      throw new Error("Cleanup is forbidden before restitution");
+    if (!r.reviewed)
+      throw new Error("Cleanup requires a visually reviewed current report");
+    const restitution = JSON.parse(String(restitutionRow.payload));
+    if (restitution.reportHash !== r.snapshotHash)
+      throw new Error("Restitution does not match current report snapshot");
+    return r;
+  }
   cleanupPlan(
     scope: string,
     reportId: string,
@@ -720,16 +795,7 @@ export class EngagementWorkflow {
     verifyArgv: string[],
   ) {
     return this.tx(() => {
-      const r = this.report(scope, reportId);
-      this.current(r);
-      if (
-        !this.db
-          .prepare(
-            "SELECT 1 FROM workflow_restitutions WHERE report_id=? AND scope=?",
-          )
-          .get(reportId, scope)
-      )
-        throw new Error("Cleanup is forbidden before restitution");
+      const r = this.assertCleanupReportReady(scope, reportId);
       for (const args of [argv, verifyArgv])
         if (
           !Array.isArray(args) ||
@@ -737,12 +803,19 @@ export class EngagementWorkflow {
           args.length > 256 ||
           args.some(
             (a) =>
-              typeof a !== "string" || a.length > 32768 || /[\0\r\n]/.test(a),
+              typeof a !== "string" ||
+              !a.trim() ||
+              a.length > 32768 ||
+              /[\0\r\n]/.test(a),
           )
         )
           throw new Error(
             "Cleanup needs explicit command and verification argv",
           );
+      if (JSON.stringify(argv) === JSON.stringify(verifyArgv))
+        throw new Error(
+          "Cleanup execution and verification commands must be distinct",
+        );
       const c = {
         id: `cleanup-${newId()}`,
         reportId,
@@ -754,7 +827,33 @@ export class EngagementWorkflow {
         createdAt: now(),
         processId: null,
         verificationProcessId: null,
+        previousProcessIds: [] as string[],
       };
+      const priorRows = this.db
+        .prepare(
+          "SELECT id, payload FROM workflow_cleanup WHERE scope=? AND mission_id=?",
+        )
+        .all(scope, r.missionId) as { id: string; payload: string }[];
+      for (const row of priorRows) {
+        const parsed = JSON.parse(String(row.payload));
+        if (parsed.status === "failed") {
+          const updated = {
+            ...parsed,
+            status: "superseded",
+            supersededBy: c.id,
+            updatedAt: now(),
+          };
+          this.db
+            .prepare(
+              "UPDATE workflow_cleanup SET payload=? WHERE scope=? AND id=? AND payload=?",
+            )
+            .run(JSON.stringify(updated), scope, row.id, row.payload);
+          this.event(scope, "cleanup.superseded", {
+            id: row.id,
+            supersededBy: c.id,
+          });
+        }
+      }
       this.db
         .prepare("INSERT INTO workflow_cleanup VALUES(?,?,?,?,?)")
         .run(c.id, scope, r.missionId, reportId, JSON.stringify(c));
@@ -771,17 +870,16 @@ export class EngagementWorkflow {
   }
   assertCleanupStart(scope: string, id: string, verification = false) {
     const c = this.cleanup(scope, id);
-    this.current(this.report(scope, c.reportId));
-    if (
-      !this.db
-        .prepare(
-          "SELECT 1 FROM workflow_restitutions WHERE report_id=? AND scope=?",
-        )
-        .get(c.reportId, scope)
-    )
-      throw new Error("Cleanup is forbidden before restitution");
-    if (verification ? c.status !== "executed" : c.status !== "planned")
+    this.assertCleanupReportReady(scope, c.reportId);
+    if (verification) {
+      const canRetryVerify =
+        c.status === "failed" &&
+        (c.failedPhase === "verify" || Boolean(c.verificationProcessId));
+      if (c.status !== "executed" && !canRetryVerify)
+        throw new Error("Invalid cleanup transition");
+    } else if (c.status !== "planned" && c.status !== "failed") {
       throw new Error("Invalid cleanup transition");
+    }
   }
   cleanupStarted(
     scope: string,
@@ -789,12 +887,42 @@ export class EngagementWorkflow {
     processId: string,
     verification = false,
   ) {
+    if (typeof processId !== "string" || !processId.trim())
+      throw new Error("Cleanup requires a process id");
     return this.tx(() => {
       this.assertCleanupStart(scope, id, verification);
       const c = this.cleanup(scope, id),
         previous = JSON.stringify(c);
-      c[verification ? "verificationProcessId" : "processId"] = processId;
-      c.status = verification ? "verifying" : "running";
+      const used = new Set<string>([
+        ...(Array.isArray(c.previousProcessIds) ? c.previousProcessIds : []),
+        ...(c.processId ? [c.processId] : []),
+        ...(c.verificationProcessId ? [c.verificationProcessId] : []),
+      ]);
+      if (used.has(processId))
+        throw new Error(
+          "Cleanup execution and verification must use distinct processes",
+        );
+      if (c.status === "failed") {
+        const history: string[] = Array.isArray(c.previousProcessIds)
+          ? [...c.previousProcessIds]
+          : [];
+        if (verification) {
+          if (c.verificationProcessId) history.push(c.verificationProcessId);
+          c.verificationProcessId = processId;
+          c.status = "verifying";
+        } else {
+          if (c.processId) history.push(c.processId);
+          if (c.verificationProcessId) history.push(c.verificationProcessId);
+          c.processId = processId;
+          c.verificationProcessId = null;
+          c.status = "running";
+        }
+        c.previousProcessIds = [...new Set(history)];
+        delete c.failedPhase;
+      } else {
+        c[verification ? "verificationProcessId" : "processId"] = processId;
+        c.status = verification ? "verifying" : "running";
+      }
       if (
         !this.db
           .prepare(
@@ -825,6 +953,8 @@ export class EngagementWorkflow {
           "Cleanup outcome is not linked to the recorded process",
         );
       c.status = success ? (verify ? "completed" : "executed") : "failed";
+      if (success) delete c.failedPhase;
+      else c.failedPhase = verify ? "verify" : "run";
       c.updatedAt = now();
       if (
         !this.db
@@ -855,6 +985,8 @@ export class EngagementWorkflow {
     const recorded = this.tx(() => {
       this.platform.mission(scope, missionId);
       if (
+        !input ||
+        typeof input !== "object" ||
         !Array.isArray(input.artifactIds) ||
         input.artifactIds.length > 20 ||
         !Array.isArray(input.tests) ||
@@ -863,32 +995,60 @@ export class EngagementWorkflow {
         throw new Error("Capitalization input limit exceeded");
       if (!["none", "candidate", "validated"].includes(input.outcome))
         throw new Error("Invalid capitalization outcome");
-      text(input.reason, 4000);
+      const cleanReason = text(input.reason, 4000);
       const artifacts = input.artifactIds.map((id) => this.artifact(scope, id));
       if (artifacts.some((a) => a.missionId !== missionId))
         throw new Error("Capitalization artifact belongs to another mission");
+      if (
+        input.tests.some(
+          (t) =>
+            !t ||
+            typeof t !== "object" ||
+            !["positive", "negative"].includes(t.kind) ||
+            typeof t.observationId !== "string" ||
+            typeof t.contains !== "string",
+        )
+      )
+        throw new Error("Invalid capitalization test entry");
       if (input.outcome === "validated") {
-        if (new Set(input.tests.map((t) => t.observationId)).size < 2)
+        const positives = input.tests.filter((t) => t.kind === "positive");
+        const negatives = input.tests.filter((t) => t.kind === "negative");
+        if (!artifacts.length || !positives.length || !negatives.length)
+          throw new Error(
+            "Validated capitalization needs artifacts and distinct positive/negative tests",
+          );
+        const posIds = new Set(positives.map((t) => t.observationId));
+        if (
+          negatives.some((t) => posIds.has(t.observationId)) ||
+          new Set(input.tests.map((t) => t.observationId)).size < 2
+        )
           throw new Error(
             "Capitalization needs distinct positive and negative test observations",
           );
-        if (
-          !artifacts.length ||
-          !input.tests.some((t) => t.kind === "positive") ||
-          !input.tests.some((t) => t.kind === "negative")
-        )
-          throw new Error(
-            "Validated capitalization needs artifacts and positive/negative tests",
-          );
+        const proofs = new Map<string, ReturnType<StorePort["evidence"]>[number]>();
         for (const t of input.tests) {
-          const proof = this.evidence.evidence(scope, [t.observationId])[0];
+          let proof = proofs.get(t.observationId);
+          if (!proof) {
+            proof = this.evidence.evidence(scope, [t.observationId])[0];
+            proofs.set(t.observationId, proof);
+          }
           if (
             !proof.success ||
             typeof t.contains !== "string" ||
-            t.contains.length < 4 ||
+            t.contains.trim().length < 4 ||
             !proof.output.includes(t.contains)
           )
             throw new Error("Capitalization test lacks observed results");
+        }
+        for (const pos of positives) {
+          const posProof = proofs.get(pos.observationId)!;
+          for (const neg of negatives) {
+            const negProof = proofs.get(neg.observationId)!;
+            if (posProof.output === negProof.output)
+              throw new Error(
+                "Capitalization negative control must observe a different output than the positive test",
+              );
+          }
         }
       }
       const snapshotHash = this.platform.reportFingerprint(scope, missionId),
@@ -898,13 +1058,20 @@ export class EngagementWorkflow {
           )
           .get(scope, missionId, snapshotHash),
         value = {
+          ...input,
           // A repeated pass rewrites its record; it does not take a new
           // identity, or every earlier reference to it would dangle.
           id: existing ? String(existing.id) : `capitalization-${newId()}`,
           missionId,
           snapshotHash,
-          ...input,
-          reason: text(input.reason, 4000),
+          outcome: input.outcome,
+          reason: cleanReason,
+          artifactIds: artifacts.map((a) => a.id),
+          tests: input.tests.map((t) => ({
+            observationId: t.observationId,
+            contains: t.contains,
+            kind: t.kind,
+          })),
           recordedAt: now(),
         };
       this.db
