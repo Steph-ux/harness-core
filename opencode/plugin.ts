@@ -667,23 +667,20 @@ export default {
           throw new Error("Verifier provider is outside the operator policy");
         return [requested];
       }
-      if (
-        liveModel &&
-        !["opencode", "opencode-go"].includes(liveModel.providerID)
-      )
-        add(liveModel);
+      if (liveModel) add(liveModel);
+      const models = await ctx.model.list();
+      const listed = Array.isArray(models) ? models : (models?.data ?? []);
       if (allowed.size) {
-        const models = await ctx.model.list();
-        for (const model of Array.isArray(models)
-          ? models
-          : (models?.data ?? []))
+        for (const model of listed)
           if (allowed.has(model.providerID)) add(model);
+      } else {
+        for (const model of listed) add(model);
       }
       // An empty list is a refusal with a reason, not a silent no-op: the
       // caller reports it instead of recording a review that never ran.
       if (!out.length)
         throw new Error(
-          "no model can serve the harness: the OpenCode free tier refuses the requests the harness makes, and no other provider is configured",
+          "no model can serve the harness: no active session model or configured provider is available",
         );
       return out.slice(0, 3);
     }

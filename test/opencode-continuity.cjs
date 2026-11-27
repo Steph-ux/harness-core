@@ -457,8 +457,9 @@ module.exports = async ({ assert, jiti }) => {
   assert.deepEqual(forged.evidence, [], "a forged citation is dropped");
   assert.equal(forged.verdict, "unsupported", "a forged citation does not confirm");
 
-  // The verifier: the free tier cannot serve a review, so the harness looks
-  // for a model that accepts a direct call.
+  // The verifier: no provider is hardcoded-blocked. Any active session model
+  // (including opencode) is tried first, and if it refuses a direct call the
+  // harness falls back to the next configured provider.
   const freeTier = fixture.contextEvent({
     sessionID: "ses_ctx",
     model: { providerID: "opencode", id: "beam-free" },
@@ -469,15 +470,42 @@ module.exports = async ({ assert, jiti }) => {
   const used = fixture.generated[fixture.generated.length - 1].model;
   assert.equal(
     used.providerID,
-    "Ed",
-    "the harness picks a model that accepts a direct call",
+    "opencode",
+    "the active session model is not hardcoded-blocked",
   );
   assert.ok(fixture.generated.length > before, "the verifier was called again");
 
-  // With no other provider, the review says so plainly.
-  fixture.models = [{ providerID: "opencode", id: "beam-free" }];
+  // If the active session model refuses, the harness falls back to another provider.
+  const origGenerate = fixture.ctx.generate.text;
+  fixture.ctx.generate.text = async (request) => {
+    if (request.model?.providerID === "opencode")
+      throw new Error("Free usage limit reached");
+    return origGenerate(request);
+  };
+  await call({ action: "run", claim: "a fourth-and-a-half claim" });
+  const fallbackUsed = fixture.generated[fixture.generated.length - 1].model;
+  assert.equal(
+    fallbackUsed.providerID,
+    "Ed",
+    "the harness falls back to another configured provider when the first refuses",
+  );
+  fixture.ctx.generate.text = origGenerate;
+
+  // With no active session model and no configured provider, the review says so plainly.
+  fixture.models = [];
   await assert.rejects(
-    () => call({ action: "run", claim: "a fifth claim" }),
+    () =>
+      fixture.tools.get("cyber_review").execute(
+        { action: "run", claim: "a fifth claim", observationIds: [proof.id] },
+        {
+          sessionID: "ses_no_model",
+          agent: "build",
+          messageID: "msg_no_model",
+          id: "call_no_model",
+          progress: () => {},
+          signal: new AbortController().signal,
+        },
+      ),
     /no model can serve the harness/,
     "the review says that no verifier is available",
   );

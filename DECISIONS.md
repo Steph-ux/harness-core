@@ -4,6 +4,22 @@ One entry per decision that is expensive to reverse. Each states what was
 decided, why, and what it costs. New entries go at the top.
 
 
+## 2026-11-27 — No provider is hardcoded-blocked from serving the verifier
+
+**Decision.** `verifierCandidates` in `opencode/plugin.ts` no longer hardcodes
+an exclusion list for `opencode` or `opencode-go`, and falls back across all
+models returned by `ctx.model.list()` when `HARNESS_VERIFIER_PROVIDERS` is
+unset. `HARNESS_VERIFIER` / `state/verifier` (explicit pin) and
+`HARNESS_VERIFIER_PROVIDERS` (explicit allowlist) remain honoured when set.
+**Why.** Hardcoding provider exclusions blocked legitimate operator sessions
+whenever the active provider matched an excluded name or when background
+extraction ran without `HARNESS_VERIFIER_PROVIDERS`. Trying the session's
+active model first and falling back on real runtime errors lets any configured
+model serve reviews and learning extraction.
+**Cost.** If a session runs on a provider that refuses direct calls, the first
+candidate fails once before falling back to the next configured provider.
+
+
 ## 2026-11-27 — Tool registry `argv` validation, gap expansion, and technique cards
 
 **Decision.** `ToolRegistry.validate` and `matchExecution` accept both
