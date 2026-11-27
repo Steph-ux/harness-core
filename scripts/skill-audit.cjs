@@ -15,8 +15,11 @@ function auditSkills(root) {
     .map((entry) => entry.name)
     .sort()
     .map((name) => {
-      const file = path.join(root, name, "SKILL.md");
-      const body = fs.readFileSync(file, "utf8").replace(/\r\n/g, "\n");
+      const skillPath = path.join(root, name, "SKILL.md");
+      if (!fs.existsSync(skillPath) || !fs.statSync(skillPath).isFile()) {
+        throw new Error(`${name}: missing or invalid SKILL.md (${skillPath})`);
+      }
+      const body = fs.readFileSync(skillPath, "utf8").replace(/\r\n/g, "\n");
       const lines = body.trimEnd().split("\n").length;
       if (!body.startsWith(`---\nname: ${name}\n`))
         errors.push(`${name}: frontmatter name does not match its directory`);

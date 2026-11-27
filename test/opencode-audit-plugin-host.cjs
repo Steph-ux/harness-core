@@ -739,6 +739,30 @@ module.exports = async ({ assert, jiti, skip }) => {
     } finally {
       globalThis.fetch = savedFetch;
     }
+    globalThis.fetch = async () => {
+      throw new Error(
+        `request failed token=SECRET_BATCH_TOKEN\n    at secretInternalFn (/home/user/secret/file.ts:42:9)\n    at anotherFrame (/a/b.ts:1:1) ${"z".repeat(400)}`,
+      );
+    };
+    try {
+      const errBatch = JSON.parse(
+        (
+          await fixture.tools.get("cyber_cve").execute(
+            {
+              action: "batch",
+              packages: [{ ecosystem: "npm", package: "lodash", version: "4.17.21" }],
+            },
+            { sessionID: "ses_a1", signal: new AbortController().signal },
+          )
+        ).content,
+      );
+      const errText = errBatch.batch[0].error;
+      assert.ok(typeof errText === "string" && errText.length > 0 && errText.length <= 200, "batch error is bounded to <= 200 chars");
+      assert.equal(errText.includes("secretInternalFn"), false, "batch error strips raw stack traces");
+      assert.equal(errText.includes("SECRET_BATCH_TOKEN"), false, "batch error redacts secrets");
+    } finally {
+      globalThis.fetch = savedFetch;
+    }
 
     // cyber_entity import without mission root still enforces assertPlainPath & validates observationIds on empty plan
     const emptyDump = path.join(workspace, "comments-only.txt");

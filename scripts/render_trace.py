@@ -14,8 +14,33 @@ WIDTH = 1000
 BAR = 34
 PAD = 18
 LINE = 19
-FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
-FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
+FONT_CANDIDATES = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    "/usr/share/fonts/dejavu/DejaVuSansMono.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+    "/System/Library/Fonts/Menlo.ttc",
+    "/Library/Fonts/Courier New.ttf",
+    "C:\\Windows\\Fonts\\consola.ttf",
+    "C:\\Windows\\Fonts\\cour.ttf",
+    "DejaVuSansMono.ttf",
+    "LiberationMono-Regular.ttf",
+    "Consolas",
+    "Courier New",
+)
+FONT_BOLD_CANDIDATES = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",
+    "/usr/share/fonts/dejavu/DejaVuSansMono-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationMono-Bold.ttf",
+    "/System/Library/Fonts/Menlo.ttc",
+    "/Library/Fonts/Courier New Bold.ttf",
+    "C:\\Windows\\Fonts\\consolab.ttf",
+    "C:\\Windows\\Fonts\\courbd.ttf",
+    "DejaVuSansMono-Bold.ttf",
+    "LiberationMono-Bold.ttf",
+    "Consolas Bold",
+    "Courier New Bold",
+    *FONT_CANDIDATES,
+)
 BG = (30, 30, 30)
 BAR_BG = (45, 45, 45)
 TEXT = (201, 209, 217)
@@ -25,12 +50,31 @@ COMMAND = (230, 237, 243)
 TITLE = (176, 176, 176)
 
 
+def load_font(candidates, size):
+    for candidate in candidates:
+        try:
+            return ImageFont.truetype(candidate, size)
+        except OSError:
+            continue
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:
+        return ImageFont.load_default()
+
+
 def main():
+    if len(sys.argv) < 5:
+        print(
+            "Usage: render_trace.py <output-file> <png-path> <title> <command>",
+            file=sys.stderr,
+        )
+        sys.exit(2)
     source, dest, title, command = sys.argv[1:5]
-    body = open(source, encoding="utf-8").read().rstrip("\n").split("\n")
-    font = ImageFont.truetype(FONT, 14)
-    bold = ImageFont.truetype(FONT_BOLD, 14)
-    small = ImageFont.truetype(FONT, 12)
+    with open(source, encoding="utf-8", errors="replace") as handle:
+        body = handle.read().rstrip("\n").split("\n")
+    font = load_font(FONT_CANDIDATES, 14)
+    bold = load_font(FONT_BOLD_CANDIDATES, 14)
+    small = load_font(FONT_CANDIDATES, 12)
     measure = ImageDraw.Draw(Image.new("RGB", (1, 1)))
 
     def wrap(text, f, width):
@@ -74,7 +118,10 @@ def main():
     for index, colour in enumerate(((255, 95, 86), (255, 189, 46), (39, 201, 63))):
         centre = PAD + 6 + index * 20
         draw.ellipse([centre - 6, BAR // 2 - 6, centre + 6, BAR // 2 + 6], fill=colour)
-    draw.text((WIDTH // 2, BAR // 2), title[:60], font=small, fill=TITLE, anchor="mm")
+    try:
+        draw.text((WIDTH // 2, BAR // 2), title[:60], font=small, fill=TITLE, anchor="mm")
+    except ValueError:
+        draw.text((PAD + 64, max(0, (BAR - 12) // 2)), title[:60], font=small, fill=TITLE)
 
     y = BAR + PAD
     draw.text((PAD, y), prompt, font=bold, fill=PROMPT)

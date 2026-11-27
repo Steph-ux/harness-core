@@ -111,8 +111,9 @@ const skip = (reason) => {
     console.log(`PASS ${suite}: ${checks} checks`);
     count += checks;
   }
+  const summaryPrefix = skipped > 0 ? "PASS WITH SKIPS" : "ALL PASS";
   console.log(
-    `ALL PASS: ${count} checks; ${suites.length - skipped} suites, ${skipped} skipped ` +
+    `${summaryPrefix}: ${count} checks; ${suites.length - skipped} suites, ${skipped} skipped ` +
       `(${skippedChecks} checks ran before a skip)`,
   );
 })().catch((error) => {
