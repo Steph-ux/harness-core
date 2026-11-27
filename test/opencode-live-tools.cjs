@@ -40,6 +40,11 @@ module.exports = async ({ assert, jiti }) => {
     process.env.HARNESS_TOOL_HOME = custom;
     assert.ok(registry.discover(scope, "fixture cli", [], 0, 15, true)
       .tools.some((entry) => entry.name === "fixture-cli"));
+    // context() exposes cached HARNESS_TOOL_HOME scripts without ever calling scan() (PATH).
+    const freshRegistry = new ToolRegistry(state);
+    freshRegistry.scan = () => { throw new Error("context unexpectedly scanned PATH"); };
+    const homeCtx = freshRegistry.context(scope, "fixture-cli");
+    assert.match(homeCtx, /fixture-cli/, "context surfaces HARNESS_TOOL_HOME scripts without scanning PATH");
     if (originalCustom === undefined) delete process.env.HARNESS_TOOL_HOME;
     else process.env.HARNESS_TOOL_HOME = originalCustom;
     // A collection is categories, not a bin directory. One configured level down

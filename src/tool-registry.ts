@@ -443,6 +443,7 @@ export class ToolRegistry {
   private readonly index: string;
   private readonly lock: string;
   private cliCache: { key: string; expires: number; entries: ToolCapability[] } | null = null;
+  private toolHomeCache: { key: string; expires: number; entries: ToolCapability[] } | null = null;
   constructor(stateRoot: string) {
     this.root = path.resolve(stateRoot, "capabilities");
     this.index = path.join(this.root, "registry.json");
@@ -886,10 +887,104 @@ export class ToolRegistry {
     }
     return [...unique.values()];
   }
+  /**
+   * Lightweight, cached scan of HARNESS_TOOL_HOME only (never PATH).
+   * Used by context() so configured user scripts are visible on turn 1
+   * without readdir-ing PATH on every message. Silently returns [] when
+   * HARNESS_TOOL_HOME is unset or inaccessible.
+   */
+  private scanToolHome(refresh = false): ToolCapability[] {
+    const raw = process.env.HARNESS_TOOL_HOME?.trim();
+    if (!raw) return [];
+    const directory = path.resolve(raw);
+    if (
+      !refresh &&
+      this.toolHomeCache?.key === directory &&
+      this.toolHomeCache.expires > Date.now()
+    )
+      return [...this.toolHomeCache.entries];
+    const found = new Map<string, ToolCapability>();
+    const indexFile = (dir: string, name: string, category?: string) => {
+      if (found.size >= MAX_SCAN) return;
+      if (!/^[A-Za-z0-9][A-Za-z0-9_.+-]{0,100}$/.test(name)) return;
+      const file = path.join(dir, name);
+      let stat;
+      try {
+        stat = fs.statSync(file);
+      } catch {
+        return;
+      }
+      if (!stat.isFile() || !isExecutable(name, stat) || found.has(name)) return;
+      const header = scriptDescription(file) ?? toolNote(name);
+      found.set(name, {
+        name,
+        origin: "path",
+        description: header
+          ? category
+            ? `${category}: ${header}`
+            : header
+          : "Executable from configured tool home",
+        command: file,
+      });
+    };
+    try {
+      const real = fs.realpathSync(directory);
+      assertPlainPath(real);
+      if (!fs.statSync(real).isDirectory()) return [];
+      let subdirs = 0;
+      for (const entry of fs.readdirSync(real, { withFileTypes: true })) {
+        if (found.size >= MAX_SCAN) break;
+        if (entry.isDirectory() || entry.isSymbolicLink()) {
+          if (
+            entry.name.startsWith(".") ||
+            entry.name.startsWith("_") ||
+            !/^[A-Za-z0-9][A-Za-z0-9_.+-]{0,100}$/.test(entry.name) ||
+            subdirs >= MAX_TOOL_SUBDIRECTORIES
+          ) {
+            if (!entry.isSymbolicLink()) continue;
+          } else {
+            const child = path.join(directory, entry.name);
+            try {
+              const childReal = fs.realpathSync(child);
+              assertPlainPath(childReal);
+              if (
+                childReal.startsWith(real + path.sep) &&
+                fs.statSync(childReal).isDirectory()
+              ) {
+                subdirs++;
+                for (const nested of fs.readdirSync(childReal, { withFileTypes: true })) {
+                  if (!nested.isFile() && !nested.isSymbolicLink()) continue;
+                  indexFile(child, nested.name, entry.name);
+                }
+                continue;
+              }
+            } catch {
+              if (entry.isDirectory()) continue;
+            }
+            if (entry.isDirectory()) continue;
+          }
+        }
+        if (!entry.isFile() && !entry.isSymbolicLink()) continue;
+        indexFile(directory, entry.name);
+      }
+    } catch {
+      return [];
+    }
+    const entries = [...found.values()];
+    this.toolHomeCache = {
+      key: directory,
+      expires: Date.now() + CLI_CACHE_MS,
+      entries,
+    };
+    return [...entries];
+  }
   discover(scope: string, query: string, host: { name: string; description?: string }[] = [],
     offset = 0, limit = 15, refresh = false, includePath = true) {
     checkScope(scope);
-    if (refresh) this.cliCache = null;
+    if (refresh) {
+      this.cliCache = null;
+      this.toolHomeCache = null;
+    }
     const entries = this.inventory(scope, host, includePath);
     const originRank = (origin: ToolCapability["origin"]) =>
       origin === "managed" ? 0 : origin === "path" ? 1 : 2;
@@ -912,11 +1007,20 @@ export class ToolRegistry {
     checkScope(scope);
     const base = this.inventory(scope, host, false);
     const seenNames = new Set(base.map((item) => item.name));
+    const cachedHome = this.scanToolHome().filter((item) => {
+      if (seenNames.has(item.name)) return false;
+      seenNames.add(item.name);
+      return true;
+    });
     const cachedCli =
       this.cliCache && this.cliCache.expires > Date.now()
-        ? this.cliCache.entries.filter((item) => !seenNames.has(item.name))
+        ? this.cliCache.entries.filter((item) => {
+            if (seenNames.has(item.name)) return false;
+            seenNames.add(item.name);
+            return true;
+          })
         : [];
-    const allEntries = [...base, ...cachedCli];
+    const allEntries = [...base, ...cachedHome, ...cachedCli];
     const originRank = (origin: ToolCapability["origin"]) =>
       origin === "managed" ? 0 : origin === "path" ? 1 : 2;
     const rankList = (items: ToolCapability[], q: string) =>
