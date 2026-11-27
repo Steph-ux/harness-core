@@ -33,7 +33,10 @@ module.exports = async ({ assert, jiti, modules }) => {
     InvestigationStore,
     surfacesFromTasks,
     assembleInvestigation,
+    directives,
   } = jiti(path.join(CORE, "src", "investigation.ts"));
+  const { EXPLOIT_TOOLS_SET } = jiti(path.join(CORE, "src", "phases.ts"));
+  const { captureLink } = jiti(path.join(CORE, "src", "capture.ts"));
   const { TaskStore } = jiti(path.join(CORE, "src", "tasks.ts"));
   const { SourceSynchronizer } = jiti(path.join(CORE, "src", "sources.ts"));
   const { createJiti } = require(path.join(modules, "jiti"));
@@ -1740,6 +1743,457 @@ module.exports = async ({ assert, jiti, modules }) => {
       () => coverageContract("toString"),
       /Unknown coverage profile/,
     );
+
+    // =========================================================================
+    // 7. Regression polish: phases, investigation, DAG reopen, workflow QA/journal, captureLink
+    // =========================================================================
+    // 7a. EXPLOIT_TOOLS_SET excludes cyber_capture / cyber_finding / cyber_entity
+    for (const nonExploitTool of ["cyber_capture", "cyber_finding", "cyber_entity"]) {
+      assert.equal(
+        EXPLOIT_TOOLS_SET.has(nonExploitTool),
+        false,
+        `${nonExploitTool} is not in EXPLOIT_TOOLS_SET`,
+      );
+    }
+    const nonExploitTail = assembleInvestigation({
+      observations: [
+        { tool: "cyber_capture", hash: "c1", success: false, timestamp: ts0 },
+        { tool: "cyber_finding", hash: "c2", success: false, timestamp: ts0 },
+        { tool: "cyber_entity", hash: "c3", success: false, timestamp: ts0 },
+      ],
+      tasks: [],
+      hypotheses: [],
+      coverage: new CoverageMap().summary(),
+      nowMs: Date.parse(ts0),
+    });
+    assert.equal(
+      nonExploitTail.consecutiveExploitFailures,
+      0,
+      "failed capture/finding/entity calls do not count as consecutive exploit failures",
+    );
+    const realExploitTail = assembleInvestigation({
+      observations: [
+        { tool: "sqlmap", hash: "e1", success: false, timestamp: ts0 },
+        { tool: "dalfox", hash: "e2", success: false, timestamp: ts0 },
+        { tool: "nuclei", hash: "e3", success: false, timestamp: ts0 },
+      ],
+      tasks: [],
+      hypotheses: [],
+      coverage: new CoverageMap().summary(),
+      nowMs: Date.parse(ts0),
+    });
+    assert.equal(realExploitTail.consecutiveExploitFailures, 3);
+    assert.ok(
+      directives(realExploitTail).some((d) => d.text.includes("BACKTRACK")),
+      "3 consecutive real exploit failures trigger BACKTRACK",
+    );
+
+    // 7b. investigation.ts: CVE CHECK mentions lookup/batch + search, DATA FLOW skips non-HTTP tools
+    const nonHttpDir = directives({
+      hypotheses: [],
+      stagnation: [],
+      coverage: new CoverageMap([{ id: "plc", label: "Modbus" }]).summary(),
+      completedWithEvidence: 0,
+      observationCount: 10,
+      toolsUsed: ["tshark", "mbpoll"],
+    });
+    assert.equal(
+      nonHttpDir.some((d) => d.text.includes("DATA FLOW")),
+      false,
+      "non-HTTP session without web/HTTP tools does not receive DATA FLOW spam",
+    );
+    const httpDir = directives({
+      hypotheses: [],
+      stagnation: [],
+      coverage: new CoverageMap([{ id: "api", label: "REST API" }]).summary(),
+      completedWithEvidence: 0,
+      observationCount: 10,
+      toolsUsed: ["nmap", "curl"],
+    });
+    assert.ok(
+      httpDir.some((d) => d.text.includes("DATA FLOW")),
+      "HTTP session with curl receives DATA FLOW directive",
+    );
+    const cveCheckText =
+      httpDir.find((d) => d.text.includes("CVE CHECK"))?.text ?? "";
+    assert.match(cveCheckText, /lookup.*batch|batch.*lookup/);
+    assert.match(cveCheckText, /search/);
+
+    // 7c. platform-store.ts: verifyFinding malformed checks & reopenValidation intermediate DAG nodes
+    const dagDir = path.join(work, "dag");
+    fs.mkdirSync(dagDir);
+    const dagK = new KnowledgeStore(path.join(dagDir, "knowledge.sqlite"));
+    const dagP = new PlatformStore(path.join(dagDir, "platform.sqlite"), dagK);
+    const dagW = new EngagementWorkflow(dagDir, dagP, dagK);
+    const dagScope = scopeFor(dagDir);
+    dagK.upsertSession({
+      id: "ses_dag_1",
+      scope: dagScope,
+      cwd: dagDir,
+      status: "active",
+      updatedAt: new Date().toISOString(),
+    });
+    dagK.upsertSession({
+      id: "ses_dag_v",
+      scope: dagScope,
+      cwd: dagDir,
+      status: "active",
+      updatedAt: new Date().toISOString(),
+    });
+    const dagOk = dagK.recordObservation({
+      id: "obs-dag-ok",
+      sessionId: "ses_dag_1",
+      scope: dagScope,
+      tool: "shell",
+      input: {},
+      output: "dag stage ok",
+      success: true,
+      timestamp: new Date().toISOString(),
+    });
+    const customGraph = [
+      { id: "scope-validation", dependsOn: [] },
+      { id: "recon", dependsOn: ["scope-validation"] },
+      { id: "enumeration", dependsOn: ["recon"] },
+      { id: "analysis", dependsOn: ["enumeration"] },
+      { id: "validation", dependsOn: ["analysis"] },
+      { id: "post-validation-gate", dependsOn: ["validation"] },
+      { id: "evidence", dependsOn: ["post-validation-gate"] },
+      { id: "qa-packaging", dependsOn: ["evidence"] },
+      { id: "report", dependsOn: ["qa-packaging"] },
+    ];
+    const mDag = dagP.createMission(dagScope, "DAG Mission", "Lab", customGraph);
+    dagP.approveScope(dagScope, mDag.id);
+    for (const [node, role] of [
+      ["recon", "recon-agent"],
+      ["enumeration", "recon-agent"],
+      ["analysis", "recon-agent"],
+      ["validation", "verification-agent"],
+      ["post-validation-gate", "verification-agent"],
+      ["evidence", "code-agent"],
+      ["qa-packaging", "code-agent"],
+    ]) {
+      const l = dagP.claim(dagScope, mDag.id, node, role);
+      dagP.finish(dagScope, mDag.id, node, l, [
+        { role, status: "completed", summary: "ok", evidence: [dagOk.id] },
+      ]);
+    }
+    const reopenedDag = dagP.reopenValidation(
+      dagScope,
+      mDag.id,
+      "Reset intermediate DAG nodes",
+      "operator",
+    );
+    for (const kept of ["scope-validation", "recon", "enumeration", "analysis"]) {
+      assert.equal(
+        reopenedDag.nodes.find((n) => n.id === kept).state,
+        "COMPLETED",
+        `${kept} stays COMPLETED on reopenValidation`,
+      );
+    }
+    for (const reset of [
+      "validation",
+      "post-validation-gate",
+      "evidence",
+      "qa-packaging",
+      "report",
+    ]) {
+      assert.equal(
+        reopenedDag.nodes.find((n) => n.id === reset).state,
+        "PENDING",
+        `intermediate/downstream node ${reset} resets to PENDING on reopenValidation`,
+      );
+    }
+
+    // verifyFinding rejects malformed checks array ([null, null]) & missing runId cleanly
+    const dagSrc = dagP.ingest(dagScope, "s-dag", "fixture:dag", "T", "Body")[0];
+    const dagPos = dagK.recordObservation({
+      id: "obs-dag-pos",
+      sessionId: "ses_dag_1",
+      scope: dagScope,
+      tool: "shell",
+      input: {},
+      output: "DAG_VULN_OUT",
+      success: true,
+      timestamp: new Date().toISOString(),
+    });
+    const dagNeg = dagK.recordObservation({
+      id: "obs-dag-neg",
+      sessionId: "ses_dag_1",
+      scope: dagScope,
+      tool: "shell",
+      input: {},
+      output: "DAG_CTRL_OUT",
+      success: true,
+      timestamp: new Date().toISOString(),
+    });
+    const dagF = dagP.createFinding(dagScope, {
+      missionId: mDag.id,
+      title: "DAG Finding",
+      severity: "medium",
+      description: "Desc",
+      limitations: "Lim",
+      evidence: [dagPos.id, dagNeg.id],
+      sources: [dagSrc.id],
+      checks: [
+        { observationId: dagPos.id, contains: "DAG_VULN_OUT", purpose: "reproduction" },
+        { observationId: dagNeg.id, contains: "DAG_CTRL_OUT", purpose: "negative-control" },
+      ],
+    });
+    const badChecksAtt = dagK.recordObservation({
+      id: "obs-dag-badchecks",
+      sessionId: "ses_dag_v",
+      scope: dagScope,
+      tool: "harness:verification",
+      input: {},
+      output: JSON.stringify({
+        type: "finding-verification",
+        findingId: dagF.id,
+        findingHash: dagP.findingHash(dagScope, dagF.id),
+        runId: "run-1",
+        verdict: "confirmed",
+        checks: [null, null],
+      }),
+      success: true,
+      timestamp: new Date().toISOString(),
+    });
+    const missingRunIdAtt = dagK.recordObservation({
+      id: "obs-dag-norunid",
+      sessionId: "ses_dag_v",
+      scope: dagScope,
+      tool: "harness:verification",
+      input: {},
+      output: JSON.stringify({
+        type: "finding-verification",
+        findingId: dagF.id,
+        findingHash: dagP.findingHash(dagScope, dagF.id),
+        verdict: "confirmed",
+        checks: [],
+      }),
+      success: true,
+      timestamp: new Date().toISOString(),
+    });
+    const dvLease = dagP.claim(dagScope, mDag.id, "validation", "verification-agent", [dagF.id]);
+    dagP.finish(dagScope, mDag.id, "validation", dvLease, [
+      {
+        role: "verification-agent",
+        status: "completed",
+        summary: "done",
+        evidence: [badChecksAtt.id, missingRunIdAtt.id],
+      },
+    ]);
+    assert.throws(
+      () => dagP.verifyFinding(dagScope, dagF.id, badChecksAtt.id),
+      /reproduction and negative controls/,
+      "verifyFinding handles null check entries cleanly without TypeError",
+    );
+    assert.throws(
+      () => dagP.verifyFinding(dagScope, dagF.id, missingRunIdAtt.id),
+      /unrelated or stale/,
+      "verifyFinding rejects attestation missing runId",
+    );
+
+    // 7d. engagement-workflow.ts: pageImages validation, PNG/JPEG magic bytes, capitalization journal guards
+    const dvEvLease = dagP.claim(dagScope, mDag.id, "post-validation-gate", "verification-agent");
+    dagP.finish(dagScope, mDag.id, "post-validation-gate", dvEvLease, [
+      { role: "verification-agent", status: "completed", summary: "ok", evidence: [dagOk.id] },
+    ]);
+    const dvEv2 = dagP.claim(dagScope, mDag.id, "evidence", "code-agent");
+    dagP.finish(dagScope, mDag.id, "evidence", dvEv2, [
+      { role: "code-agent", status: "completed", summary: "ok", evidence: [dagOk.id] },
+    ]);
+    const dagSnap = dagW.snapshot(dagScope, mDag.id, {
+      title: "DAG Report",
+      client: "C",
+      author: "A",
+      period: "2026",
+      method: "M",
+      findings: {
+        [dagF.id]: {
+          classification: "observation",
+          asset: "Local",
+          preconditions: "None",
+          impact: "Low",
+          steps: ["Step 1"],
+          remediation: ["Fix 1"],
+          closure: "Closed",
+        },
+      },
+    });
+    const dDoc = path.join(dagDir, "r.docx");
+    const dPdf = path.join(dagDir, "r.pdf");
+    const dJpg = path.join(dagDir, "page-1.jpg");
+    const dQa = path.join(dagDir, "qa.json");
+    fs.writeFileSync(dDoc, "PK\u0003\u0004dag");
+    fs.writeFileSync(dPdf, "%PDF-1.7\ndag");
+    fs.writeFileSync(dJpg, Buffer.from("ffd8ffe000104a464946", "hex"));
+    const daDoc = dagW.registerArtifact(dagScope, mDag.id, { path: dDoc, kind: "report-docx", observationIds: [dagOk.id] }, dagDir);
+    const daPdf = dagW.registerArtifact(dagScope, mDag.id, { path: dPdf, kind: "report-pdf", observationIds: [dagOk.id] }, dagDir);
+    // Reject absolute page image path & invalid sha256
+    fs.writeFileSync(
+      dQa,
+      JSON.stringify({
+        snapshotId: dagSnap.snapshot.id,
+        snapshotHash: dagSnap.sha256,
+        docxHash: daDoc.sha256,
+        pdfHash: daPdf.sha256,
+        pages: 1,
+        structuredChecks: true,
+        pageImages: [{ path: dJpg, sha256: digest(dJpg) }],
+      }),
+    );
+    const daQaAbs = dagW.registerArtifact(dagScope, mDag.id, { path: dQa, kind: "report-qa", observationIds: [dagOk.id] }, dagDir);
+    assert.throws(
+      () => dagW.registerReport(dagScope, dagSnap.snapshot.id, [daDoc.id, daPdf.id, daQaAbs.id]),
+      /distinct rendered image/,
+      "registerReport rejects absolute path in pageImages",
+    );
+    fs.writeFileSync(
+      dQa,
+      JSON.stringify({
+        snapshotId: dagSnap.snapshot.id,
+        snapshotHash: dagSnap.sha256,
+        docxHash: daDoc.sha256,
+        pdfHash: daPdf.sha256,
+        pages: 1,
+        structuredChecks: true,
+        pageImages: [{ path: "page-1.jpg", sha256: "not-a-sha" }],
+      }),
+    );
+    const daQaBadSha = dagW.registerArtifact(dagScope, mDag.id, { path: dQa, kind: "report-qa", observationIds: [dagOk.id] }, dagDir);
+    assert.throws(
+      () => dagW.registerReport(dagScope, dagSnap.snapshot.id, [daDoc.id, daPdf.id, daQaBadSha.id]),
+      /distinct rendered image/,
+      "registerReport rejects non-hex sha256 in pageImages",
+    );
+
+    // Valid JPEG page image accepted & registerReport does not re-hash artifacts redundantly
+    fs.writeFileSync(
+      dQa,
+      JSON.stringify({
+        snapshotId: dagSnap.snapshot.id,
+        snapshotHash: dagSnap.sha256,
+        docxHash: daDoc.sha256,
+        pdfHash: daPdf.sha256,
+        pages: 1,
+        structuredChecks: true,
+        pageImages: [{ path: "page-1.jpg", sha256: digest(dJpg) }],
+      }),
+    );
+    const daQaOk = dagW.registerArtifact(dagScope, mDag.id, { path: dQa, kind: "report-qa", observationIds: [dagOk.id] }, dagDir);
+    dagW.registerReport(dagScope, dagSnap.snapshot.id, [daDoc.id, daPdf.id, daQaOk.id]);
+    dagW.reviewReport(dagScope, dagSnap.snapshot.id, {
+      pagesReviewed: [1],
+      decision: "approved",
+      reviewer: "op",
+      notes: "JPEG ok",
+    });
+    assert.doesNotThrow(() => dagW.assertCurrentReport(dagScope, mDag.id));
+
+    // publishCapitalizationJournal guards (missing dir, symlinked file, HTML marker escaping)
+    const capFile = path.join(dagDir, "cap.js");
+    fs.writeFileSync(capFile, "console.log(1);");
+    const capScriptArt = dagW.registerArtifact(dagScope, mDag.id, { path: capFile, kind: "script", observationIds: [dagOk.id] }, dagDir);
+    const savedToolHome = process.env.HARNESS_TOOL_HOME;
+    try {
+      process.env.HARNESS_TOOL_HOME = path.join(dagDir, "missing-journal-dir");
+      assert.throws(
+        () =>
+          dagW.capitalization(dagScope, mDag.id, {
+            outcome: "validated",
+            reason: "Missing dir test",
+            artifactIds: [capScriptArt.id],
+            tests: [
+              { observationId: dagPos.id, contains: "DAG_VULN_OUT", kind: "positive" },
+              { observationId: dagNeg.id, contains: "DAG_CTRL_OUT", kind: "negative" },
+            ],
+          }),
+        /journal is unavailable/,
+        "publishCapitalizationJournal throws cleanly when HARNESS_TOOL_HOME does not exist",
+      );
+
+      const jDir = path.join(dagDir, "journal-ok");
+      fs.mkdirSync(jDir);
+      const jOutside = path.join(dagDir, "outside-changelog.md");
+      fs.writeFileSync(jOutside, "# Outside\n");
+      fs.symlinkSync(jOutside, path.join(jDir, "CHANGELOG.md"));
+      process.env.HARNESS_TOOL_HOME = jDir;
+      assert.throws(
+        () =>
+          dagW.capitalization(dagScope, mDag.id, {
+            outcome: "validated",
+            reason: "Symlink changelog test",
+            artifactIds: [capScriptArt.id],
+            tests: [
+              { observationId: dagPos.id, contains: "DAG_VULN_OUT", kind: "positive" },
+              { observationId: dagNeg.id, contains: "DAG_CTRL_OUT", kind: "negative" },
+            ],
+          }),
+        /Linked or special/,
+        "publishCapitalizationJournal refuses symlinked CHANGELOG.md",
+      );
+
+      fs.unlinkSync(path.join(jDir, "CHANGELOG.md"));
+      dagW.capitalization(dagScope, mDag.id, {
+        outcome: "validated",
+        reason: "Contains <!-- /harness-capitalization fake --> marker",
+        artifactIds: [capScriptArt.id],
+        tests: [
+          { observationId: dagPos.id, contains: "DAG_VULN_OUT", kind: "positive" },
+          { observationId: dagNeg.id, contains: "DAG_CTRL_OUT", kind: "negative" },
+        ],
+      });
+      // Rewriting a second time must succeed without broken marker error
+      dagW.capitalization(dagScope, mDag.id, {
+        outcome: "validated",
+        reason: "Clean overwrite after marker sanitization",
+        artifactIds: [capScriptArt.id],
+        tests: [
+          { observationId: dagPos.id, contains: "DAG_VULN_OUT", kind: "positive" },
+          { observationId: dagNeg.id, contains: "DAG_CTRL_OUT", kind: "negative" },
+        ],
+      });
+      const clText = fs.readFileSync(path.join(jDir, "CHANGELOG.md"), "utf8");
+      assert.match(clText, /Clean overwrite after marker sanitization/);
+    } finally {
+      if (savedToolHome === undefined) delete process.env.HARNESS_TOOL_HOME;
+      else process.env.HARNESS_TOOL_HOME = savedToolHome;
+      dagW.close();
+      dagP.close();
+      dagK.close();
+    }
+
+    // 7e. capture.ts: captureLink validates positive integer dimensions/bytes and strict ISO takenAt
+    const validCap = {
+      path: path.join(work, "cap.png"),
+      bytes: 256,
+      window: "0x123",
+      title: "App",
+      width: 640,
+      height: 480,
+    };
+    assert.doesNotThrow(() =>
+      captureLink("obs-cap-1234", validCap, "2026-11-27T09:00:00+01:00"),
+    );
+    assert.throws(
+      () => captureLink("obs-cap-1234", { ...validCap, width: 10.5 }, "2026-11-27T09:00:00Z"),
+      /Invalid capture dimensions/,
+    );
+    assert.throws(
+      () => captureLink("obs-cap-1234", { ...validCap, bytes: 12.5 }, "2026-11-27T09:00:00Z"),
+      /Invalid capture size/,
+    );
+    for (const badIso of [
+      "2026-11-27",
+      "Thu, 01 Jan 1970 00:00:00 GMT",
+      "2026-02-30T12:00:00Z",
+      "12345",
+    ]) {
+      assert.throws(
+        () => captureLink("obs-cap-1234", validCap, badIso),
+        /Invalid capture timestamp/,
+        `captureLink rejects non-ISO timestamp ${badIso}`,
+      );
+    }
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
   }

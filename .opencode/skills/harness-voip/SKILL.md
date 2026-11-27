@@ -39,7 +39,7 @@ If RTP is in scope, **hash a pcap already collected** — do not tap a live call
 
 ### 5. Finding contract
 
-`cyber_finding` for: unauthenticated SIP, default extension, TLS missing on 5060 with a captured test REGISTER — plus the unused-extension control. CVE on Asterisk/FreeSWITCH via `cyber_cve` on the **exact** version. No finding that required a PSTN call.
+`cyber_finding` for: unauthenticated SIP, default extension, TLS missing on 5060 with a captured test REGISTER — plus the unused-extension control. CVE on Asterisk/FreeSWITCH via `cyber_cve search` (NVD + searchsploit) on the **exact** version (or `cyber_cve lookup` for OSV packages). No finding that required a PSTN call.
 
 ## Proof contract
 
@@ -62,7 +62,7 @@ Unused extension must 404/403.
 
 ### TLS
 
-5061 vs 5060: missing TLS on 5060 with a captured **test** REGISTER is a candidate. Version string → `cyber_cve` on exact Asterisk/FreeSWITCH version.
+5061 vs 5060: missing TLS on 5060 with a captured **test** REGISTER is a candidate. Version string → `cyber_cve search` on exact Asterisk/FreeSWITCH version (or `cyber_cve lookup` for OSV packages).
 
 ```
 cyber_process argv=["sipsak","-S","-s","sip:<test>@<host>"]

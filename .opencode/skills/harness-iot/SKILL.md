@@ -69,7 +69,7 @@ cyber_process argv=["binwalk","-e","-M","<firmware.bin>"]
 cyber_process argv=["nmap","-sV","-Pn","-p","<port>","<approved-host>"]
 ```
 
-Native blob → `harness-ghidra`. Secret string → `harness-secret-scan`. Lockfile → `harness-supply-chain`. Radio → `harness-wireless`. One named interface probe with an actual fixture/denial control. Version ≠ CVE until lookup.
+Native blob → `harness-ghidra`. Secret string → `harness-secret-scan`. Lockfile → `harness-supply-chain` (`cyber_cve lookup` for OSV packages). Radio → `harness-wireless`. One named interface probe with an actual fixture/denial control. Version ≠ CVE until `cyber_cve search` (NVD + searchsploit) on exact firmware/service version.
 
 ### Stop
 
@@ -82,7 +82,7 @@ Firmware hash, unpack or interface, executed fixture/denial control, source chun
 ### Reproduction recipe
 
 Hash firmware first. Unpack read-only. One named live probe if approved.
-Use a clean fixture or actual denial as control. Banner version waits for `cyber_cve`.
+Use a clean fixture or actual denial as control. Banner version waits for `cyber_cve search` (NVD + searchsploit), or `cyber_cve lookup` for OSV packages.
 
 ## Verification scenarios
 

@@ -45,7 +45,7 @@ Default users (`SAP*`, `DDIC`) are **candidates** until a login is **explicitly*
 
 ### 5. Notes vs findings
 
-SAP Security Note / CVE: `cyber_cve lookup` on the **exact** kernel/ICM version. Version string without lookup is not a finding.
+SAP Security Note / CVE: `cyber_cve search` (NVD + searchsploit) on the **exact** kernel/ICM version (or `cyber_cve lookup` for OSV ecosystems). Version string without lookup is not a finding.
 
 ### 6. Finding contract
 
@@ -72,7 +72,7 @@ Production write, RFC_READ_TABLE without named RFC+row limit, default-password s
 
 ### Evidence ids
 
-Scan, one ICM/RFC read, wrong-client control. Notes via `cyber_cve` on exact kernel version.
+Scan, one ICM/RFC read, wrong-client control. Notes via `cyber_cve search` (NVD + searchsploit) on exact kernel version (or `cyber_cve lookup` for OSV packages).
 
 ### ICF one GET
 
@@ -82,7 +82,7 @@ Documented path only (`/sap/public/info` or `/sap/bc/gui/sap/its/webgui`) with t
 cyber_process argv=["nmap","-sV","-Pn","-p","3200,3300,3600,8000,44300,50000,50013","<approved-host>"]
 ```
 
-Wrong client / closed instance = negative control. Notes via `cyber_cve` on exact kernel.
+Wrong client / closed instance = negative control. Notes via `cyber_cve search` on exact kernel.
 
 ### Stop
 

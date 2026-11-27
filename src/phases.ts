@@ -53,7 +53,6 @@ export const EXPLOIT_TOOLS_SET = new Set([
   "nuclei", "xsstrike", "nosqlmap", "ysoserial",
   "hydra", "john", "hashcat", "responder", "impacket",
   "metasploit", "msfvenom", "searchsploit",
-  "cyber_finding", "cyber_capture",
 ]);
 
 const EXPLOIT_TOOLS = EXPLOIT_TOOLS_SET;

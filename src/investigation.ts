@@ -510,6 +510,52 @@ export interface Directive {
   text: string;
 }
 
+const HTTP_FLOW_TOOLS = new Set([
+  "curl",
+  "httpx",
+  "wget",
+  "fetch",
+  "webfetch",
+  "web_fetch",
+  "burp",
+  "mitmproxy",
+  "zap",
+  "ffuf",
+  "gobuster",
+  "dirsearch",
+  "feroxbuster",
+  "wfuzz",
+  "nuclei",
+  "sqlmap",
+  "dalfox",
+  "katana",
+  "hakrawler",
+  "arjun",
+  "paramspider",
+  "nikto",
+  "whatweb",
+  "cariddi",
+  "commix",
+  "tplmap",
+  "ssrfmap",
+  "nosqlmap",
+  "xsstrike",
+]);
+
+const RECON_TOOLS = [
+  "nmap",
+  "httpx",
+  "whatweb",
+  "wappalyzer",
+  "nuclei",
+  "nikto",
+  "wafw00f",
+  "curl",
+  "gobuster",
+  "feroxbuster",
+  "dirsearch",
+];
+
 /**
  * Produce directives from the investigation state.
  *
@@ -643,10 +689,19 @@ export function directives(state: InvestigationState): Directive[] {
 
   // Data flow analysis nudge: if the model is making HTTP requests but has
   // not recorded any hypothesis about parameter→sink flows, it may be testing
-  // blindly. This is a heuristic: the model should trace inputs, not just
-  // throw payloads.
-  const httpTools = ["curl", "httpx", "wget", "fetch", "burp", "ffuf", "gobuster", "nuclei", "sqlmap", "wfuzz", "feroxbuster"];
-  const httpObs = state.stagnation.length === 0 && state.observationCount > 8;
+  // blindly. Guarded on HTTP/web tool usage when toolsUsed is known so
+  // non-HTTP sessions (ICS/OT, firmware, VoIP, mainframe) are not spammed.
+  const used = new Set(state.toolsUsed ?? []);
+  const hasHttpTools =
+    state.toolsUsed === undefined ||
+    [...used].some(
+      (t) =>
+        HTTP_FLOW_TOOLS.has(t) ||
+        t.startsWith("chrome-devtools.") ||
+        t.startsWith("rea."),
+    );
+  const httpObs =
+    state.stagnation.length === 0 && state.observationCount > 8 && hasHttpTools;
   if (httpObs && activeH.length === 0 && confirmedH.length === 0 && cov.untested > 0) {
     const hasFlowHypothesis = state.hypotheses.some((h) =>
       /sink|source|parameter|flow|taint|inject|input.*reach/i.test(h.text),
@@ -661,14 +716,12 @@ export function directives(state: InvestigationState): Directive[] {
 
   // CVE lookup nudge: when recon tools ran but no CVE lookup was performed,
   // the model is missing known vulnerabilities on the discovered stack.
-  const reconTools = ["nmap", "httpx", "whatweb", "wappalyzer", "nuclei", "nikto", "wafw00f", "curl", "gobuster", "feroxbuster", "dirsearch"];
-  const used = new Set(state.toolsUsed ?? []);
-  const hasRecon = reconTools.some((t) => used.has(t));
+  const hasRecon = RECON_TOOLS.some((t) => used.has(t));
   const hasCveLookup = used.has("cyber_cve") || used.has("trivy") || used.has("retire");
   if (hasRecon && !hasCveLookup && state.observationCount > 5) {
     result.push({
       priority: "recommended",
-      text: "CVE CHECK: Reconnaissance tools ran but no CVE lookup was performed. Use cyber_cve to check discovered technologies/versions against OSV, or run trivy/retire on collected artifacts. Known CVEs are low-hanging fruit.",
+      text: 'CVE CHECK: Reconnaissance tools ran but no CVE lookup was performed. Use cyber_cve action="lookup"/"batch" for OSV packages and cyber_cve action="search" (NVD + searchsploit) for services, servers, CMS, appliances, or firmware (or run trivy/retire on collected artifacts). Known CVEs are low-hanging fruit.',
     });
   }
 
@@ -677,13 +730,13 @@ export function directives(state: InvestigationState): Directive[] {
   if (
     cov.total > 0 &&
     cov.untested > 0 &&
-    state.completedWithEvidence > 0 &&
+    (state.completedWithEvidence > 0 || used.has("cyber_report")) &&
     pct !== null &&
     pct < CONCLUSION_THRESHOLD
   ) {
     result.push({
       priority: "mandatory",
-      text: `PREMATURE CONCLUSION GUARD: Coverage is only ${pct}%. Do not declare findings or write a report until at least ${CONCLUSION_THRESHOLD}% of surfaces are tested or explicitly blocked with a reason.`,
+      text: `PREMATURE CONCLUSION GUARD: Coverage is only ${pct}%. Do not conclude the engagement or write a report until at least ${CONCLUSION_THRESHOLD}% of surfaces are tested or explicitly blocked with a reason.`,
     });
   }
 
@@ -1341,13 +1394,31 @@ export function assembleInvestigation(opts: {
     }
   }
 
+  const toolSet = new Set<string>();
+  for (const o of opts.observations) {
+    toolSet.add(o.tool);
+    if (
+      o.tool === "cyber_process" &&
+      o.input &&
+      typeof o.input === "object" &&
+      (o.input as Record<string, unknown>).action === "run" &&
+      Array.isArray((o.input as Record<string, unknown>).argv)
+    ) {
+      const bin = (o.input as Record<string, unknown>).argv[0];
+      if (typeof bin === "string" && bin.trim()) {
+        const base = path.posix.basename(bin.trim().replace(/\\/g, "/"));
+        if (base) toolSet.add(base);
+      }
+    }
+  }
+
   return {
     hypotheses: opts.hypotheses,
     stagnation,
     coverage: opts.coverage,
     completedWithEvidence,
     observationCount: opts.observations.length,
-    toolsUsed: [...new Set(opts.observations.map((o) => o.tool))],
+    toolsUsed: [...toolSet],
     consecutiveExploitFailures,
   };
 }

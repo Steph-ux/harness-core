@@ -36,7 +36,7 @@ Distinguish filesystem mtime from embedded CreateDate.
 
 - GPS: candidate until it sits in engagement geography **and** a second source agrees.
 - Author: candidate until an in-scope principal matches.
-- Software version: `cyber_cve` / `harness-supply-chain`, not this method.
+- Software version: `cyber_cve search` (NVD + searchsploit) for software/CMS/firmware or `cyber_cve lookup` / `harness-supply-chain` for OSV packages, not this method.
 
 ### 4. Negative control
 
@@ -52,7 +52,7 @@ Known-clean fixture of the same type, plus the copy hash. Must not invent GPS/au
 |---|---|
 | GPS | geography in scope + second source |
 | Author | in-scope principal match |
-| Software | `cyber_cve` on exact version |
+| Software | `cyber_cve search` (or `cyber_cve lookup` for OSV) on exact version |
 
 ```
 cyber_process argv=["exiftool","-json","-n","<file>"]

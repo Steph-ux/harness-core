@@ -36,28 +36,44 @@ function publishCapitalizationJournal(record: {
   recordedAt: string;
 }): void {
   if (record.outcome !== "validated") return;
+  if (!/^[0-9a-f]{64}$/i.test(record.snapshotHash))
+    throw new Error("Invalid capitalization snapshot hash");
   const root = process.env.HARNESS_TOOL_HOME?.trim();
   if (!root) return;
   const resolved = path.resolve(root);
   assertPlainPath(resolved);
-  if (!fs.statSync(resolved).isDirectory())
+  const rootStat = fs.statSync(resolved, { throwIfNoEntry: false });
+  if (!rootStat?.isDirectory())
     throw new Error("Configured tool journal is unavailable");
-  const lessons = ["LEÇONS.md", "LECONS.md", "LESSONS.md"]
-    .map((name) => path.join(resolved, name))
-    .find((file) => fs.existsSync(file)) ?? path.join(resolved, "LESSONS.md");
+  const lessonsCandidates = ["LEÇONS.md", "LECONS.md", "LESSONS.md"].map(
+    (name) => path.join(resolved, name),
+  );
+  for (const candidate of lessonsCandidates) assertPlainPath(candidate);
+  const lessons =
+    lessonsCandidates.find((file) => fs.existsSync(file)) ??
+    path.join(resolved, "LESSONS.md");
+  const safeReason = record.reason
+    .replace(/\s+/g, " ")
+    .replaceAll("<!--", "< !--")
+    .replaceAll("-->", "-- >")
+    .slice(0, 500);
   const line =
     `- ${record.recordedAt.slice(0, 10)} — ${record.id} (validated): ` +
-    record.reason.replace(/\s+/g, " ").slice(0, 500);
+    safeReason;
   for (const file of [path.join(resolved, "CHANGELOG.md"), lessons])
     upsertJournalBlock(file, record.snapshotHash, line);
 }
 function upsertJournalBlock(file: string, snapshotHash: string, line: string): void {
+  assertPlainPath(file);
   const begin = `<!-- harness-capitalization ${snapshotHash} -->`;
   const end = `<!-- /harness-capitalization ${snapshotHash} -->`;
   const section = `${begin}\n${line}\n${end}\n`;
   let current = "";
   try {
-    current = fs.readFileSync(file, "utf8");
+    const stat = fs.lstatSync(file, { throwIfNoEntry: false });
+    if (stat && !stat.isFile())
+      throw new Error("Configured tool journal file is invalid");
+    if (stat) current = fs.readFileSync(file, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
@@ -128,6 +144,38 @@ const DUMP_EXT = new Set([
   ".headers",
   ".md",
 ]);
+const isPngOrJpeg = (bytes: Buffer): boolean =>
+  (bytes.length >= 8 &&
+    bytes.subarray(0, 8).toString("hex") === "89504e470d0a1a0a") ||
+  (bytes.length >= 3 && bytes.subarray(0, 3).toString("hex") === "ffd8ff");
+
+function validateQaPageImages(qa: any): void {
+  if (
+    !qa ||
+    typeof qa !== "object" ||
+    Array.isArray(qa) ||
+    !Number.isInteger(qa.pages) ||
+    qa.pages < 1 ||
+    qa.pages > 100 ||
+    !Array.isArray(qa.pageImages) ||
+    qa.pageImages.length !== qa.pages ||
+    qa.pageImages.some(
+      (i: any) =>
+        !i ||
+        typeof i !== "object" ||
+        Array.isArray(i) ||
+        typeof i.path !== "string" ||
+        !i.path.trim() ||
+        path.isAbsolute(i.path) ||
+        typeof i.sha256 !== "string" ||
+        !/^[0-9a-f]{64}$/i.test(i.sha256),
+    ) ||
+    new Set(qa.pageImages.map((i: any) => i.path)).size !== qa.pages
+  ) {
+    throw new Error("Every report page must have a distinct rendered image");
+  }
+}
+
 export class EngagementWorkflow {
   private db: DatabaseSync;
   constructor(
@@ -239,14 +287,10 @@ export class EngagementWorkflow {
         throw new Error("Invalid PDF artifact signature");
       const extension = path.extname(file).toLowerCase();
       // A response body is not a proof, and a text file is not a script.
-      if (input.kind === "capture") {
-        const png = signature.subarray(0, 4).toString("hex") === "89504e47",
-          jpeg = signature.subarray(0, 3).toString("hex") === "ffd8ff";
-        if (!png && !jpeg)
-          throw new Error(
-            "A capture must be a PNG or JPEG image, not a raw body",
-          );
-      }
+      if (input.kind === "capture" && !isPngOrJpeg(signature))
+        throw new Error(
+          "A capture must be a PNG or JPEG image, not a raw body",
+        );
       if (
         (input.kind === "poc" || input.kind === "script") &&
         !SOURCE_EXT.has(extension)
@@ -454,6 +498,9 @@ export class EngagementWorkflow {
         serialized = json(snapshot);
       if (Buffer.byteLength(serialized, "utf8") > 10000000)
         throw new Error("Report snapshot size limit exceeded");
+      const snapshotHash = createHash("sha256")
+        .update(serialized, "utf8")
+        .digest("hex");
       atomicWrite(file, serialized);
       this.db
         .prepare(
@@ -466,7 +513,7 @@ export class EngagementWorkflow {
           json(snapshot),
           json({
             snapshotPath: file,
-            snapshotHash: digestFile(file),
+            snapshotHash,
             artifacts: [],
             review: null,
           }),
@@ -483,7 +530,7 @@ export class EngagementWorkflow {
       return {
         snapshot,
         path: file,
-        sha256: digestFile(file),
+        sha256: snapshotHash,
         ...(reportDir ? { reportDir } : {}),
       };
     });
@@ -514,21 +561,23 @@ export class EngagementWorkflow {
         "Report stage requires a registered, visually reviewed report artifact",
       );
     const r = this.report(scope, String(row.id));
-    this.current(r);
+    this.current(r, true);
     if (!r.reviewed)
       throw new Error(
         "Report stage requires a registered, visually reviewed report artifact",
       );
     this.checkPages(r);
   }
-  private current(r: any) {
-    const latest = this.db
-      .prepare(
-        "SELECT id FROM workflow_reports WHERE scope=? AND mission_id=? ORDER BY rowid DESC LIMIT 1",
-      )
-      .get(r.scope, r.missionId);
-    if (latest?.id !== r.id)
-      throw new Error("Report snapshot is stale; use the latest version");
+  private current(r: any, knownLatest = false) {
+    if (!knownLatest) {
+      const latest = this.db
+        .prepare(
+          "SELECT id FROM workflow_reports WHERE scope=? AND mission_id=? ORDER BY rowid DESC LIMIT 1",
+        )
+        .get(r.scope, r.missionId);
+      if (latest?.id !== r.id)
+        throw new Error("Report snapshot is stale; use the latest version");
+    }
     if (
       r.snapshot.sourceHash !==
       this.platform.reportFingerprint(r.scope, r.missionId)
@@ -537,35 +586,38 @@ export class EngagementWorkflow {
     if (digestFile(r.snapshotPath) !== r.snapshotHash)
       throw new Error("Report snapshot changed");
   }
-  private checkPages(r: any) {
-    const artifacts = r.artifacts.map((id: string) =>
-      this.artifact(r.scope, id),
-    );
+  private checkPages(r: any, preverifiedArtifacts?: any[]) {
+    const artifacts =
+      preverifiedArtifacts ??
+      r.artifacts.map((id: string) => this.artifact(r.scope, id));
     const qa = artifacts.find((a: any) => a.kind === "report-qa");
-    if (!qa || !r.qa || !Array.isArray(r.qa.pageImages))
+    if (!qa || !r.qa)
       throw new Error(
         "Register generated files and rendered pages before review",
       );
-    const root = path.dirname(qa.path);
+    validateQaPageImages(r.qa);
+    const rootDir = path.dirname(qa.path);
+    assertPlainPath(rootDir);
+    const canonicalRoot = fs.realpathSync.native(rootDir);
+    const norm = (p: string) =>
+      process.platform === "win32" ? p.toLowerCase() : p;
     for (const image of r.qa.pageImages) {
-      if (
-        !image ||
-        typeof image.path !== "string" ||
-        !image.path.trim() ||
-        typeof image.sha256 !== "string"
-      )
-        throw new Error("Invalid report page entry");
-      const file = path.resolve(root, image.path);
-      if (!file.startsWith(root + path.sep))
+      const file = path.resolve(rootDir, image.path);
+      if (!norm(file).startsWith(norm(rootDir) + path.sep))
         throw new Error("QA page path escaped");
       assertPlainPath(file);
+      const canonicalFile = fs.realpathSync.native(file);
+      if (!norm(canonicalFile).startsWith(norm(canonicalRoot) + path.sep))
+        throw new Error("QA page path escaped");
+      if (!fs.statSync(file).isFile())
+        throw new Error("Invalid report page entry");
       const bytes = fs.readFileSync(file);
-      const sig = bytes.subarray(0, 4);
-      const isPng = sig.toString("hex") === "89504e47";
-      const isJpeg = sig.subarray(0, 3).toString("hex") === "ffd8ff";
-      if (!isPng && !isJpeg)
+      if (!isPngOrJpeg(bytes))
         throw new Error("Rendered report page must be a PNG or JPEG image");
-      if (createHash("sha256").update(bytes).digest("hex") !== image.sha256)
+      if (
+        createHash("sha256").update(bytes).digest("hex") !==
+        image.sha256.toLowerCase()
+      )
         throw new Error("Rendered page changed after generation");
     }
   }
@@ -603,6 +655,7 @@ export class EngagementWorkflow {
       if (
         !qa ||
         typeof qa !== "object" ||
+        Array.isArray(qa) ||
         qa.snapshotId !== id ||
         qa.snapshotHash !== r.snapshotHash ||
         !Number.isInteger(qa.pages) ||
@@ -617,22 +670,8 @@ export class EngagementWorkflow {
       ])
         if (qa[key] !== artifacts.find((a) => a.kind === kind).sha256)
           throw new Error("Report QA hash mismatch");
-      if (
-        !Array.isArray(qa.pageImages) ||
-        qa.pageImages.length !== qa.pages ||
-        qa.pageImages.some(
-          (i: any) =>
-            !i ||
-            typeof i.path !== "string" ||
-            !i.path.trim() ||
-            typeof i.sha256 !== "string",
-        ) ||
-        new Set(qa.pageImages.map((i: any) => i.path)).size !== qa.pages
-      )
-        throw new Error(
-          "Every report page must have a distinct rendered image",
-        );
-      this.checkPages({ ...r, artifacts: artifactIds, qa });
+      validateQaPageImages(qa);
+      this.checkPages({ ...r, artifacts: artifactIds, qa }, artifacts);
       const payload = {
         snapshotPath: r.snapshotPath,
         snapshotHash: r.snapshotHash,

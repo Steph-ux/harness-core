@@ -35,7 +35,7 @@ Missing tool → `not-tested`. Timeout → stop, do not retry in a loop.
 
 ### 3. Asset identity
 
-Firmware/version from the read or from a collected project file (`cyber_source`). `cyber_cve lookup` on that exact version. Banner ≠ CVE.
+Firmware/version from the read or from a collected project file (`cyber_source`). `cyber_cve search` (NVD + searchsploit) on that exact firmware/controller version (or `cyber_cve lookup` for OSV packages). Banner ≠ CVE.
 
 ### 4. Negative control
 
@@ -73,7 +73,7 @@ Coil write, PLC stop/start, firmware, safety-network scan, radio jamming.
 
 ### Evidence ids
 
-Protocol identity, at most one poll and offline/simulator control. A write is a method violation. Banner ≠ CVE until `cyber_cve` matches the exact version.
+Protocol identity, at most one poll and offline/simulator control. A write is a method violation. Banner ≠ CVE until `cyber_cve search` (NVD + searchsploit) matches the exact version (or `cyber_cve lookup` for OSV packages).
 
 Process-safety owner named in scope or stop.
 

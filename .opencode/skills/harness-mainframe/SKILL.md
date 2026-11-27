@@ -41,7 +41,7 @@ A transaction or HLQ **not** in the named list must not be opened. A second LPAR
 
 ### 5. Finding contract
 
-`cyber_finding` for: unauthenticated TN3270, default applid without RACF, cleartext FTP of a named HLQ — with banner/inquiry observation and denied-transaction control. CVE on z/OS components via `cyber_cve` on the **exact** PTF/version. No finding that required a job submit.
+`cyber_finding` for: unauthenticated TN3270, default applid without RACF, cleartext FTP of a named HLQ — with banner/inquiry observation and denied-transaction control. CVE on z/OS components via `cyber_cve search` (NVD + searchsploit) on the **exact** PTF/version (or `cyber_cve lookup` for OSV packages). No finding that required a job submit.
 
 ## Proof contract
 
@@ -69,7 +69,7 @@ Production password spray, RACF change, job submit, second LPAR.
 
 ### Evidence ids
 
-Banner, one inquiry, denied-transaction control. CVE via `cyber_cve` on exact PTF only. No customer PII on a 3270 screenshot.
+Banner, one inquiry, denied-transaction control. CVE via `cyber_cve search` on exact PTF only (or `cyber_cve lookup` for OSV packages). No customer PII on a 3270 screenshot.
 
 A second LPAR not in scope must not be contacted.
 

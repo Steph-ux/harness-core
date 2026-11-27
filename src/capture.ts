@@ -204,6 +204,30 @@ export interface CaptureLink {
   takenAt: string;
 }
 
+const ISO_TIMESTAMP_RE =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
+
+function isValidIsoTimestamp(value: string): boolean {
+  const m = ISO_TIMESTAMP_RE.exec(value);
+  if (!m) return false;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const hour = Number(m[4]);
+  const minute = Number(m[5]);
+  const second = Number(m[6]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+  if (hour > 23 || minute > 59 || second > 59) return false;
+  const calendar = new Date(Date.UTC(year, month - 1, day));
+  if (
+    calendar.getUTCFullYear() !== year ||
+    calendar.getUTCMonth() !== month - 1 ||
+    calendar.getUTCDate() !== day
+  )
+    return false;
+  return Number.isFinite(Date.parse(value));
+}
+
 export function captureLink(
   observationId: string,
   result: CaptureResult,
@@ -214,7 +238,7 @@ export function captureLink(
     !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/.test(observationId)
   )
     throw new Error("Invalid observation id");
-  if (!result || typeof result !== "object")
+  if (!result || typeof result !== "object" || Array.isArray(result))
     throw new Error("Invalid capture result");
   if (typeof result.path !== "string" || !result.path.trim())
     throw new Error("Invalid capture path");
@@ -223,19 +247,16 @@ export function captureLink(
   if (typeof result.title !== "string")
     throw new Error("Invalid capture title");
   if (
-    !Number.isFinite(result.width) ||
+    !Number.isInteger(result.width) ||
     result.width <= 0 ||
-    !Number.isFinite(result.height) ||
+    !Number.isInteger(result.height) ||
     result.height <= 0
   )
     throw new Error("Invalid capture dimensions");
-  if (!Number.isFinite(result.bytes) || result.bytes <= 0)
+  if (!Number.isInteger(result.bytes) || result.bytes <= 0)
     throw new Error("Invalid capture size");
-  if (
-    typeof takenAt !== "string" ||
-    !takenAt.trim() ||
-    Number.isNaN(Date.parse(takenAt))
-  )
+  const cleanTakenAt = typeof takenAt === "string" ? takenAt.trim() : "";
+  if (!cleanTakenAt || !isValidIsoTimestamp(cleanTakenAt))
     throw new Error("Invalid capture timestamp");
   return {
     observationId,
@@ -245,6 +266,6 @@ export function captureLink(
     width: result.width,
     height: result.height,
     bytes: result.bytes,
-    takenAt,
+    takenAt: cleanTakenAt,
   };
 }

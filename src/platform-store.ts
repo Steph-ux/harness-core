@@ -890,7 +890,20 @@ export class PlatformStore {
         )
       )
         throw new Error("Only completed validation can be reopened");
-      for (const node of ["validation", "evidence", "report"]) {
+      for (const node of (() => {
+        const resetSet = new Set<string>(["validation", "evidence", "report"]);
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (const n of mission.nodes) {
+            if (!resetSet.has(n.id) && n.dependsOn.some((d) => resetSet.has(d))) {
+              resetSet.add(n.id);
+              changed = true;
+            }
+          }
+        }
+        return mission.nodes.map((n) => n.id).filter((nid) => resetSet.has(nid));
+      })()) {
         this.checkpoint(scope, id, node, "PENDING", {
           reason: explanation,
           decidedBy,
@@ -1354,7 +1367,18 @@ export class PlatformStore {
     checks: FindingProposal["checks"],
     sessionId: string,
   ) {
-    if (!Array.isArray(checks) || checks.length < 2 || checks.length > 30)
+    if (
+      !Array.isArray(checks) ||
+      checks.length < 2 ||
+      checks.length > 30 ||
+      checks.some(
+        (c) =>
+          !c ||
+          typeof c !== "object" ||
+          Array.isArray(c) ||
+          typeof c.observationId !== "string",
+      )
+    )
       throw new Error("Verification needs reproduction and negative controls");
     const purposes = new Set(checks.map((c) => c.purpose));
     if (!purposes.has("reproduction") || !purposes.has("negative-control"))
@@ -1502,7 +1526,9 @@ export class PlatformStore {
         observation.tool !== "harness:verification" ||
         attestation.findingId !== id ||
         attestation.findingHash !== this.findingHash(scope, id) ||
-        attestation.verdict !== "confirmed"
+        attestation.verdict !== "confirmed" ||
+        typeof attestation.runId !== "string" ||
+        !attestation.runId.trim()
       )
         throw new Error("Verification attestation is unrelated or stale");
       this.checkVerification(scope, f, attestation.checks, observation.sessionId);

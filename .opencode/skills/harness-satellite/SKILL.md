@@ -55,7 +55,7 @@ cyber_process argv=["curl","-sS","-D","-","-o","/dev/null","-w","status:%{http_c
 
 ### 4. Finding contract
 
-`cyber_finding` for: unauthenticated ground API exposing TC/TM, credentials in a collected config, version with `cyber_cve` match. Never a finding that required an uplink. RF intercept of another nation's satellite is **out of scope** even if the SDR can see it.
+`cyber_finding` for: unauthenticated ground API exposing TC/TM, credentials in a collected config, version with `cyber_cve search` (NVD + searchsploit) match for services/firmware/appliances or `cyber_cve lookup` for OSV packages. Never a finding that required an uplink. RF intercept of another nation's satellite is **out of scope** even if the SDR can see it.
 
 ## Proof contract
 
